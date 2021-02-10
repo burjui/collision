@@ -4,6 +4,7 @@ use crate::physics::{CollisionDetector, PhysicsObject};
 use anyhow::anyhow;
 use anyhow::{Context, Result};
 use cgmath::Vector2;
+use rand::random;
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::keyboard::Keycode;
@@ -14,6 +15,7 @@ use sdl2::ttf::Font;
 use sdl2::video::WindowContext;
 use std::path::Path;
 use std::process::exit;
+use std::time::Instant;
 
 mod config;
 mod fps;
@@ -62,11 +64,13 @@ fn main() -> Result<()> {
     for i in 0..10 {
         collision_detector.add(PhysicsObject {
             position: Vector2::new(100.0 + i as f32 * 10.0, 100.0 + i as f32 * 50.0),
-            velocity: Vector2::new(0.0, 0.0),
+            velocity: Vector2::new(random::<f32>() * 40.0 - 20.0, random::<f32>() * 40.0 - 20.0),
             size: 30.0,
         });
     }
     collision_detector.update();
+
+    let mut last_measured_time = Instant::now();
 
     'running: loop {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -82,6 +86,14 @@ fn main() -> Result<()> {
 
                 _ => {}
             }
+        }
+
+        let now = Instant::now();
+        let dt = (now - last_measured_time).as_secs_f32();
+        if dt >= 0.1 {
+            last_measured_time = now;
+            collision_detector.advance(dt);
+            collision_detector.update();
         }
 
         draw_physics(&collision_detector, &mut canvas, &font)?;
@@ -165,6 +177,16 @@ fn draw_physics(
             )
             .map_err(string_to_anyhow)
             .context("render object circle")?;
+        canvas
+            .aa_line(
+                object.position.x as i16,
+                object.position.y as i16,
+                (object.position.x + object.velocity.x * 3.0) as i16,
+                (object.position.y + object.velocity.y * 3.0) as i16,
+                Color::RGB(100, 255, 255),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object velocity vector")?;
     }
 
     Ok(())

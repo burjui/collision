@@ -3,7 +3,6 @@ use core::fmt::{Display, Formatter};
 use core::iter::Iterator;
 use core::option::Option;
 use core::option::Option::{None, Some};
-use itertools::Itertools;
 use slab::Slab;
 use std::collections::HashMap;
 use std::vec::Vec;
@@ -42,31 +41,40 @@ impl CollisionDetector {
     }
 
     pub fn add(&mut self, object: PhysicsObject) -> ObjectId {
-        self.cell_size = self.cell_size.max(object.size + 1.0);
-        let x = object.position.x - object.size / 2.0;
-        let y = object.position.y - object.size / 2.0;
-        let grid_position_x = self
-            .grid_position
-            .map(|position| position.x.min(x))
-            .unwrap_or(x);
-        let grid_position_y = self
-            .grid_position
-            .map(|position| position.y.min(y))
-            .unwrap_or(y);
-        self.grid_position = Some(Vector2::new(grid_position_x, grid_position_y));
-        println!(
-            "@ grid_position: ({}, {}), xy = ({}, {})",
-            grid_position_x, grid_position_y, x, y
-        );
         ObjectId(self.objects.insert(object))
     }
 
     pub fn update(&mut self) {
         self.grid.clear();
         self.cells.clear();
+
+        self.grid_position = None;
+        for (_, object) in &self.objects {
+            self.cell_size = self.cell_size.max(object.size + 1.0);
+            let x = object.position.x - object.size / 2.0;
+            let y = object.position.y - object.size / 2.0;
+            let grid_position_x = self
+                .grid_position
+                .map(|position| position.x.min(x))
+                .unwrap_or(x);
+            let grid_position_y = self
+                .grid_position
+                .map(|position| position.y.min(y))
+                .unwrap_or(y);
+            self.grid_position = Some(Vector2::new(grid_position_x, grid_position_y));
+
+            #[cfg(debug_assertions)]
+            println!(
+                "@ grid_position: ({}, {}), xy = ({}, {})",
+                grid_position_x, grid_position_y, x, y
+            );
+        }
+
         if let Some(grid_position) = &self.grid_position {
+            #[cfg(debug_assertions)]
             println!("grid_position: ({}, {})", grid_position.x, grid_position.y);
             for (id, object) in &self.objects {
+                #[cfg(debug_assertions)]
                 println!("# {}", id);
                 let half_size = object.size / 2.0;
                 for point in &[
@@ -79,6 +87,7 @@ impl CollisionDetector {
                     let cell_y = ((point.y - grid_position.y) / self.cell_size) as usize;
                     let cell = (cell_x, cell_y);
 
+                    #[cfg(debug_assertions)]
                     println!("({}, {}) -> {:?}", point.x, point.y, cell);
                     let cell_ids = self.grid.entry(cell).or_insert_with(Vec::new);
                     if !cell_ids.contains(&id) {
@@ -93,7 +102,10 @@ impl CollisionDetector {
             }
         }
 
+        #[cfg(debug_assertions)]
         {
+            use itertools::Itertools;
+
             for (id, _) in &self.objects {
                 println!("# {}: {:?}", id, &self.cells[&id]);
             }
@@ -101,15 +113,17 @@ impl CollisionDetector {
             for (cell, ids) in self.grid.iter().sorted_by_key(|(cell, _)| *cell) {
                 println!("{:?}: {:?}", cell, ids);
             }
-        }
 
-        let grid_size = self.grid_size();
-        println!("grid_size: {}x{}", grid_size.x, grid_size.y);
+            let grid_size = self.grid_size();
+            println!("grid_size: {}x{}", grid_size.x, grid_size.y);
+        }
     }
 
-    // pub fn get(&self, id: ObjectId) -> Option<&PhysicsObject> {
-    //     self.objects.get(id.0)
-    // }
+    pub fn advance(&mut self, dt: f32) {
+        for (_, object) in &mut self.objects {
+            object.position += object.velocity * dt;
+        }
+    }
 
     pub fn objects(&self) -> impl Iterator<Item = (ObjectId, &PhysicsObject)> {
         self.objects
