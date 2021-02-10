@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use core::option::Option;
 use core::option::Option::{None, Some};
 use static_assertions::const_assert;
@@ -7,7 +8,7 @@ use std::time::Instant;
 
 pub struct FpsCalculator {
     last_measure_time: Instant,
-    frame_count_queue: VecDeque<(Instant, usize)>,
+    frame_count_queue: VecDeque<(Instant, u128)>,
 }
 
 impl FpsCalculator {
@@ -18,7 +19,9 @@ impl FpsCalculator {
         }
     }
 
-    pub fn update(&mut self, frame_count: usize) -> Option<u128> {
+    pub fn update(&mut self, frame_count: usize) -> Result<Option<u128>> {
+        let frame_count = u128::try_from(frame_count).context("FpsCalculator::update")?;
+
         const FRAMES_MEASURE_PERIOD_MILLIS: u128 = 100;
         const_assert!(FRAMES_MEASURE_PERIOD_MILLIS > 0);
 
@@ -43,12 +46,11 @@ impl FpsCalculator {
                 }
 
                 let frames_in_period = frame_count - start_frame_count;
-                let frames_per_second =
-                    u128::try_from(frames_in_period).unwrap() * 1000 / period_millis;
-                return Some(frames_per_second);
+                let frames_per_second = frames_in_period * 1000 / period_millis;
+                return Ok(Some(frames_per_second));
             }
         }
 
-        None
+        Ok(None)
     }
 }
