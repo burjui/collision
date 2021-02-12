@@ -70,8 +70,8 @@ fn main() -> Result<()> {
     }
 
     let mut collision_detector = CollisionDetector::new();
-    // create_saved_scene(&mut collision_detector);
-    create_random_scene(&mut collision_detector, &config);
+    create_saved_scene(&mut collision_detector);
+    // create_random_scene(&mut collision_detector, &config);
     let initial_objects = collision_detector.objects().collect_vec();
 
     let mut last_measured_time = Instant::now();
@@ -227,8 +227,8 @@ fn draw_physics(
                 .aa_line(
                     object.position.x as i16,
                     object.position.y as i16,
-                    (object.position.x + object.velocity.x * 3.0) as i16,
-                    (object.position.y + object.velocity.y * 3.0) as i16,
+                    (object.position.x + object.velocity.x) as i16,
+                    (object.position.y + object.velocity.y) as i16,
                     Color::RGB(100, 255, 255),
                 )
                 .map_err(string_to_anyhow)

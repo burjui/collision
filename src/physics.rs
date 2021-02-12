@@ -13,6 +13,7 @@ pub struct PhysicsObject {
     pub position: Vector2<f32>,
     pub velocity: Vector2<f32>,
     pub size: f32,
+    pub mass: f32,
 }
 
 pub struct ObjectId(usize);
@@ -252,8 +253,8 @@ impl CollisionDetector {
         let v2 = object2.velocity;
         let c1 = object1.position;
         let c2 = object2.position;
-        let m1 = 1.0; // TODO mass
-        let m2 = 1.0; // TODO mass
+        let m1 = object1.mass;
+        let m2 = object2.mass;
         self.objects[id1].velocity = v1
             - ((c1 - c2).dot(v1 - v2) * (c1 - c2) * 2.0 * m2)
                 * (1.0 / ((m1 + m2) * (c1 - c2).magnitude2()));
