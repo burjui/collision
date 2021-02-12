@@ -161,7 +161,11 @@ impl CollisionDetector {
                     .and_then(|c| c.get(&id2))
                     .is_none()
                 {
-                    let delay = calculate_event_delay(&self.objects[id1], &self.objects[id2], true);
+                    let delay = calculate_event_delay(
+                        &self.objects[id1],
+                        &self.objects[id2],
+                        EventKind::Collision,
+                    );
                     if delay < f32::INFINITY {
                         self.collisions
                             .entry(id1)
@@ -185,7 +189,11 @@ impl CollisionDetector {
 
     fn collision(&mut self, id1: usize, id2: usize) {
         self.collision_elastic(id1, id2);
-        let delay = calculate_event_delay(&self.objects[id1], &self.objects[id2], false);
+        let delay = calculate_event_delay(
+            &self.objects[id1],
+            &self.objects[id2],
+            EventKind::Separation,
+        );
         self.events.push(Event {
             time: self.time + delay,
             kind: EventKind::Separation,
@@ -264,10 +272,11 @@ impl CollisionDetector {
     }
 }
 
-// TODO respect padding
-// TODO for_collide -> enum
-fn calculate_event_delay(a: &PhysicsObject, b: &PhysicsObject, for_collide: bool) -> f32 {
-    let sign = if for_collide { 1.0 } else { -1.0 };
+fn calculate_event_delay(a: &PhysicsObject, b: &PhysicsObject, event_kind: EventKind) -> f32 {
+    let sign = match event_kind {
+        EventKind::Collision => 1.0,
+        EventKind::Separation => -1.0,
+    };
     let net_rad = (a.size + b.size) * 0.5;
     let dist = a.position - b.position;
     let coeff_c = sign * (net_rad * net_rad - dist.magnitude2());
