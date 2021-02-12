@@ -63,6 +63,10 @@ fn main() -> Result<()> {
     let mut stats_text: Option<(Texture<'_>, Rect)> = None;
     let mut frame_count = 0usize;
     let mut fps_calculator = FpsCalculator::new();
+    let mut render_settings = RenderSettings {
+        with_grid: true,
+        object_render_kind: ObjectRenderKind::Detailed,
+    };
 
     #[cfg(unix)]
     unsafe {
@@ -77,7 +81,7 @@ fn main() -> Result<()> {
     let mut last_measured_time = Instant::now();
 
     'running: loop {
-        match process_events(&mut event_pump, &initial_objects) {
+        match process_events(&mut event_pump, &initial_objects, &mut render_settings) {
             EventResponse::Continue => {}
             EventResponse::Quit => break 'running,
         }
@@ -95,7 +99,7 @@ fn main() -> Result<()> {
             config.screen_width,
             &mut canvas,
             &font,
-            ObjectRenderKind::Detailed,
+            &render_settings,
         )?;
 
         if let Some(fps) = fps_calculator.update(frame_count)? {
@@ -130,6 +134,7 @@ enum EventResponse {
 fn process_events(
     event_pump: &mut EventPump,
     initial_objects: &[(ObjectId, PhysicsObject)],
+    render_settings: &mut RenderSettings,
 ) -> EventResponse {
     for event in event_pump.poll_iter() {
         match event {
@@ -147,6 +152,21 @@ fn process_events(
                     print_object_rust_code(object);
                 }
             }
+
+            Event::KeyDown {
+                keycode: Some(Keycode::G),
+                ..
+            } => render_settings.with_grid = !render_settings.with_grid,
+
+            Event::KeyDown {
+                keycode: Some(Keycode::D),
+                ..
+            } => render_settings.object_render_kind = ObjectRenderKind::Detailed,
+
+            Event::KeyDown {
+                keycode: Some(Keycode::S),
+                ..
+            } => render_settings.object_render_kind = ObjectRenderKind::Simplified,
 
             _ => {}
         }
@@ -166,9 +186,15 @@ fn print_object_rust_code(object: &PhysicsObject) {
     println!("}});");
 }
 
+#[derive(Copy, Clone)]
 enum ObjectRenderKind {
     Detailed,
     Simplified,
+}
+
+struct RenderSettings {
+    with_grid: bool,
+    object_render_kind: ObjectRenderKind,
 }
 
 fn render_physics(
@@ -176,13 +202,15 @@ fn render_physics(
     screen_width: u32,
     canvas: &mut WindowCanvas,
     font: &Font,
-    object_render_kind: ObjectRenderKind,
+    settings: &RenderSettings,
 ) -> Result<()> {
-    render_grid(collision_detector, canvas)?;
+    if settings.with_grid {
+        render_grid(collision_detector, canvas)?;
+    }
 
     let texture_creator = canvas.texture_creator();
     for (id, object) in collision_detector.objects() {
-        match object_render_kind {
+        match settings.object_render_kind {
             ObjectRenderKind::Detailed => {
                 render_object_detailed(id, &object, screen_width, canvas, font, &texture_creator)?;
             }
