@@ -1,10 +1,11 @@
 use crate::config::Config;
+use crate::fenv::{feenableexcept, FE_INVALID};
 use crate::fps::FpsCalculator;
-use crate::physics::{CollisionDetector, PhysicsObject};
+use crate::physics::CollisionDetector;
+use crate::scene::{create_random_scene, create_saved_scene};
 use anyhow::anyhow;
 use anyhow::{Context, Result};
-use cgmath::Vector2;
-use rand::random;
+use itertools::Itertools;
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::keyboard::Keycode;
@@ -18,8 +19,10 @@ use std::process::exit;
 use std::time::Instant;
 
 mod config;
+mod fenv;
 mod fps;
 mod physics;
+mod scene;
 
 fn main() -> Result<()> {
     let config = Config::from_file(Path::new("config.toml")).unwrap_or_else(|error| {
@@ -51,7 +54,7 @@ fn main() -> Result<()> {
         .context("get event pump")?;
     let ttf_context = sdl2::ttf::init().context("init TTF")?;
     let font = ttf_context
-        .load_font("/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf", 20)
+        .load_font("/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf", 16)
         .map_err(string_to_anyhow)
         .context("load font")?;
     let texture_creator = canvas.texture_creator();
@@ -60,15 +63,16 @@ fn main() -> Result<()> {
     let mut frame_count = 0usize;
     let mut fps_calculator = FpsCalculator::new();
 
-    let mut collision_detector = CollisionDetector::new();
-    for i in 0..10 {
-        collision_detector.add(PhysicsObject {
-            position: Vector2::new(100.0 + i as f32 * 10.0, 100.0 + i as f32 * 50.0),
-            velocity: Vector2::new(random::<f32>() * 40.0 - 20.0, random::<f32>() * 40.0 - 20.0),
-            size: 30.0,
-        });
+    #[cfg(unix)]
+    unsafe {
+        // Catch NaNs as SIGFPE
+        feenableexcept(FE_INVALID);
     }
-    collision_detector.update();
+
+    let mut collision_detector = CollisionDetector::new();
+    // create_saved_scene(&mut collision_detector);
+    create_random_scene(&mut collision_detector, &config);
+    let initial_objects = collision_detector.objects().collect_vec();
 
     let mut last_measured_time = Instant::now();
 
@@ -84,23 +88,52 @@ fn main() -> Result<()> {
                     ..
                 } => break 'running,
 
+                Event::KeyDown {
+                    keycode: Some(Keycode::P),
+                    ..
+                } => {
+                    for (_, object) in &initial_objects {
+                        println!(
+                            r"
+                            collision_detector.add(PhysicsObject {{
+                                position: Vector2::new({:?}, {:?}),
+                                velocity: Vector2::new({:?}, {:?}),
+                                size: {:?},
+                            }});",
+                            object.position.x,
+                            object.position.y,
+                            object.velocity.x,
+                            object.velocity.y,
+                            object.size,
+                        );
+                    }
+                }
+
                 _ => {}
             }
         }
 
         let now = Instant::now();
         let dt = (now - last_measured_time).as_secs_f32();
-        if dt >= 0.1 {
-            last_measured_time = now;
-            collision_detector.advance(dt);
-            collision_detector.update();
-        }
+        last_measured_time = now;
+        collision_detector.advance(dt);
 
-        draw_physics(&collision_detector, &mut canvas, &font)?;
+        draw_physics(
+            &collision_detector,
+            config.screen_width,
+            &mut canvas,
+            &font,
+            false,
+        )?;
 
         if let Some(fps) = fps_calculator.update(frame_count)? {
-            let stats_string = format!("FPS: {}", fps);
-            stats_text = Some(render_text(&stats_string, &font, &texture_creator)?);
+            let stats_string = format!("FPS: {}\ntime: {:.3}", fps, collision_detector.time());
+            stats_text = Some(render_text(
+                &stats_string,
+                config.screen_width,
+                &font,
+                &texture_creator,
+            )?);
         }
 
         if let Some((stats_text_texture, stats_text_rect)) = &stats_text {
@@ -118,8 +151,10 @@ fn main() -> Result<()> {
 
 fn draw_physics(
     collision_detector: &CollisionDetector,
+    screen_width: u32,
     canvas: &mut WindowCanvas,
     font: &Font,
+    as_pixel: bool,
 ) -> Result<()> {
     let grid_position = collision_detector
         .grid_position()
@@ -158,35 +193,47 @@ fn draw_physics(
     }
 
     for (id, object) in collision_detector.objects() {
-        let texture_creator = canvas.texture_creator();
-        let (id_text_texture, id_text_rect) = render_text(&id.to_string(), font, &texture_creator)
-            .context("draw_physics(): render object id text")?;
-        let mut dst_rect = id_text_rect;
-        dst_rect.x += (object.position.x - object.size / 2.0) as i32;
-        dst_rect.y += (object.position.y - object.size / 2.0) as i32;
-        canvas
-            .copy(&id_text_texture, id_text_rect, dst_rect)
-            .map_err(string_to_anyhow)
-            .context("copy object id text to the window surface")?;
-        canvas
-            .aa_circle(
-                object.position.x as i16,
-                object.position.y as i16,
-                object.size as i16 / 2,
-                Color::RGB(100, 100, 255),
-            )
-            .map_err(string_to_anyhow)
-            .context("render object circle")?;
-        canvas
-            .aa_line(
-                object.position.x as i16,
-                object.position.y as i16,
-                (object.position.x + object.velocity.x * 3.0) as i16,
-                (object.position.y + object.velocity.y * 3.0) as i16,
-                Color::RGB(100, 255, 255),
-            )
-            .map_err(string_to_anyhow)
-            .context("render object velocity vector")?;
+        if as_pixel {
+            canvas
+                .pixel(
+                    object.position.x as i16,
+                    object.position.y as i16,
+                    Color::RGB(100, 100, 255),
+                )
+                .map_err(string_to_anyhow)
+                .context("render object as pixel")?;
+        } else {
+            let texture_creator = canvas.texture_creator();
+            let (id_text_texture, id_text_rect) =
+                render_text(&id.to_string(), screen_width, font, &texture_creator)
+                    .context("draw_physics(): render object id text")?;
+            let mut dst_rect = id_text_rect;
+            dst_rect.x += (object.position.x - object.size / 2.0) as i32;
+            dst_rect.y += (object.position.y - object.size / 2.0) as i32;
+            canvas
+                .copy(&id_text_texture, id_text_rect, dst_rect)
+                .map_err(string_to_anyhow)
+                .context("copy object id text to the window surface")?;
+            canvas
+                .aa_circle(
+                    object.position.x as i16,
+                    object.position.y as i16,
+                    object.size as i16 / 2,
+                    Color::RGB(100, 100, 255),
+                )
+                .map_err(string_to_anyhow)
+                .context("render object circle")?;
+            canvas
+                .aa_line(
+                    object.position.x as i16,
+                    object.position.y as i16,
+                    (object.position.x + object.velocity.x * 3.0) as i16,
+                    (object.position.y + object.velocity.y * 3.0) as i16,
+                    Color::RGB(100, 255, 255),
+                )
+                .map_err(string_to_anyhow)
+                .context("render object velocity vector")?;
+        }
     }
 
     Ok(())
@@ -194,12 +241,13 @@ fn draw_physics(
 
 fn render_text<'texture>(
     s: &str,
+    wrapping_width: u32,
     font: &Font,
     texture_creator: &'texture TextureCreator<WindowContext>,
 ) -> Result<(Texture<'texture>, Rect)> {
     let rendered = font
         .render(&s)
-        .blended(Color::RGB(255, 255, 255))
+        .blended_wrapped(Color::RGB(255, 255, 255), wrapping_width)
         .context("render text")?;
     let rect = rendered.rect();
     let texture = texture_creator
