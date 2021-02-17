@@ -5,11 +5,12 @@ use crate::physics::{CollisionDetector, ObjectId, PhysicsObject};
 use crate::scene::*;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
-use cgmath::Vector2;
+use cgmath::{InnerSpace, Vector2};
 use itertools::Itertools;
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::keyboard::Keycode;
+use sdl2::mouse::MouseButton;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::{Texture, TextureCreator, WindowCanvas};
@@ -64,8 +65,8 @@ fn main() -> Result<()> {
     let mut frame_count = 0usize;
     let mut fps_calculator = FpsCalculator::new();
     let mut render_settings = RenderSettings {
-        with_grid: true,
-        object_render_kind: ObjectRenderKind::Detailed,
+        with_grid: false,
+        object_render_kind: ObjectRenderKind::Simplified,
     };
 
     #[cfg(unix)]
@@ -75,13 +76,18 @@ fn main() -> Result<()> {
     }
 
     let mut collision_detector = CollisionDetector::new();
-    create_random_scene(&mut collision_detector, &config);
+    create_scene(&mut collision_detector);
     let initial_objects = collision_detector.objects().collect_vec();
 
     let mut last_measured_time = Instant::now();
 
     'running: loop {
-        match process_events(&mut event_pump, &initial_objects, &mut render_settings) {
+        match process_events(
+            &mut event_pump,
+            &initial_objects,
+            &mut render_settings,
+            &mut collision_detector,
+        ) {
             EventResponse::Continue => {}
             EventResponse::Quit => break 'running,
         }
@@ -135,6 +141,7 @@ fn process_events(
     event_pump: &mut EventPump,
     initial_objects: &[(ObjectId, PhysicsObject)],
     render_settings: &mut RenderSettings,
+    collision_detector: &mut CollisionDetector,
 ) -> EventResponse {
     for event in event_pump.poll_iter() {
         match event {
@@ -167,6 +174,21 @@ fn process_events(
                 keycode: Some(Keycode::S),
                 ..
             } => render_settings.object_render_kind = ObjectRenderKind::Simplified,
+
+            Event::MouseButtonDown {
+                mouse_btn: MouseButton::Left,
+                x,
+                y,
+                ..
+            } => {
+                for (id, object) in collision_detector.objects().collect_vec() {
+                    let click_position = Vector2::new(x as f32, y as f32);
+                    let direction = object.position - click_position;
+                    if direction.magnitude() > 1.0 && direction.magnitude() < 50.0 {
+                        collision_detector.object_mut(id).velocity = direction.normalize_to(150.0);
+                    }
+                }
+            }
 
             _ => {}
         }

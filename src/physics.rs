@@ -152,6 +152,10 @@ impl CollisionDetector {
         self.time
     }
 
+    pub fn object_mut(&mut self, id: ObjectId) -> &mut PhysicsObject {
+        &mut self.objects[id.0]
+    }
+
     fn scan_grid_for_collisions(&mut self) {
         for (_, ids) in &self.grid {
             for (&id1, &id2) in ids.iter().tuple_windows() {
