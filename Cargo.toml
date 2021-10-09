@@ -2,7 +2,7 @@
 name = "collision"
 version = "0.1.0"
 authors = ["Artem Borisovskiy <bytefu@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 sdl2 = { version = "0.34.3", features = ["gfx", "ttf"] }
@@ -15,4 +15,6 @@ slab = "0.4.2"
 cgmath = "0.18.0"
 itertools = "0.10.0"
 anyhow = "1.0.38"
-rand = "0.8.3"
+fxhash = "0.2.1"
+log4rs = "1.0.0"
+log = "0.4.14"

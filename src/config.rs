@@ -1,8 +1,7 @@
-use core::result::Result;
-use core::result::Result::Ok;
+use anyhow::anyhow;
+use anyhow::Context;
 use num_traits::Zero;
 use serde_derive::Deserialize;
-use std::error::Error;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::Read;
@@ -16,30 +15,29 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_file(config_path: &Path) -> Result<Config, String> {
-        fn read(config_path: &Path) -> Result<Config, Box<dyn Error>> {
-            let mut config_file = File::open(config_path)?;
-            let mut config_string = String::new();
-            config_file.read_to_string(&mut config_string)?;
-            let config: Config = toml::from_str(&config_string)?;
-            config.verify()?;
-            Ok(config)
-        }
-
-        read(config_path).map_err(|error| format!("{}: {}", config_path.to_string_lossy(), error))
+    pub fn from_file(config_path: &Path) -> anyhow::Result<Config> {
+        let mut config_file = File::open(config_path)
+            .context(format!("open config \"{}\"", config_path.to_string_lossy()))?;
+        let mut config_string = String::new();
+        config_file
+            .read_to_string(&mut config_string)
+            .context("read config")?;
+        let config: Config = toml::from_str(&config_string).context("parse config")?;
+        config.validate().context("validate config")?;
+        Ok(config)
     }
 
-    fn verify(&self) -> Result<(), String> {
+    fn validate(&self) -> anyhow::Result<()> {
         check(&self.screen_width, "screen_width", Positive)?;
         Ok(())
     }
 }
 
-fn check<T, R: Rule<T>>(value: &T, name: &'static str, rule: R) -> Result<(), String> {
+fn check<T, R: Rule<T>>(value: &T, name: &'static str, rule: R) -> anyhow::Result<()> {
     if rule.condition(value) {
         Ok(())
     } else {
-        Err(rule.error_message(value, name))
+        Err(anyhow!("{}", rule.error_message(value, name)))
     }
 }
 
