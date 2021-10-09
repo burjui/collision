@@ -1,14 +1,19 @@
-use cgmath::{InnerSpace, Vector2};
 use core::fmt::{Display, Formatter};
 use core::iter::Iterator;
 use core::option::Option;
 use core::option::Option::{None, Some};
-use fxhash::{FxHashMap, FxHashSet};
+
+use cgmath::{InnerSpace, Vector2};
 use itertools::Itertools;
 use log::{debug, warn};
+use ndarray::{Array2, Axis};
 use slab::Slab;
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+
+use timeline::EventKind;
+
+use crate::physics::timeline::Timeline;
+
+mod timeline;
 
 #[derive(Copy, Clone)]
 pub struct Object {
@@ -26,82 +31,9 @@ impl Display for ObjectId {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum EventKind {
-    Collision,
-    Separation,
-}
-
-#[derive(Copy, Clone)]
-struct Event {
-    kind: EventKind,
-    time: f64,
-    id1: usize,
-    id2: usize,
-}
-
-impl Event {
-    fn contains(&self, id: usize) -> bool {
-        self.id1 == id || self.id2 == id
-    }
-}
-
-impl Ord for Event {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.time.partial_cmp(&self.time).unwrap()
-    }
-}
-
-impl PartialOrd for Event {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.time.partial_cmp(&self.time)
-    }
-}
-
-impl Eq for Event {}
-
-impl PartialEq for Event {
-    fn eq(&self, other: &Self) -> bool {
-        self.time == other.time
-    }
-}
-
-#[derive(Default)]
-struct Timeline {
-    time: f64,
-    events: BinaryHeap<Event>,
-}
-
-impl Timeline {
-    fn add_event(&mut self, kind: EventKind, time: f64, id1: usize, id2: usize) {
-        self.events.push(Event {
-            time,
-            kind,
-            id1,
-            id2,
-        });
-    }
-
-    fn peek_event(&self) -> Option<&Event> {
-        self.events.peek()
-    }
-
-    fn pop_event(&mut self) -> Option<Event> {
-        self.events.pop()
-    }
-
-    fn remove_events(&mut self, mut pred: impl FnMut(&Event) -> bool) {
-        self.events.retain(|event| !pred(event))
-    }
-
-    fn contains_any_events(&self, pred: impl FnMut(&Event) -> bool) -> bool {
-        self.events.iter().any(pred)
-    }
-}
-
 pub struct CollisionDetector {
     objects: Slab<Object>,
-    grid: FxHashMap<(usize, usize), FxHashSet<usize>>,
+    grid: Array2<Option<Vec<usize>>>,
     grid_position: Option<Vector2<f64>>,
     cell_size: f64,
     timeline: Timeline,
@@ -111,7 +43,7 @@ impl CollisionDetector {
     pub fn new() -> Self {
         Self {
             objects: Slab::new(),
-            grid: FxHashMap::default(),
+            grid: Array2::from_elem((0, 0), None),
             grid_position: None,
             cell_size: 0.0,
             timeline: Timeline::default(),
@@ -137,130 +69,133 @@ impl CollisionDetector {
     }
 
     pub fn grid_size(&self) -> Vector2<usize> {
-        self.grid
-            .keys()
-            .next()
-            .cloned()
-            .map(|(first_x, first_y)| {
-                let (mut min_x, mut min_y, mut max_x, mut max_y) =
-                    (first_x, first_y, first_x, first_y);
-                for (x, y) in self.grid.keys() {
-                    min_x = min_x.min(*x);
-                    min_y = min_y.min(*y);
-                    max_x = max_x.max(*x);
-                    max_y = max_y.max(*y);
-                }
-                Vector2::new(max_x - min_x + 1, max_y - min_y + 1)
-            })
-            .unwrap_or_else(|| Vector2::new(0, 0))
+        Vector2::new(self.grid.len_of(Axis(0)), self.grid.len_of(Axis(1)))
     }
 
     pub fn advance(&mut self, mut dt: f64) {
         self.update_grid();
         self.scan_grid_for_collisions();
 
-        let target_time = self.timeline.time + dt;
-        while let Some(event) = self.timeline.peek_event().cloned() {
+        while let Some((event, dt_leftover)) = self.timeline.advance(dt) {
             if dt <= 0.0 {
                 break;
             }
 
-            if event.time < target_time {
-                self.timeline.pop_event();
+            let event_dt = dt - dt_leftover;
+            dt = dt_leftover;
+            self.advance_objects(event_dt);
+            self.update_grid();
+            self.scan_grid_for_collisions();
 
-                let (id1, id2) = (event.id1, event.id2);
-                let event_dt = event.time - self.timeline.time;
-                self.timeline.time = event.time;
-                dt -= event_dt;
-                self.advance_objects(event_dt);
-
-                self.update_grid();
-                self.scan_grid_for_collisions();
-
-                match event.kind {
-                    EventKind::Collision => {
-                        self.collide(id1, id2);
-                        self.update_grid();
-                        self.scan_grid_for_collisions();
-                    }
-
-                    EventKind::Separation => self.separate(id1, id2),
+            match event.kind {
+                EventKind::Collision => {
+                    self.collide(event.id1, event.id2);
+                    self.update_grid();
+                    self.scan_grid_for_collisions();
                 }
-            } else {
-                break;
+
+                EventKind::Separation => self.separate(event.id1, event.id2),
             }
         }
 
-        if dt > 0.0 {
-            self.timeline.time += dt;
+        if dt >= 0.0 {
             self.advance_objects(dt);
             self.update_grid();
             self.scan_grid_for_collisions();
         }
 
-        let excess_collisions = self
-            .timeline
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(event.kind, EventKind::Collision) && event.time < self.timeline.time
-            })
-            .count();
-        let excess_separations = self
-            .timeline
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(event.kind, EventKind::Separation) && event.time < self.timeline.time
-            })
-            .count();
-        if excess_collisions + excess_separations > 0 {
-            warn!(
-                "{} excess events ({} collisions, {} separations)",
-                excess_collisions + excess_separations,
-                excess_collisions,
-                excess_separations
-            );
-        }
+        // let excess_collisions = self
+        //     .timeline
+        //     .events
+        //     .iter()
+        //     .filter(|event| {
+        //         matches!(event.kind, EventKind::Collision) && event.time < self.timeline.time
+        //     })
+        //     .count();
+        // let excess_separations = self
+        //     .timeline
+        //     .events
+        //     .iter()
+        //     .filter(|event| {
+        //         matches!(event.kind, EventKind::Separation) && event.time < self.timeline.time
+        //     })
+        //     .count();
+        // if excess_collisions + excess_separations > 0 {
+        //     warn!(
+        //         "{} excess events ({} collisions, {} separations)",
+        //         excess_collisions + excess_separations,
+        //         excess_collisions,
+        //         excess_separations
+        //     );
+        // }
     }
 
     pub fn time(&self) -> f64 {
-        self.timeline.time
+        self.timeline.time()
     }
 
     pub fn object_mut(&mut self, id: ObjectId) -> &mut Object {
         &mut self.objects[id.0]
     }
 
-    fn collide(&mut self, id1: usize, id2: usize) {
-        debug!("COLLIDE {} {} (now {})", id1, id2, self.timeline.time);
-        self.collision_elastic(id1, id2);
+    fn update_grid(&mut self) {
+        debug!("UPDATE GRID");
+        self.grid = Array2::from_elem((0, 0), None);
 
-        // After collision, velocities change, making further events invalid
-        self.timeline
-            .remove_events(|event| event.contains(id1) || event.contains(id2));
-
-        // Separation might not happen if objects didn't actually intersect at the time of collision
-        if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Separation) {
-            let time = self.timeline.time + delay + 0.01;
-            self.timeline
-                .add_event(EventKind::Separation, time, id1, id2);
+        self.grid_position = None;
+        let mut x_end = f64::MIN;
+        let mut y_end = f64::MIN;
+        for (_, object) in &self.objects {
+            self.cell_size = self.cell_size.max(object.size * 2.0);
+            let x = object.position.x - object.size / 2.0;
+            let y = object.position.y - object.size / 2.0;
+            let grid_position_x = self
+                .grid_position
+                .map(|position| position.x.min(x))
+                .unwrap_or(x);
+            let grid_position_y = self
+                .grid_position
+                .map(|position| position.y.min(y))
+                .unwrap_or(y);
+            x_end = x_end.max(object.position.x + object.size);
+            y_end = y_end.max(object.position.y + object.size);
+            self.grid_position = Some(Vector2::new(grid_position_x, grid_position_y));
         }
-    }
 
-    fn separate(&mut self, id1: usize, id2: usize) {
-        debug!("SEPARATE {} {} (now {})", id1, id2, self.timeline.time);
-        self.timeline.remove_events(|event| {
-            matches!(event.kind, EventKind::Separation)
-                && event.contains(id1)
-                && event.contains(id2)
-        });
+        if let Some(grid_position) = &self.grid_position {
+            let width = ((x_end - grid_position.x) / self.cell_size).ceil() as usize;
+            let height = ((y_end - grid_position.y) / self.cell_size).ceil() as usize;
+            self.grid = Array2::from_elem((width, height), None);
+
+            for (id, object) in &self.objects {
+                let half_size = object.size / 2.0;
+                let corners = &[
+                    object.position + Vector2::new(-half_size, -half_size),
+                    object.position + Vector2::new(-half_size, half_size),
+                    object.position + Vector2::new(half_size, -half_size),
+                    object.position + Vector2::new(half_size, half_size),
+                ];
+                for point in corners {
+                    let cell_x = ((point.x - grid_position.x) / self.cell_size).floor() as usize;
+                    let cell_y = ((point.y - grid_position.y) / self.cell_size).floor() as usize;
+                    let cell = (cell_x, cell_y);
+                    let cellmates = self
+                        .grid
+                        .get_mut(cell)
+                        .map(|cellmates| cellmates.get_or_insert_with(Vec::new))
+                        .unwrap();
+                    if let Err(index) = cellmates.binary_search(&id) {
+                        cellmates.insert(index, id);
+                    }
+                }
+            }
+        }
     }
 
     fn scan_grid_for_collisions(&mut self) {
         debug!("SCAN GRID");
-        for ids in self.grid.values() {
-            for pair in ids
+        for ids in self.grid.iter().flatten() {
+            let pairs = ids
                 .iter()
                 .cloned()
                 .permutations(2)
@@ -269,11 +204,13 @@ impl CollisionDetector {
                     pair
                 })
                 .unique()
-            {
+                .collect_vec();
+
+            for pair in pairs {
                 let (id1, id2) = (pair[0], pair[1]);
 
                 if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Collision) {
-                    let collision_time = self.timeline.time + delay;
+                    let collision_time = self.timeline.time() + delay;
                     let collision_matters = !self.timeline.contains_any_events(|event| {
                         let these_are_separating = || {
                             event.contains(id1)
@@ -289,6 +226,7 @@ impl CollisionDetector {
 
                         these_are_separating() || either_is_colliding_earlier()
                     });
+
                     if collision_matters {
                         self.timeline
                             .add_event(EventKind::Collision, collision_time, id1, id2);
@@ -304,46 +242,29 @@ impl CollisionDetector {
         }
     }
 
-    fn update_grid(&mut self) {
-        debug!("UPDATE GRID");
-        self.grid.clear();
+    fn collide(&mut self, id1: usize, id2: usize) {
+        debug!("COLLIDE {} {} (now {})", id1, id2, self.timeline.time());
+        self.collision_elastic(id1, id2);
 
-        self.grid_position = None;
-        for (_, object) in &self.objects {
-            self.cell_size = self.cell_size.max(object.size + 1.0);
-            let x = object.position.x - object.size / 2.0;
-            let y = object.position.y - object.size / 2.0;
-            let grid_position_x = self
-                .grid_position
-                .map(|position| position.x.min(x))
-                .unwrap_or(x);
-            let grid_position_y = self
-                .grid_position
-                .map(|position| position.y.min(y))
-                .unwrap_or(y);
-            self.grid_position = Some(Vector2::new(grid_position_x, grid_position_y));
-        }
+        // After collision, velocities change, making further events invalid
+        self.timeline
+            .remove_events(|event| event.contains(id1) || event.contains(id2));
 
-        if let Some(grid_position) = &self.grid_position {
-            for (id, object) in &self.objects {
-                let half_size = object.size / 2.0;
-                let corners = &[
-                    object.position + Vector2::new(-half_size, -half_size),
-                    object.position + Vector2::new(-half_size, half_size),
-                    object.position + Vector2::new(half_size, -half_size),
-                    object.position + Vector2::new(half_size, half_size),
-                ];
-                for point in corners {
-                    let cell_x = ((point.x - grid_position.x) / self.cell_size).floor() as usize;
-                    let cell_y = ((point.y - grid_position.y) / self.cell_size).floor() as usize;
-                    let cell = (cell_x, cell_y);
-                    self.grid
-                        .entry(cell)
-                        .or_insert_with(FxHashSet::default)
-                        .insert(id);
-                }
-            }
+        // Separation might not happen if objects didn't actually intersect at the time of collision
+        if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Separation) {
+            let time = self.timeline.time() + delay;
+            self.timeline
+                .add_event(EventKind::Separation, time, id1, id2);
         }
+    }
+
+    fn separate(&mut self, id1: usize, id2: usize) {
+        debug!("SEPARATE {} {} (now {})", id1, id2, self.timeline.time());
+        self.timeline.remove_events(|event| {
+            matches!(event.kind, EventKind::Separation)
+                && event.contains(id1)
+                && event.contains(id2)
+        });
     }
 
     fn collision_elastic(&mut self, id1: usize, id2: usize) {
@@ -411,7 +332,6 @@ impl CollisionDetector {
 
 #[allow(unused)]
 mod debug_utils {
-
     const PROBLEMATIC_IDS: [usize; 2] = [16, 26];
 
     pub(crate) fn are_problematic(id1: usize, id2: usize) -> bool {
