@@ -22,23 +22,23 @@ impl FpsCalculator {
     pub fn update(&mut self, frame_count: usize) -> Result<Option<u128>> {
         let frame_count = u128::try_from(frame_count).context("FpsCalculator::update")?;
 
-        const FRAMES_MEASURE_PERIOD_MILLIS: u128 = 100;
+        const FRAMES_MEASURE_PERIOD_MILLIS: u128 = 200;
         const_assert!(FRAMES_MEASURE_PERIOD_MILLIS > 0);
 
-        let real_time = Instant::now();
-        if (real_time - self.last_measure_time).as_millis() >= FRAMES_MEASURE_PERIOD_MILLIS {
-            self.frame_count_queue.push_back((real_time, frame_count));
-            self.last_measure_time = real_time;
+        let now = Instant::now();
+        if (now - self.last_measure_time).as_millis() >= FRAMES_MEASURE_PERIOD_MILLIS {
+            self.frame_count_queue.push_back((now, frame_count));
+            self.last_measure_time = now;
         }
 
         if let Some((measure_start, start_frame_count)) = self.frame_count_queue.front().cloned() {
-            const STATS_AVERAGING_PERIOD_MILLIS: u128 = 200;
+            const STATS_AVERAGING_PERIOD_MILLIS: u128 = 1000;
             const_assert!(STATS_AVERAGING_PERIOD_MILLIS > 0);
 
-            let period_millis = (real_time - measure_start).as_millis();
-            if period_millis > FRAMES_MEASURE_PERIOD_MILLIS {
+            let period_millis = (now - measure_start).as_millis();
+            if period_millis > STATS_AVERAGING_PERIOD_MILLIS {
                 while let Some((measure_start, _)) = self.frame_count_queue.front().cloned() {
-                    if (real_time - measure_start).as_millis() > STATS_AVERAGING_PERIOD_MILLIS {
+                    if (now - measure_start).as_millis() > STATS_AVERAGING_PERIOD_MILLIS {
                         self.frame_count_queue.pop_front();
                     } else {
                         break;
