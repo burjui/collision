@@ -22,7 +22,7 @@ impl FpsCalculator {
     pub fn update(&mut self, frame_count: usize) -> Result<Option<u128>> {
         let frame_count = u128::try_from(frame_count).context("FpsCalculator::update")?;
 
-        const FRAMES_MEASURE_PERIOD_MILLIS: u128 = 200;
+        const FRAMES_MEASURE_PERIOD_MILLIS: u128 = 100;
         const_assert!(FRAMES_MEASURE_PERIOD_MILLIS > 0);
 
         let now = Instant::now();
@@ -32,7 +32,7 @@ impl FpsCalculator {
         }
 
         if let Some((measure_start, start_frame_count)) = self.frame_count_queue.front().cloned() {
-            const STATS_AVERAGING_PERIOD_MILLIS: u128 = 1000;
+            const STATS_AVERAGING_PERIOD_MILLIS: u128 = 300;
             const_assert!(STATS_AVERAGING_PERIOD_MILLIS > 0);
 
             let period_millis = (now - measure_start).as_millis();
