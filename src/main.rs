@@ -95,7 +95,7 @@ fn main() -> Result<()> {
         }
 
         if advance_time {
-            collision_detector.advance(0.01);
+            collision_detector.advance(0.005);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -168,7 +168,13 @@ fn process_events(
             Event::KeyDown {
                 keycode: Some(Keycode::D),
                 ..
-            } => render_settings.object_render_kind = ObjectRenderKind::Detailed,
+            } => {
+                render_settings.object_render_kind = ObjectRenderKind::Detailed(RenderDetails {
+                    circle: true,
+                    id: true,
+                    velocity: true,
+                })
+            }
 
             Event::KeyDown {
                 keycode: Some(Keycode::S),
@@ -226,8 +232,15 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
 
 #[derive(Copy, Clone)]
 enum ObjectRenderKind {
-    Detailed,
     Simplified,
+    Detailed(RenderDetails),
+}
+
+#[derive(Copy, Clone)]
+struct RenderDetails {
+    circle: bool,
+    id: bool,
+    velocity: bool,
 }
 
 struct RenderSettings {
@@ -249,11 +262,20 @@ fn render_physics(
     let texture_creator = canvas.texture_creator();
     for (id, object) in collision_detector.objects() {
         match settings.object_render_kind {
-            ObjectRenderKind::Detailed => {
-                render_object_detailed(id, &object, screen_width, canvas, font, &texture_creator)?;
-            }
             ObjectRenderKind::Simplified => {
                 render_object_simplified(&object, canvas)?;
+            }
+
+            ObjectRenderKind::Detailed(details) => {
+                render_object_detailed(
+                    id,
+                    &object,
+                    details,
+                    screen_width,
+                    canvas,
+                    font,
+                    &texture_creator,
+                )?;
             }
         }
     }
@@ -264,47 +286,54 @@ fn render_physics(
 fn render_object_detailed(
     id: ObjectId,
     object: &Object,
+    details: RenderDetails,
     screen_width: u32,
     canvas: &mut WindowCanvas,
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
-    let (id_text_texture, id_text_rect) = render_text(
-        &id.to_string(),
-        screen_width,
-        font,
-        Color::RGB(100, 100, 100),
-        texture_creator,
-    )
-    .context("draw_physics(): render object id text")?;
-    let mut dst_rect = id_text_rect;
-    dst_rect.x += (object.position.x - object.size / 2.0) as i32;
-    dst_rect.y += (object.position.y - object.size / 2.0) as i32;
-    canvas
-        .copy(&id_text_texture, id_text_rect, dst_rect)
-        .map_err(string_to_anyhow)
-        .context("copy object id text to the window surface")?;
-
-    canvas
-        .aa_circle(
-            object.position.x as i16,
-            object.position.y as i16,
-            (object.size * 0.5) as i16,
-            Color::RGB(100, 100, 255),
+    if details.circle {
+        canvas
+            .aa_circle(
+                object.position.x as i16,
+                object.position.y as i16,
+                (object.size * 0.5) as i16,
+                Color::RGB(100, 100, 255),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object circle")?;
+    }
+    if details.id {
+        let (id_text_texture, id_text_rect) = render_text(
+            &id.to_string(),
+            screen_width,
+            font,
+            Color::RGB(100, 100, 100),
+            texture_creator,
         )
-        .map_err(string_to_anyhow)
-        .context("render object circle")
+        .context("draw_physics(): render object id text")?;
+        let mut dst_rect = id_text_rect;
+        dst_rect.x += (object.position.x - object.size / 2.0) as i32;
+        dst_rect.y += (object.position.y - object.size / 2.0) as i32;
+        canvas
+            .copy(&id_text_texture, id_text_rect, dst_rect)
+            .map_err(string_to_anyhow)
+            .context("copy object id text to the window surface")?;
+    }
+    if details.velocity {
+        canvas
+            .aa_line(
+                object.position.x as i16,
+                object.position.y as i16,
+                (object.position.x + object.velocity.x) as i16,
+                (object.position.y + object.velocity.y) as i16,
+                Color::RGB(100, 255, 255),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object velocity vector")?;
+    }
 
-    // canvas
-    //     .aa_line(
-    //         object.position.x as i16,
-    //         object.position.y as i16,
-    //         (object.position.x + object.velocity.x) as i16,
-    //         (object.position.y + object.velocity.y) as i16,
-    //         Color::RGB(100, 255, 255),
-    //     )
-    //     .map_err(string_to_anyhow)
-    //     .context("render object velocity vector")
+    Ok(())
 }
 
 fn render_object_simplified(object: &Object, canvas: &mut WindowCanvas) -> Result<()> {

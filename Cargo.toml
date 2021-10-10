@@ -7,19 +7,16 @@ authors = ["Artem Borisovskiy <bytefu@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-sdl2 = { version = "0.34.3", features = ["gfx", "ttf"] }
-serde = "1.0.118"
-serde_derive = "1.0.118"
+sdl2 = { version = "0.34.5", features = ["gfx", "ttf"] }
+serde = "1.0.130"
+serde_derive = "1.0.130"
 toml = "0.5.8"
 static_assertions = "1.1.0"
 num-traits = "0.2.14"
-slab = "0.4.2"
+slab = "0.4.4"
 cgmath = "0.18.0"
-itertools = "0.10.0"
-anyhow = "1.0.38"
+itertools = "0.10.1"
+anyhow = "1.0.44"
 log4rs = "1.0.0"
 log = "0.4.14"
 ndarray = "0.15.3"
-
-[profile.release]
-debug = true

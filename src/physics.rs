@@ -1,18 +1,16 @@
+use crate::physics::permutation::UniquePermutation2;
+use crate::physics::timeline::Timeline;
+use cgmath::{InnerSpace, Vector2};
 use core::fmt::{Display, Formatter};
 use core::iter::Iterator;
 use core::option::Option;
 use core::option::Option::{None, Some};
-
-use cgmath::{InnerSpace, Vector2};
-use itertools::Itertools;
-use log::{debug, warn};
+use log::debug;
 use ndarray::{Array2, Axis};
 use slab::Slab;
-
 use timeline::EventKind;
 
-use crate::physics::timeline::Timeline;
-
+mod permutation;
 mod timeline;
 
 #[derive(Copy, Clone)]
@@ -194,42 +192,33 @@ impl CollisionDetector {
 
     fn scan_grid_for_collisions(&mut self) {
         debug!("SCAN GRID");
+
         for ids in self.grid.iter().flatten() {
-            let pairs = ids
-                .iter()
-                .cloned()
-                .permutations(2)
-                .map(|mut pair| {
-                    pair.sort_unstable();
-                    pair
-                })
-                .unique()
-                .collect_vec();
+            if ids.len() >= 2 {
+                for [id1, id2] in UniquePermutation2::new(ids) {
+                    if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Collision)
+                    {
+                        let collision_time = self.timeline.time() + delay;
+                        let collision_matters = !self.timeline.contains_any_events(|event| {
+                            let these_are_separating = || {
+                                event.contains(id1)
+                                    && event.contains(id2)
+                                    && (matches!(event.kind, EventKind::Separation))
+                            };
 
-            for pair in pairs {
-                let (id1, id2) = (pair[0], pair[1]);
+                            let either_is_colliding_earlier = || {
+                                (event.contains(id1) || event.contains(id2))
+                                    && matches!(event.kind, EventKind::Collision)
+                                    && event.time <= collision_time
+                            };
 
-                if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Collision) {
-                    let collision_time = self.timeline.time() + delay;
-                    let collision_matters = !self.timeline.contains_any_events(|event| {
-                        let these_are_separating = || {
-                            event.contains(id1)
-                                && event.contains(id2)
-                                && (matches!(event.kind, EventKind::Separation))
-                        };
+                            these_are_separating() || either_is_colliding_earlier()
+                        });
 
-                        let either_is_colliding_earlier = || {
-                            (event.contains(id1) || event.contains(id2))
-                                && matches!(event.kind, EventKind::Collision)
-                                && event.time <= collision_time
-                        };
-
-                        these_are_separating() || either_is_colliding_earlier()
-                    });
-
-                    if collision_matters {
-                        self.timeline
-                            .add_event(EventKind::Collision, collision_time, id1, id2);
+                        if collision_matters {
+                            self.timeline
+                                .add_event(EventKind::Collision, collision_time, id1, id2);
+                        }
                     }
                 }
             }
