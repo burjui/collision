@@ -31,7 +31,7 @@ impl Display for ObjectId {
 
 pub struct CollisionDetector {
     objects: Slab<Object>,
-    grid: Array2<Option<Vec<usize>>>,
+    grid: Array2<Vec<usize>>,
     grid_position: Option<Vector2<f64>>,
     cell_size: f64,
     timeline: Timeline,
@@ -41,7 +41,7 @@ impl CollisionDetector {
     pub fn new() -> Self {
         Self {
             objects: Slab::new(),
-            grid: Array2::from_elem((0, 0), None),
+            grid: Array2::from_elem((0, 0), Vec::new()),
             grid_position: None,
             cell_size: 0.0,
             timeline: Timeline::default(),
@@ -138,7 +138,7 @@ impl CollisionDetector {
 
     fn update_grid(&mut self) {
         debug!("UPDATE GRID");
-        self.grid = Array2::from_elem((0, 0), None);
+        self.grid = Array2::from_elem((0, 0), Vec::new());
 
         self.grid_position = None;
         let mut x_end = f64::MIN;
@@ -163,7 +163,7 @@ impl CollisionDetector {
         if let Some(grid_position) = &self.grid_position {
             let width = ((x_end - grid_position.x) / self.cell_size).ceil() as usize;
             let height = ((y_end - grid_position.y) / self.cell_size).ceil() as usize;
-            self.grid = Array2::from_elem((width, height), None);
+            self.grid = Array2::from_elem((width, height), Vec::new());
 
             for (id, object) in &self.objects {
                 let half_size = object.size / 2.0;
@@ -177,11 +177,7 @@ impl CollisionDetector {
                     let cell_x = ((point.x - grid_position.x) / self.cell_size).floor() as usize;
                     let cell_y = ((point.y - grid_position.y) / self.cell_size).floor() as usize;
                     let cell = (cell_x, cell_y);
-                    let cellmates = self
-                        .grid
-                        .get_mut(cell)
-                        .map(|cellmates| cellmates.get_or_insert_with(Vec::new))
-                        .unwrap();
+                    let cellmates = &mut self.grid[cell];
                     if let Err(index) = cellmates.binary_search(&id) {
                         cellmates.insert(index, id);
                     }
@@ -193,7 +189,7 @@ impl CollisionDetector {
     fn scan_grid_for_collisions(&mut self) {
         debug!("SCAN GRID");
 
-        for ids in self.grid.iter().flatten() {
+        for ids in self.grid.iter() {
             if ids.len() >= 2 {
                 for [id1, id2] in UniquePermutation2::new(ids) {
                     if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Collision)
