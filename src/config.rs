@@ -29,6 +29,7 @@ impl Config {
 
     fn validate(&self) -> anyhow::Result<()> {
         check(&self.screen_width, "screen_width", Positive)?;
+        check(&self.screen_height, "screen_height", Positive)?;
         Ok(())
     }
 }
