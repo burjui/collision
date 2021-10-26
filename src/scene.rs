@@ -1,5 +1,7 @@
-use crate::physics::{CollisionDetector, Object};
 use cgmath::Vector2;
+
+use crate::physics::object::Object;
+use crate::physics::CollisionDetector;
 
 macro_rules! emitted_scene_path {
     () => {

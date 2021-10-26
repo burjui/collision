@@ -1,10 +1,8 @@
 #![feature(binary_heap_retain)]
 
-use crate::config::Config;
-use crate::fenv::{feenableexcept, FE_INVALID};
-use crate::fps::FpsCalculator;
-use crate::physics::{CollisionDetector, Object, ObjectId};
-use crate::scene::*;
+use std::fs::File;
+use std::path::Path;
+
 use anyhow::anyhow;
 use anyhow::{Context, Result};
 use cgmath::{InnerSpace, Vector2};
@@ -19,8 +17,14 @@ use sdl2::render::{Texture, TextureCreator, WindowCanvas};
 use sdl2::ttf::Font;
 use sdl2::video::WindowContext;
 use sdl2::EventPump;
-use std::fs::File;
-use std::path::Path;
+
+use physics::object::{Object, ObjectId};
+
+use crate::config::Config;
+use crate::fenv::{feenableexcept, FE_INVALID};
+use crate::fps::FpsCalculator;
+use crate::physics::CollisionDetector;
+use crate::scene::*;
 
 mod config;
 mod fenv;

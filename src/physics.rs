@@ -1,33 +1,21 @@
-use crate::physics::permutation::UniquePermutation2;
-use crate::physics::timeline::Timeline;
-use cgmath::{InnerSpace, Vector2};
-use core::fmt::{Display, Formatter};
 use core::iter::Iterator;
 use core::option::Option;
 use core::option::Option::{None, Some};
+
+use cgmath::{InnerSpace, Vector2};
 use log::debug;
 use ndarray::{Array2, Axis};
 use slab::Slab;
+
+use object::{Object, ObjectId};
 use timeline::EventKind;
 
+use crate::physics::permutation::UniquePermutation2;
+use crate::physics::timeline::Timeline;
+
+pub mod object;
 mod permutation;
 mod timeline;
-
-#[derive(Copy, Clone)]
-pub struct Object {
-    pub position: Vector2<f64>,
-    pub velocity: Vector2<f64>,
-    pub size: f64,
-    pub mass: f64,
-}
-
-pub struct ObjectId(usize);
-
-impl Display for ObjectId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 pub struct CollisionDetector {
     objects: Slab<Object>,
