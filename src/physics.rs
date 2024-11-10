@@ -3,25 +3,25 @@ use core::option::Option;
 use core::option::Option::{None, Some};
 
 use cgmath::{InnerSpace, Vector2};
+use itertools::Itertools;
 use log::debug;
-use ndarray::{Array2, Axis};
 use slab::Slab;
 
+use crate::physics::grid::{empty_grid, Grid, GridBuilder, ReadOnly};
 use object::{Object, ObjectId};
 use timeline::EventKind;
 
 use crate::physics::permutation::UniquePermutation2;
 use crate::physics::timeline::Timeline;
 
+mod grid;
 pub mod object;
 mod permutation;
 mod timeline;
 
 pub struct CollisionDetector {
     objects: Slab<Object>,
-    grid: Array2<Vec<usize>>,
-    grid_position: Option<Vector2<f64>>,
-    cell_size: f64,
+    grid: ReadOnly<Grid>,
     timeline: Timeline,
 }
 
@@ -29,9 +29,7 @@ impl CollisionDetector {
     pub fn new() -> Self {
         Self {
             objects: Slab::new(),
-            grid: Array2::from_elem((0, 0), Vec::new()),
-            grid_position: None,
-            cell_size: 0.0,
+            grid: empty_grid(),
             timeline: Timeline::default(),
         }
     }
@@ -47,21 +45,22 @@ impl CollisionDetector {
     }
 
     pub fn grid_position(&self) -> Option<Vector2<f64>> {
-        self.grid_position
+        if self.grid.cells.is_empty() {
+            None
+        } else {
+            Some(self.grid.position)
+        }
     }
 
     pub fn grid_cell_size(&self) -> f64 {
-        self.cell_size
+        self.grid.cell_size
     }
 
     pub fn grid_size(&self) -> Vector2<usize> {
-        Vector2::new(self.grid.len_of(Axis(0)), self.grid.len_of(Axis(1)))
+        self.grid.size
     }
 
     pub fn advance(&mut self, mut dt: f64) {
-        self.update_grid();
-        self.scan_grid_for_collisions();
-
         while let Some((event, dt_leftover)) = self.timeline.advance(dt) {
             if dt <= 0.0 {
                 break;
@@ -70,14 +69,11 @@ impl CollisionDetector {
             let event_dt = dt - dt_leftover;
             dt = dt_leftover;
             self.advance_objects(event_dt);
-            self.update_grid();
-            self.scan_grid_for_collisions();
 
             match event.kind {
                 EventKind::Collision => {
                     self.collide(event.id1, event.id2);
-                    self.update_grid();
-                    self.scan_grid_for_collisions();
+                    self.calculate_collisions();
                 }
 
                 EventKind::Separation => self.separate(event.id1, event.id2),
@@ -86,34 +82,10 @@ impl CollisionDetector {
 
         if dt >= 0.0 {
             self.advance_objects(dt);
-            self.update_grid();
-            self.scan_grid_for_collisions();
+            if !self.timeline.contains_any_events(|_| true) {
+                self.calculate_collisions();
+            }
         }
-
-        // let excess_collisions = self
-        //     .timeline
-        //     .events
-        //     .iter()
-        //     .filter(|event| {
-        //         matches!(event.kind, EventKind::Collision) && event.time < self.timeline.time
-        //     })
-        //     .count();
-        // let excess_separations = self
-        //     .timeline
-        //     .events
-        //     .iter()
-        //     .filter(|event| {
-        //         matches!(event.kind, EventKind::Separation) && event.time < self.timeline.time
-        //     })
-        //     .count();
-        // if excess_collisions + excess_separations > 0 {
-        //     warn!(
-        //         "{} excess events ({} collisions, {} separations)",
-        //         excess_collisions + excess_separations,
-        //         excess_collisions,
-        //         excess_separations
-        //     );
-        // }
     }
 
     pub fn time(&self) -> f64 {
@@ -124,62 +96,23 @@ impl CollisionDetector {
         &mut self.objects[id.0]
     }
 
-    fn update_grid(&mut self) {
-        debug!("UPDATE GRID");
-        self.grid = Array2::from_elem((0, 0), Vec::new());
-
-        self.grid_position = None;
-        let mut x_end = f64::MIN;
-        let mut y_end = f64::MIN;
-        for (_, object) in &self.objects {
-            self.cell_size = self.cell_size.max(object.size * 2.0);
-            let x = object.position.x - object.size / 2.0;
-            let y = object.position.y - object.size / 2.0;
-            let grid_position_x = self
-                .grid_position
-                .map(|position| position.x.min(x))
-                .unwrap_or(x);
-            let grid_position_y = self
-                .grid_position
-                .map(|position| position.y.min(y))
-                .unwrap_or(y);
-            x_end = x_end.max(object.position.x + object.size);
-            y_end = y_end.max(object.position.y + object.size);
-            self.grid_position = Some(Vector2::new(grid_position_x, grid_position_y));
+    #[must_use]
+    fn build_grid(&mut self) -> ReadOnly<Grid> {
+        let mut grid_builder = GridBuilder::new();
+        for (id, object) in &self.objects {
+            grid_builder.add(ObjectId(id), object.position, object.size);
         }
-
-        if let Some(grid_position) = &self.grid_position {
-            let width = ((x_end - grid_position.x) / self.cell_size).ceil() as usize;
-            let height = ((y_end - grid_position.y) / self.cell_size).ceil() as usize;
-            self.grid = Array2::from_elem((width, height), Vec::new());
-
-            for (id, object) in &self.objects {
-                let half_size = object.size / 2.0;
-                let corners = &[
-                    object.position + Vector2::new(-half_size, -half_size),
-                    object.position + Vector2::new(-half_size, half_size),
-                    object.position + Vector2::new(half_size, -half_size),
-                    object.position + Vector2::new(half_size, half_size),
-                ];
-                for point in corners {
-                    let cell_x = ((point.x - grid_position.x) / self.cell_size).floor() as usize;
-                    let cell_y = ((point.y - grid_position.y) / self.cell_size).floor() as usize;
-                    let cell = (cell_x, cell_y);
-                    let cellmates = &mut self.grid[cell];
-                    if let Err(index) = cellmates.binary_search(&id) {
-                        cellmates.insert(index, id);
-                    }
-                }
-            }
-        }
+        grid_builder.build()
     }
 
-    fn scan_grid_for_collisions(&mut self) {
-        debug!("SCAN GRID");
+    pub(crate) fn calculate_collisions(&mut self) {
+        debug!("SCANNING FOR COLLISIONS (now {})", self.timeline.time());
 
-        for ids in self.grid.iter() {
+        self.grid = self.build_grid();
+        for ids in self.grid.cells() {
+            let ids = ids.collect_vec();
             if ids.len() >= 2 {
-                for [id1, id2] in UniquePermutation2::new(ids) {
+                for (ObjectId(id1), ObjectId(id2)) in UniquePermutation2::new(&ids) {
                     if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Collision)
                     {
                         let collision_time = self.timeline.time() + delay;

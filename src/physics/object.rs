@@ -10,6 +10,7 @@ pub struct Object {
     pub mass: f64,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ObjectId(pub(crate) usize);
 
 impl Display for ObjectId {

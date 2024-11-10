@@ -5,7 +5,6 @@ use serde_derive::Deserialize;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::Read;
-use std::ops::RangeInclusive;
 use std::path::Path;
 
 #[derive(Deserialize)]
@@ -41,24 +40,11 @@ fn check<T, R: Rule<T>>(value: &T, name: &'static str, rule: R) -> anyhow::Resul
         Err(anyhow!("{}", rule.error_message(value, name)))
     }
 }
-
-struct GreatOrEqual<T>(T);
 struct Positive;
-struct IsInRange<T>(RangeInclusive<T>);
 
 trait Rule<T> {
     fn condition(&self, value: &T) -> bool;
     fn error_message(&self, value: &T, name: &'static str) -> String;
-}
-
-impl<T: PartialOrd + Display> Rule<T> for GreatOrEqual<T> {
-    fn condition(&self, value: &T) -> bool {
-        value >= &self.0
-    }
-
-    fn error_message(&self, value: &T, name: &'static str) -> String {
-        format!("{} ({}) must be greater than {}", name, value, &self.0)
-    }
 }
 
 impl<T: Zero + PartialOrd + Display> Rule<T> for Positive {
@@ -71,18 +57,38 @@ impl<T: Zero + PartialOrd + Display> Rule<T> for Positive {
     }
 }
 
-impl<T: PartialOrd + Display> Rule<T> for IsInRange<T> {
-    fn condition(&self, value: &T) -> bool {
-        self.0.contains(value)
+#[allow(unused)]
+mod unused {
+    use std::{fmt::Display, ops::RangeInclusive};
+
+    use super::Rule;
+
+    struct GreatOrEqual<T>(T);
+    struct IsInRange<T>(RangeInclusive<T>);
+
+    impl<T: PartialOrd + Display> Rule<T> for GreatOrEqual<T> {
+        fn condition(&self, value: &T) -> bool {
+            value >= &self.0
+        }
+
+        fn error_message(&self, value: &T, name: &'static str) -> String {
+            format!("{} ({}) must be greater than {}", name, value, &self.0)
+        }
     }
 
-    fn error_message(&self, value: &T, name: &'static str) -> String {
-        format!(
-            "{} ({}) is out of range [{}; {}]",
-            name,
-            value,
-            self.0.start(),
-            self.0.end()
-        )
+    impl<T: PartialOrd + Display> Rule<T> for IsInRange<T> {
+        fn condition(&self, value: &T) -> bool {
+            self.0.contains(value)
+        }
+
+        fn error_message(&self, value: &T, name: &'static str) -> String {
+            format!(
+                "{} ({}) is out of range [{}; {}]",
+                name,
+                value,
+                self.0.start(),
+                self.0.end()
+            )
+        }
     }
 }

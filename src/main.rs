@@ -1,5 +1,3 @@
-#![feature(binary_heap_retain)]
-
 use std::fs::File;
 use std::path::Path;
 
@@ -73,7 +71,11 @@ fn main() -> Result<()> {
     let mut fps_calculator = FpsCalculator::new();
     let mut render_settings = RenderSettings {
         with_grid: false,
-        object_render_kind: ObjectRenderKind::Simplified,
+        details: RenderDetails {
+            circle: false,
+            id: false,
+            velocity: false,
+        },
     };
 
     #[cfg(unix)]
@@ -143,6 +145,15 @@ enum EventResponse {
     Quit,
 }
 
+macro_rules! keydown {
+    ($keycode: pat) => {
+        Event::KeyDown {
+            keycode: Some($keycode),
+            ..
+        }
+    };
+}
+
 fn process_events(
     event_pump: &mut EventPump,
     render_settings: &mut RenderSettings,
@@ -151,44 +162,38 @@ fn process_events(
 ) -> EventResponse {
     for event in event_pump.poll_iter() {
         match event {
-            Event::Quit { .. }
-            | Event::KeyDown {
-                keycode: Some(Keycode::Escape),
-                ..
-            } => return EventResponse::Quit,
+            Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
+            keydown!(Keycode::P) => emit_scene(collision_detector.objects()).unwrap(),
+            keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
+            keydown!(Keycode::Space) => *advance_time = !*advance_time,
 
-            Event::KeyDown {
-                keycode: Some(Keycode::P),
-                ..
-            } => {
-                emit_scene(collision_detector.objects()).unwrap();
-            }
-
-            Event::KeyDown {
-                keycode: Some(Keycode::G),
-                ..
-            } => render_settings.with_grid = !render_settings.with_grid,
-
-            Event::KeyDown {
-                keycode: Some(Keycode::D),
-                ..
-            } => {
-                render_settings.object_render_kind = ObjectRenderKind::Detailed(RenderDetails {
+            keydown!(Keycode::D) => {
+                render_settings.details = RenderDetails {
                     circle: true,
                     id: true,
                     velocity: true,
-                })
+                };
             }
 
-            Event::KeyDown {
-                keycode: Some(Keycode::S),
-                ..
-            } => render_settings.object_render_kind = ObjectRenderKind::Simplified,
+            keydown!(Keycode::S) => {
+                render_settings.details = RenderDetails {
+                    circle: false,
+                    id: false,
+                    velocity: false,
+                };
+            }
 
-            Event::KeyDown {
-                keycode: Some(Keycode::Space),
-                ..
-            } => *advance_time = !*advance_time,
+            keydown!(Keycode::C) => {
+                render_settings.details.circle = !render_settings.details.circle;
+            }
+
+            keydown!(Keycode::I) => {
+                render_settings.details.id = !render_settings.details.id;
+            }
+
+            keydown!(Keycode::V) => {
+                render_settings.details.velocity = !render_settings.details.velocity;
+            }
 
             Event::MouseButtonDown {
                 mouse_btn: MouseButton::Left,
@@ -200,7 +205,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        collision_detector.object_mut(id).velocity = direction.normalize_to(100.0);
+                        collision_detector.object_mut(id).velocity += direction.normalize_to(100.0);
                     }
                 }
             }
@@ -235,12 +240,6 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
 }
 
 #[derive(Copy, Clone)]
-enum ObjectRenderKind {
-    Simplified,
-    Detailed(RenderDetails),
-}
-
-#[derive(Copy, Clone)]
 struct RenderDetails {
     circle: bool,
     id: bool,
@@ -249,7 +248,7 @@ struct RenderDetails {
 
 struct RenderSettings {
     with_grid: bool,
-    object_render_kind: ObjectRenderKind,
+    details: RenderDetails,
 }
 
 fn render_physics(
@@ -265,48 +264,51 @@ fn render_physics(
 
     let texture_creator = canvas.texture_creator();
     for (id, object) in collision_detector.objects() {
-        match settings.object_render_kind {
-            ObjectRenderKind::Simplified => {
-                render_object_simplified(&object, canvas)?;
-            }
-
-            ObjectRenderKind::Detailed(details) => {
-                render_object_detailed(
-                    id,
-                    &object,
-                    details,
-                    screen_width,
-                    canvas,
-                    font,
-                    &texture_creator,
-                )?;
-            }
-        }
+        render_object(
+            id,
+            &object,
+            &settings.details,
+            screen_width,
+            canvas,
+            font,
+            &texture_creator,
+        )?;
     }
 
     Ok(())
 }
 
-fn render_object_detailed(
+fn render_object(
     id: ObjectId,
     object: &Object,
-    details: RenderDetails,
+    details: &RenderDetails,
     screen_width: u32,
     canvas: &mut WindowCanvas,
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
+    let particle_color = Color::GREEN;
     if details.circle {
         canvas
             .aa_circle(
                 object.position.x as i16,
                 object.position.y as i16,
                 (object.size * 0.5) as i16,
-                Color::RGB(100, 100, 255),
+                particle_color,
             )
             .map_err(string_to_anyhow)
             .context("render object circle")?;
+    } else {
+        canvas
+            .pixel(
+                object.position.x as i16,
+                object.position.y as i16,
+                particle_color,
+            )
+            .map_err(string_to_anyhow)
+            .context("render object as pixel")?;
     }
+
     if details.id {
         let (id_text_texture, id_text_rect) = render_text(
             &id.to_string(),
@@ -324,31 +326,23 @@ fn render_object_detailed(
             .map_err(string_to_anyhow)
             .context("copy object id text to the window surface")?;
     }
+
     if details.velocity {
+        let magnitude = object.velocity.magnitude() + 0.0000001;
+        let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
         canvas
             .aa_line(
                 object.position.x as i16,
                 object.position.y as i16,
-                (object.position.x + object.velocity.x) as i16,
-                (object.position.y + object.velocity.y) as i16,
-                Color::RGB(100, 255, 255),
+                (object.position.x + object.velocity.x * scale_factor) as i16,
+                (object.position.y + object.velocity.y * scale_factor) as i16,
+                Color::RGB(127, 0, 127),
             )
             .map_err(string_to_anyhow)
             .context("render object velocity vector")?;
     }
 
     Ok(())
-}
-
-fn render_object_simplified(object: &Object, canvas: &mut WindowCanvas) -> Result<()> {
-    canvas
-        .pixel(
-            object.position.x as i16,
-            object.position.y as i16,
-            Color::RGB(100, 100, 255),
-        )
-        .map_err(string_to_anyhow)
-        .context("render object as pixel")
 }
 
 fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas) -> Result<()> {

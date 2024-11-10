@@ -10,7 +10,7 @@ macro_rules! emitted_scene_path {
 }
 
 pub fn create_scene(collision_detector: &mut CollisionDetector) {
-    const SIZE: f64 = 2.0;
+    const SIZE: f64 = 5.0;
     const SPACING: f64 = 3.0;
 
     for i in 0..30 {
@@ -26,6 +26,8 @@ pub fn create_scene(collision_detector: &mut CollisionDetector) {
             });
         }
     }
+
+    collision_detector.calculate_collisions();
 
     // include!(concat!("../", emitted_scene_path!()));
 }
