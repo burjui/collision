@@ -29,7 +29,7 @@ impl GridBuilder {
         self.start.y = self.start.y.min(object_start.y);
         self.end.x = self.end.x.max(object_end.x);
         self.end.y = self.end.y.max(object_end.y);
-        self.cell_size = self.cell_size.max(size);
+        self.cell_size = self.cell_size.max(size * 2.0);
     }
 
     pub(crate) fn build(self) -> ReadOnly<Grid> {

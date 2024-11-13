@@ -88,6 +88,7 @@ fn main() -> Result<()> {
     create_scene(&mut collision_detector);
 
     let mut advance_time = true;
+    let mut min_fps = std::u128::MAX;
 
     'running: loop {
         match process_events(
@@ -101,7 +102,7 @@ fn main() -> Result<()> {
         }
 
         if advance_time {
-            collision_detector.advance(0.005);
+            collision_detector.advance(0.003);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -116,7 +117,11 @@ fn main() -> Result<()> {
         )?;
 
         if let Some(fps) = fps_calculator.update(frame_count)? {
-            let stats_string = format!("FPS: {}\ntime: {}", fps, collision_detector.time());
+            min_fps = min_fps.min(fps);
+            let stats_string = format!(
+                "FPS: {fps} (min {min_fps})\ntime: {}",
+                collision_detector.time()
+            );
             stats_text = Some(render_text(
                 &stats_string,
                 config.screen_width,

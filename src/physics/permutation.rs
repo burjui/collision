@@ -4,6 +4,7 @@ pub(crate) struct UniquePermutation2<'a, T> {
 }
 
 impl<'a, T> UniquePermutation2<'a, T> {
+    #[must_use]
     pub(crate) fn new(items: &'a [T]) -> Self {
         assert!(items.len() >= 2);
         Self { items, state: 0b11 }
@@ -30,6 +31,12 @@ where
             Some((self.items[first].clone(), self.items[second].clone()))
         }
     }
+}
+
+#[test]
+#[should_panic]
+fn n1k2() {
+    UniquePermutation2::new(&[1]).collect::<Box<[_]>>().as_ref();
 }
 
 #[test]

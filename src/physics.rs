@@ -82,9 +82,7 @@ impl CollisionDetector {
 
         if dt >= 0.0 {
             self.advance_objects(dt);
-            if !self.timeline.contains_any_events(|_| true) {
-                self.calculate_collisions();
-            }
+            self.calculate_collisions();
         }
     }
 
@@ -111,31 +109,38 @@ impl CollisionDetector {
         self.grid = self.build_grid();
         for ids in self.grid.cells() {
             let ids = ids.collect_vec();
-            if ids.len() >= 2 {
-                for (ObjectId(id1), ObjectId(id2)) in UniquePermutation2::new(&ids) {
-                    if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Collision)
-                    {
-                        let collision_time = self.timeline.time() + delay;
-                        let collision_matters = !self.timeline.contains_any_events(|event| {
-                            let these_are_separating = || {
-                                event.contains(id1)
-                                    && event.contains(id2)
-                                    && (matches!(event.kind, EventKind::Separation))
-                            };
+            Self::calculate_collisions_in_cell(&ids, &self.objects, &mut self.timeline);
+        }
+    }
 
-                            let either_is_colliding_earlier = || {
-                                (event.contains(id1) || event.contains(id2))
-                                    && matches!(event.kind, EventKind::Collision)
-                                    && event.time <= collision_time
-                            };
+    pub(crate) fn calculate_collisions_in_cell(
+        cell: &[ObjectId],
+        objects: &Slab<Object>,
+        timeline: &mut Timeline,
+    ) {
+        if cell.len() >= 2 {
+            for (ObjectId(id1), ObjectId(id2)) in UniquePermutation2::new(cell) {
+                let (o1, o2) = (&objects[id1], &objects[id2]);
+                if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
+                    let collision_time = timeline.time() + delay;
+                    let collision_matters = !timeline.contains_any_events(|event| {
+                        let these_are_separating = || {
+                            event.contains(id1)
+                                && event.contains(id2)
+                                && (matches!(event.kind, EventKind::Separation))
+                        };
 
-                            these_are_separating() || either_is_colliding_earlier()
-                        });
+                        let either_is_colliding_earlier = || {
+                            (event.contains(id1) || event.contains(id2))
+                                && matches!(event.kind, EventKind::Collision)
+                                && event.time <= collision_time
+                        };
 
-                        if collision_matters {
-                            self.timeline
-                                .add_event(EventKind::Collision, collision_time, id1, id2);
-                        }
+                        these_are_separating() || either_is_colliding_earlier()
+                    });
+
+                    if collision_matters {
+                        timeline.add_event(EventKind::Collision, collision_time, id1, id2);
                     }
                 }
             }
@@ -157,7 +162,8 @@ impl CollisionDetector {
             .remove_events(|event| event.contains(id1) || event.contains(id2));
 
         // Separation might not happen if objects didn't actually intersect at the time of collision
-        if let Some(delay) = self.calculate_event_delay(id1, id2, EventKind::Separation) {
+        let (o1, o2) = (&self.objects[id1], &self.objects[id2]);
+        if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Separation) {
             let time = self.timeline.time() + delay;
             self.timeline
                 .add_event(EventKind::Separation, time, id1, id2);
@@ -198,12 +204,11 @@ impl CollisionDetector {
     //
     // by Madhav Deshpande, Neha Kharsikar and Priyanka Prabhu
     //
-    fn calculate_event_delay(&self, id1: usize, id2: usize, kind: EventKind) -> Option<f64> {
+    fn calculate_event_delay(o1: &Object, o2: &Object, kind: EventKind) -> Option<f64> {
         // a = |vy21|^2
         // b = 2*(p21.y*v21.y + p21.x*v21.x)
         // c = |p21|^2 - R^2
         // discriminant = b^2 - 4ac
-        let (o1, o2) = (&self.objects[id1], &self.objects[id2]);
         let coeff_sign = match kind {
             EventKind::Collision => 1.0,
             EventKind::Separation => -1.0,
