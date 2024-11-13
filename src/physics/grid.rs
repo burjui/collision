@@ -1,13 +1,11 @@
 use crate::physics::object::ObjectId;
 use cgmath::Vector2;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, Range};
 
 pub(crate) struct GridBuilder {
     objects: Vec<(ObjectId, Vector2<f64>, Vector2<f64>)>,
     start: Vector2<f64>,
-    end: Vector2<f64>,
     cell_size: f64,
 }
 
@@ -16,7 +14,6 @@ impl GridBuilder {
         GridBuilder {
             objects: Vec::new(),
             start: Vector2::new(f64::MAX, f64::MAX),
-            end: Vector2::new(f64::MIN, f64::MIN),
             cell_size: 0.0,
         }
     }
@@ -28,8 +25,6 @@ impl GridBuilder {
         self.objects.push((id, object_start, object_end));
         self.start.x = self.start.x.min(object_start.x);
         self.start.y = self.start.y.min(object_start.y);
-        self.end.x = self.end.x.max(object_end.x);
-        self.end.y = self.end.y.max(object_end.y);
         self.cell_size = self.cell_size.max(size * 2.0);
     }
 
@@ -101,21 +96,6 @@ pub(crate) struct Grid {
 }
 
 impl Grid {
-    pub(crate) fn cell(&self, id: ObjectId) -> &[ObjectId] {
-        let cell_index = self
-            .cells
-            .binary_search_by(|range| {
-                if range.contains(&id.0) {
-                    Ordering::Equal
-                } else {
-                    range.start.cmp(&id.0)
-                }
-            })
-            .unwrap();
-        let object_range = self.cells[cell_index].clone();
-        &self.objects[object_range]
-    }
-
     pub(crate) fn cells(&self) -> impl Iterator<Item = &'_ [ObjectId]> + '_ {
         self.cells.iter().map(|range| &self.objects[range.clone()])
     }
