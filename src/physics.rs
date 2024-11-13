@@ -3,7 +3,6 @@ use core::option::Option;
 use core::option::Option::{None, Some};
 
 use cgmath::{InnerSpace, Vector2};
-use itertools::Itertools;
 use log::debug;
 use slab::Slab;
 
@@ -74,6 +73,11 @@ impl CollisionDetector {
                 EventKind::Collision => {
                     self.collide(event.id1, event.id2);
                     self.calculate_collisions();
+                    // Self::calculate_collisions_in_cell(
+                    //     self.grid.cell(event.id1),
+                    //     &self.objects,
+                    //     &mut self.timeline,
+                    // );
                 }
 
                 EventKind::Separation => self.separate(event.id1, event.id2),
@@ -107,9 +111,11 @@ impl CollisionDetector {
         debug!("SCANNING FOR COLLISIONS (now {})", self.timeline.time());
 
         self.grid = self.build_grid();
+        let mut cell = Vec::<ObjectId>::new();
         for ids in self.grid.cells() {
-            let ids = ids.collect_vec();
-            Self::calculate_collisions_in_cell(&ids, &self.objects, &mut self.timeline);
+            cell.clear();
+            cell.extend_from_slice(ids);
+            Self::calculate_collisions_in_cell(&cell, &self.objects, &mut self.timeline);
         }
     }
 
@@ -119,8 +125,8 @@ impl CollisionDetector {
         timeline: &mut Timeline,
     ) {
         if cell.len() >= 2 {
-            for (ObjectId(id1), ObjectId(id2)) in UniquePermutation2::new(cell) {
-                let (o1, o2) = (&objects[id1], &objects[id2]);
+            for (id1, id2) in UniquePermutation2::new(cell) {
+                let (o1, o2) = (&objects[id1.0], &objects[id2.0]);
                 if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
                     let collision_time = timeline.time() + delay;
                     let collision_matters = !timeline.contains_any_events(|event| {
@@ -153,7 +159,7 @@ impl CollisionDetector {
         }
     }
 
-    fn collide(&mut self, id1: usize, id2: usize) {
+    fn collide(&mut self, id1: ObjectId, id2: ObjectId) {
         debug!("COLLIDE {} {} (now {})", id1, id2, self.timeline.time());
         self.collision_elastic(id1, id2);
 
@@ -162,7 +168,7 @@ impl CollisionDetector {
             .remove_events(|event| event.contains(id1) || event.contains(id2));
 
         // Separation might not happen if objects didn't actually intersect at the time of collision
-        let (o1, o2) = (&self.objects[id1], &self.objects[id2]);
+        let (o1, o2) = (&self.objects[id1.0], &self.objects[id2.0]);
         if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Separation) {
             let time = self.timeline.time() + delay;
             self.timeline
@@ -170,7 +176,7 @@ impl CollisionDetector {
         }
     }
 
-    fn separate(&mut self, id1: usize, id2: usize) {
+    fn separate(&mut self, id1: ObjectId, id2: ObjectId) {
         debug!("SEPARATE {} {} (now {})", id1, id2, self.timeline.time());
         self.timeline.remove_events(|event| {
             matches!(event.kind, EventKind::Separation)
@@ -179,19 +185,19 @@ impl CollisionDetector {
         });
     }
 
-    fn collision_elastic(&mut self, id1: usize, id2: usize) {
-        let object1 = self.objects[id1];
-        let object2 = self.objects[id2];
+    fn collision_elastic(&mut self, id1: ObjectId, id2: ObjectId) {
+        let object1 = self.objects[id1.0];
+        let object2 = self.objects[id2.0];
         let v1 = object1.velocity;
         let v2 = object2.velocity;
         let c1 = object1.position;
         let c2 = object2.position;
         let m1 = object1.mass;
         let m2 = object2.mass;
-        self.objects[id1].velocity = v1
+        self.objects[id1.0].velocity = v1
             - ((c1 - c2).dot(v1 - v2) * (c1 - c2) * 2.0 * m2)
                 * (1.0 / ((m1 + m2) * (c1 - c2).magnitude2()));
-        self.objects[id2].velocity = v2
+        self.objects[id2.0].velocity = v2
             - ((c2 - c1).dot(v2 - v1) * (c2 - c1) * 2.0 * m1)
                 * (1.0 / ((m1 + m2) * (c2 - c1).magnitude2()));
     }

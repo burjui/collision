@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
 use cgmath::{InnerSpace, Vector2};
+use colortemp::temp_to_rgb;
 use itertools::Itertools;
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
@@ -88,7 +89,7 @@ fn main() -> Result<()> {
     create_scene(&mut collision_detector);
 
     let mut advance_time = true;
-    let mut min_fps = std::u128::MAX;
+    let mut min_fps = u128::MAX;
 
     'running: loop {
         match process_events(
@@ -292,7 +293,14 @@ fn render_object(
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
-    let particle_color = Color::GREEN;
+    fn spectrum(position: f64) -> Color {
+        let rgb = temp_to_rgb(300 + (7000.0 * position) as i64);
+        let c = |c: f64| (c * 255.0) as u8;
+        Color::RGB(c(rgb.r), c(rgb.g), c(rgb.b))
+    }
+
+    let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
+    let particle_color = spectrum(spectrum_position);
     if details.circle {
         canvas
             .aa_circle(

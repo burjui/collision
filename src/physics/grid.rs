@@ -1,5 +1,6 @@
 use crate::physics::object::ObjectId;
 use cgmath::Vector2;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, Range};
 
@@ -96,14 +97,27 @@ pub(crate) struct Grid {
     pub(crate) size: Vector2<usize>,
     pub(crate) cell_size: f64,
     pub(crate) objects: Vec<ObjectId>,
-    pub(crate) cells: Vec<Range<usize>>,
+    pub(crate) cells: Vec<Range<usize>>, // indices into objects
 }
 
 impl Grid {
-    pub(crate) fn cells(&self) -> impl Iterator<Item = impl Iterator<Item = ObjectId> + '_> + '_ {
-        self.cells
-            .iter()
-            .map(|range| self.objects[range.clone()].iter().copied())
+    pub(crate) fn cell(&self, id: ObjectId) -> &[ObjectId] {
+        let cell_index = self
+            .cells
+            .binary_search_by(|range| {
+                if range.contains(&id.0) {
+                    Ordering::Equal
+                } else {
+                    range.start.cmp(&id.0)
+                }
+            })
+            .unwrap();
+        let object_range = self.cells[cell_index].clone();
+        &self.objects[object_range]
+    }
+
+    pub(crate) fn cells(&self) -> impl Iterator<Item = &'_ [ObjectId]> + '_ {
+        self.cells.iter().map(|range| &self.objects[range.clone()])
     }
 }
 

@@ -2,6 +2,8 @@ use core::option::Option;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use super::object::ObjectId;
+
 #[derive(Default)]
 pub struct Timeline {
     time: f64,
@@ -9,7 +11,7 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    pub(crate) fn add_event(&mut self, kind: EventKind, time: f64, id1: usize, id2: usize) {
+    pub(crate) fn add_event(&mut self, kind: EventKind, time: f64, id1: ObjectId, id2: ObjectId) {
         self.events.push(Event {
             time,
             kind,
@@ -52,12 +54,12 @@ impl Timeline {
 pub(crate) struct Event {
     pub(crate) kind: EventKind,
     pub(crate) time: f64,
-    pub(crate) id1: usize,
-    pub(crate) id2: usize,
+    pub(crate) id1: ObjectId,
+    pub(crate) id2: ObjectId,
 }
 
 impl Event {
-    pub(crate) fn contains(&self, id: usize) -> bool {
+    pub(crate) fn contains(&self, id: ObjectId) -> bool {
         self.id1 == id || self.id2 == id
     }
 }
