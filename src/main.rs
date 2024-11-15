@@ -169,7 +169,12 @@ fn process_events(
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
             keydown!(Keycode::P) => emit_scene(collision_detector.objects()).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
-            keydown!(Keycode::Space) => *advance_time = !*advance_time,
+            keydown!(Keycode::Space) => {
+                *advance_time = !*advance_time;
+                if *advance_time {
+                    collision_detector.calculate_collisions();
+                }
+            }
 
             keydown!(Keycode::D) => {
                 render_settings.details = RenderDetails {

@@ -76,7 +76,7 @@ impl CollisionDetector {
 
                     for &cell_index in self.grid.cells_for_object(event.id1) {
                         Self::calculate_collisions_in_cell(
-                            &self.grid[cell_index].objects,
+                            &self.grid[cell_index],
                             &self.objects,
                             &mut self.timeline,
                         );
@@ -115,7 +115,7 @@ impl CollisionDetector {
 
         self.grid = self.build_grid();
         for cell in &self.grid.cells {
-            Self::calculate_collisions_in_cell(&cell.objects, &self.objects, &mut self.timeline);
+            Self::calculate_collisions_in_cell(cell, &self.objects, &mut self.timeline);
         }
 
         debug!("{} events left", self.timeline.len());

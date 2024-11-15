@@ -60,14 +60,12 @@ impl GridBuilder {
 
                 let cell_index = *cell_indices.entry(cell).or_insert_with(|| {
                     let index = self.grid.cells.len();
-                    self.grid.cells.push(GridCell {
-                        objects: Vec::new(),
-                    });
+                    self.grid.cells.push(Vec::new());
                     index
                 });
                 object_cells.push(CellIndex(cell_index));
 
-                self.grid.cells[cell_index].objects.push(*object);
+                self.grid.cells[cell_index].push(*object);
             }
         }
 
@@ -82,13 +80,6 @@ pub struct GridObject {
     cells: Vec<CellIndex>,
 }
 
-pub struct GridCell {
-    pub objects: Vec<ObjectId>,
-}
-
-#[derive(Copy, Clone, Deref)]
-pub struct ObjectIndex(usize);
-
 #[derive(Copy, Clone, Deref, PartialEq, Eq, Hash)]
 pub struct CellIndex(usize);
 
@@ -97,7 +88,7 @@ pub struct Grid {
     pub size: Vector2<usize>,
     pub cell_size: f64,
     pub objects: Vec<GridObject>,
-    pub cells: Vec<GridCell>,
+    pub cells: Vec<Vec<ObjectId>>,
 }
 
 impl Grid {
@@ -125,17 +116,8 @@ impl Grid {
     }
 }
 
-impl Index<ObjectIndex> for Grid {
-    type Output = GridObject;
-
-    fn index(&self, index: ObjectIndex) -> &Self::Output {
-        &self.objects[index.0]
-    }
-}
-
 impl Index<CellIndex> for Grid {
-    type Output = GridCell;
-
+    type Output = [ObjectId];
     fn index(&self, index: CellIndex) -> &Self::Output {
         &self.cells[index.0]
     }
