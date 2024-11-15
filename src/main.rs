@@ -4,7 +4,6 @@ use std::path::Path;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
 use cgmath::{InnerSpace, Vector2};
-use colortemp::temp_to_rgb;
 use itertools::Itertools;
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
@@ -34,8 +33,7 @@ mod physics;
 mod scene;
 
 fn main() -> Result<()> {
-    let _ = File::create("collision.log").context("truncate log")?;
-    log4rs::init_file("log4rs.yml", Default::default()).context("init logger")?;
+    env_logger::init();
 
     let config = Config::from_file(Path::new("config.toml")).context("load config")?;
 
@@ -293,12 +291,6 @@ fn render_object(
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
-    fn spectrum(position: f64) -> Color {
-        let rgb = temp_to_rgb(300 + (7000.0 * position) as i64);
-        let c = |c: f64| (c * 255.0) as u8;
-        Color::RGB(c(rgb.r), c(rgb.g), c(rgb.b))
-    }
-
     let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
     let particle_color = spectrum(spectrum_position);
     if details.circle {
@@ -418,4 +410,19 @@ fn render_text<'texture>(
 
 fn string_to_anyhow(s: String) -> anyhow::Error {
     anyhow!("{}", s)
+}
+
+fn spectrum(position: f64) -> Color {
+    Color::RGB(
+        ((1.0 - position) * 255.0) as u8,
+        ((0.5 - (position - 0.5).abs()) * 255.0 * 2.0) as u8,
+        (position * 255.0) as u8,
+    )
+}
+
+#[test]
+fn spectrum_test() {
+    assert_eq!(spectrum(0.0), Color::RGB(255, 0, 0));
+    assert_eq!(spectrum(0.5), Color::RGB(127, 255, 127));
+    assert_eq!(spectrum(1.0), Color::RGB(0, 0, 255));
 }

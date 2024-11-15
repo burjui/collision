@@ -6,12 +6,13 @@ use cgmath::{InnerSpace, Vector2};
 use log::debug;
 use slab::Slab;
 
-use crate::physics::grid::{empty_grid, Grid, GridBuilder, ReadOnly};
+use crate::physics::grid::{Grid, GridBuilder};
 use object::{Object, ObjectId};
 use timeline::EventKind;
 
 use crate::physics::permutation::UniquePermutation2;
 use crate::physics::timeline::Timeline;
+use itertools::Itertools;
 
 mod grid;
 pub mod object;
@@ -20,7 +21,7 @@ mod timeline;
 
 pub struct CollisionDetector {
     objects: Slab<Object>,
-    grid: ReadOnly<Grid>,
+    grid: Grid,
     timeline: Timeline,
 }
 
@@ -28,7 +29,7 @@ impl CollisionDetector {
     pub fn new() -> Self {
         Self {
             objects: Slab::new(),
-            grid: empty_grid(),
+            grid: Grid::new(),
             timeline: Timeline::default(),
         }
     }
@@ -44,7 +45,7 @@ impl CollisionDetector {
     }
 
     pub fn grid_position(&self) -> Option<Vector2<f64>> {
-        if self.grid.cells.is_empty() {
+        if self.grid.is_empty() {
             None
         } else {
             Some(self.grid.position)
@@ -73,11 +74,19 @@ impl CollisionDetector {
                 EventKind::Collision => {
                     self.collide(event.id1, event.id2);
                     self.calculate_collisions();
-                    // Self::calculate_collisions_in_cell(
-                    //     self.grid.cell(event.id1),
-                    //     &self.objects,
-                    //     &mut self.timeline,
-                    // );
+                    // let mut current_cell = Vec::new();
+                    // for cell in self
+                    //     .grid
+                    //     .cells(move |id| id == event.id1 || id == event.id2)
+                    // {
+                    //     current_cell.clear();
+                    //     current_cell.extend(cell);
+                    //     Self::calculate_collisions_in_cell(
+                    //         &current_cell,
+                    //         &self.objects,
+                    //         &mut self.timeline,
+                    //     );
+                    // }
                 }
 
                 EventKind::Separation => self.separate(event.id1, event.id2),
@@ -99,7 +108,7 @@ impl CollisionDetector {
     }
 
     #[must_use]
-    fn build_grid(&mut self) -> ReadOnly<Grid> {
+    fn build_grid(&mut self) -> Grid {
         let mut grid_builder = GridBuilder::new();
         for (id, object) in &self.objects {
             grid_builder.add(ObjectId(id), object.position, object.size);
@@ -107,19 +116,20 @@ impl CollisionDetector {
         grid_builder.build()
     }
 
-    pub(crate) fn calculate_collisions(&mut self) {
+    pub fn calculate_collisions(&mut self) {
         debug!("SCANNING FOR COLLISIONS (now {})", self.timeline.time());
 
         self.grid = self.build_grid();
         let mut cell = Vec::<ObjectId>::new();
-        for ids in self.grid.cells() {
+        for ids in self.grid.cells(|_| true) {
+            debug!("cellmates: {}", ids.clone().join(", "));
             cell.clear();
-            cell.extend_from_slice(ids);
+            cell.extend(ids);
             Self::calculate_collisions_in_cell(&cell, &self.objects, &mut self.timeline);
         }
     }
 
-    pub(crate) fn calculate_collisions_in_cell(
+    pub fn calculate_collisions_in_cell(
         cell: &[ObjectId],
         objects: &Slab<Object>,
         timeline: &mut Timeline,
@@ -146,6 +156,7 @@ impl CollisionDetector {
                     });
 
                     if collision_matters {
+                        timeline.remove_events(|event| event.contains(id1) && event.contains(id2));
                         timeline.add_event(EventKind::Collision, collision_time, id1, id2);
                     }
                 }

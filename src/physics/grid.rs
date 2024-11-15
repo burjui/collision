@@ -1,114 +1,167 @@
 use crate::physics::object::ObjectId;
 use cgmath::Vector2;
-use std::collections::{HashMap, HashSet};
-use std::ops::{Deref, Range};
+use derive_deref::Deref;
+use log::debug;
+use petgraph::{
+    graph::{NodeIndex, UnGraph},
+    visit::IntoNodeReferences,
+};
 
-pub(crate) struct GridBuilder {
-    objects: Vec<(ObjectId, Vector2<f64>, Vector2<f64>)>,
+#[derive(Clone, Copy)]
+enum Node {
+    Object {
+        object: ObjectId,
+        position: Vector2<f64>,
+        size: f64,
+    },
+    Cell {
+        i: usize,
+        j: usize,
+    },
+}
+
+type Relations = UnGraph<Node, ()>;
+
+#[derive(Deref)]
+pub struct ReadOnly<T>(T);
+
+pub struct GridBuilder {
+    relations: Relations,
     start: Vector2<f64>,
     cell_size: f64,
 }
 
 impl GridBuilder {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         GridBuilder {
-            objects: Vec::new(),
+            relations: UnGraph::default(),
             start: Vector2::new(f64::MAX, f64::MAX),
             cell_size: 0.0,
         }
     }
 
-    pub(crate) fn add(&mut self, id: ObjectId, position: Vector2<f64>, size: f64) {
+    pub fn add(&mut self, id: ObjectId, position: Vector2<f64>, size: f64) {
+        self.relations.add_node(Node::Object {
+            object: id,
+            position,
+            size,
+        });
         let half_size = size * 0.5;
-        let object_start = Vector2::new(position.x - half_size, position.y - half_size);
-        let object_end = Vector2::new(position.x + half_size, position.y + half_size);
-        self.objects.push((id, object_start, object_end));
-        self.start.x = self.start.x.min(object_start.x);
-        self.start.y = self.start.y.min(object_start.y);
+        self.start.x = self.start.x.min(position.x - half_size);
+        self.start.y = self.start.y.min(position.y - half_size);
         self.cell_size = self.cell_size.max(size * 2.0);
     }
 
-    pub(crate) fn build(self) -> ReadOnly<Grid> {
-        let mut size = Vector2::new(0, 0);
-        let unique_obj_cells = {
-            let mut obj_cells = HashMap::new();
-            if self.cell_size > 0.0 {
-                for (id, start, end) in self.objects {
-                    for (x, y) in [
-                        (start.x, start.y),
-                        (start.x, end.y),
-                        (end.x, start.y),
-                        (end.x, end.y),
-                    ] {
-                        let cell @ (cell_x, cell_y) = cell(self.start, self.cell_size, (x, y));
-                        size.x = size.x.max(cell_x);
-                        size.y = size.y.max(cell_y);
-                        obj_cells
-                            .entry(cell)
-                            .or_insert_with(HashSet::new)
-                            .insert(id);
+    pub fn build(mut self) -> Grid {
+        let mut grid_size = Vector2::new(0, 0);
+        for (object_index, node) in self
+            .relations
+            .node_references()
+            .map(|(index, node)| (index, *node))
+            .collect::<Vec<_>>()
+        {
+            if let Node::Object { position, size, .. } = node {
+                let start = position - Vector2::new(size * 0.5, size * 0.5);
+                let end = start + Vector2::new(size, size);
+                for (x, y) in [
+                    (start.x, start.y),
+                    (start.x, end.y),
+                    (end.x, start.y),
+                    (end.x, end.y),
+                ] {
+                    let (cell_i, cell_j) = cell(self.start, self.cell_size, (x, y));
+                    grid_size.x = grid_size.x.max(cell_i);
+                    grid_size.y = grid_size.y.max(cell_j);
+                    let cell_index = self
+                        .relations
+                        .node_references()
+                        .find_map(|(cell_index, node)| match *node {
+                            Node::Cell { i, j } if i == cell_i && j == cell_j => Some(cell_index),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| {
+                            // debug!("add cell ({}, {})", cell_i, cell_j);
+                            self.relations.add_node(Node::Cell {
+                                i: cell_i,
+                                j: cell_j,
+                            })
+                        });
+
+                    if !self.relations.contains_edge(object_index, cell_index) {
+                        debug!(
+                            "add edge ({:?}) -> {:?}",
+                            self.node(object_index),
+                            self.node(cell_index)
+                        );
+                        self.relations.add_edge(object_index, cell_index, ());
                     }
                 }
             }
-
-            obj_cells
-        };
-
-        let mut objects = Vec::with_capacity(unique_obj_cells.len());
-        let mut cells = Vec::new();
-        let mut obj_cells_offset = 0;
-        for (_, mates) in unique_obj_cells {
-            let mut obj_in_cell_count = 0;
-            for id in mates {
-                obj_in_cell_count += 1;
-                objects.push(id);
-            }
-            cells.push(obj_cells_offset..obj_cells_offset + obj_in_cell_count);
-            obj_cells_offset += obj_in_cell_count;
         }
 
-        ReadOnly(Grid {
+        Grid {
             position: self.start,
-            size,
+            size: grid_size,
             cell_size: self.cell_size,
-            objects,
-            cells,
-        })
+            relations: self.relations,
+        }
+    }
+
+    fn node(&self, index: NodeIndex) -> String {
+        match self.relations[index] {
+            Node::Object { object, .. } => format!("object {}", object),
+            Node::Cell { i, j } => format!("cell ({}, {})", i, j),
+        }
     }
 }
 
-pub(crate) struct ReadOnly<T>(T);
-
-impl<T> Deref for ReadOnly<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub(crate) struct Grid {
-    pub(crate) position: Vector2<f64>,
-    pub(crate) size: Vector2<usize>,
-    pub(crate) cell_size: f64,
-    pub(crate) objects: Vec<ObjectId>,
-    pub(crate) cells: Vec<Range<usize>>, // indices into objects
+pub struct Grid {
+    pub position: Vector2<f64>,
+    pub size: Vector2<usize>,
+    pub cell_size: f64,
+    relations: UnGraph<Node, ()>,
 }
 
 impl Grid {
-    pub(crate) fn cells(&self) -> impl Iterator<Item = &'_ [ObjectId]> + '_ {
-        self.cells.iter().map(|range| &self.objects[range.clone()])
+    pub fn new() -> Self {
+        Self {
+            position: Vector2::new(0.0, 0.0),
+            size: Vector2::new(0, 0),
+            cell_size: 0.0,
+            relations: UnGraph::default(),
+        }
     }
-}
 
-pub(crate) fn empty_grid() -> ReadOnly<Grid> {
-    ReadOnly(Grid {
-        position: Vector2::new(0.0, 0.0),
-        size: Vector2::new(0, 0),
-        cell_size: 0.0,
-        objects: Vec::new(),
-        cells: Vec::new(),
-    })
+    pub fn is_empty(&self) -> bool {
+        self.relations.node_count() == 0
+    }
+
+    pub fn cells(
+        &self,
+        object_predicate: impl Fn(ObjectId) -> bool + 'static,
+    ) -> impl Iterator<Item = impl Iterator<Item = ObjectId> + Clone + '_> {
+        self.relations
+            .node_references()
+            .filter_map(move |(index, node)| match *node {
+                Node::Object { object: id, .. } if object_predicate(id) => Some(index),
+                _ => None,
+            })
+            .flat_map(|object_index| {
+                self.relations.neighbors(object_index).map(|cell_index| {
+                    match self.relations[cell_index] {
+                        Node::Cell { .. } => {
+                            self.relations
+                                .neighbors(cell_index)
+                                .filter_map(|neighbor_index| match self.relations[neighbor_index] {
+                                    Node::Object { object, .. } => Some(object),
+                                    _ => None,
+                                })
+                        }
+                        _ => unreachable!("not a cell"),
+                    }
+                })
+            })
+    }
 }
 
 type Cell = (usize, usize);

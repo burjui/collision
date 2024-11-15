@@ -1,11 +1,11 @@
-pub(crate) struct UniquePermutation2<'a, T> {
+pub struct UniquePermutation2<'a, T> {
     items: &'a [T],
     state: u32,
 }
 
 impl<'a, T> UniquePermutation2<'a, T> {
     #[must_use]
-    pub(crate) fn new(items: &'a [T]) -> Self {
+    pub fn new(items: &'a [T]) -> Self {
         assert!(items.len() >= 2);
         Self { items, state: 0b11 }
     }

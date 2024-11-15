@@ -11,7 +11,7 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    pub(crate) fn add_event(&mut self, kind: EventKind, time: f64, id1: ObjectId, id2: ObjectId) {
+    pub fn add_event(&mut self, kind: EventKind, time: f64, id1: ObjectId, id2: ObjectId) {
         self.events.push(Event {
             time,
             kind,
@@ -20,11 +20,11 @@ impl Timeline {
         });
     }
 
-    pub(crate) fn time(&self) -> f64 {
+    pub fn time(&self) -> f64 {
         self.time
     }
 
-    pub(crate) fn advance(&mut self, dt: f64) -> Option<(Event, f64)> {
+    pub fn advance(&mut self, dt: f64) -> Option<(Event, f64)> {
         assert!(dt >= 0.0);
 
         let final_time = self.time + dt;
@@ -41,25 +41,25 @@ impl Timeline {
             })
     }
 
-    pub(crate) fn remove_events(&mut self, mut pred: impl FnMut(&Event) -> bool) {
+    pub fn remove_events(&mut self, mut pred: impl FnMut(&Event) -> bool) {
         self.events.retain(|event| !pred(event))
     }
 
-    pub(crate) fn contains_any_events(&self, pred: impl FnMut(&Event) -> bool) -> bool {
+    pub fn contains_any_events(&self, pred: impl FnMut(&Event) -> bool) -> bool {
         self.events.iter().any(pred)
     }
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct Event {
-    pub(crate) kind: EventKind,
-    pub(crate) time: f64,
-    pub(crate) id1: ObjectId,
-    pub(crate) id2: ObjectId,
+pub struct Event {
+    pub kind: EventKind,
+    pub time: f64,
+    pub id1: ObjectId,
+    pub id2: ObjectId,
 }
 
 impl Event {
-    pub(crate) fn contains(&self, id: ObjectId) -> bool {
+    pub fn contains(&self, id: ObjectId) -> bool {
         self.id1 == id || self.id2 == id
     }
 }

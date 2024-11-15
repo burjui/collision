@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use core::option::Option;
 use core::option::Option::{None, Some};
-use static_assertions::const_assert;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::time::Instant;
@@ -23,7 +22,9 @@ impl FpsCalculator {
         let frame_count = u128::try_from(frame_count).context("FpsCalculator::update")?;
 
         const FRAMES_MEASURE_PERIOD_MILLIS: u128 = 100;
-        const_assert!(FRAMES_MEASURE_PERIOD_MILLIS > 0);
+        const {
+            assert!(FRAMES_MEASURE_PERIOD_MILLIS > 0);
+        }
 
         let now = Instant::now();
         if (now - self.last_measure_time).as_millis() >= FRAMES_MEASURE_PERIOD_MILLIS {
@@ -33,7 +34,9 @@ impl FpsCalculator {
 
         if let Some((measure_start, start_frame_count)) = self.frame_count_queue.front().cloned() {
             const STATS_AVERAGING_PERIOD_MILLIS: u128 = 300;
-            const_assert!(STATS_AVERAGING_PERIOD_MILLIS > 0);
+            const {
+                assert!(STATS_AVERAGING_PERIOD_MILLIS > 0);
+            }
 
             let period_millis = (now - measure_start).as_millis();
             if period_millis > STATS_AVERAGING_PERIOD_MILLIS {
