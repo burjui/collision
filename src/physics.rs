@@ -3,6 +3,7 @@ use core::option::Option;
 use core::option::Option::{None, Some};
 
 use cgmath::{InnerSpace, Vector2};
+use grid::ObjectIndex;
 use log::debug;
 use slab::Slab;
 
@@ -12,7 +13,6 @@ use timeline::EventKind;
 
 use crate::physics::permutation::UniquePermutation2;
 use crate::physics::timeline::Timeline;
-use itertools::Itertools;
 
 mod grid;
 pub mod object;
@@ -74,6 +74,15 @@ impl CollisionDetector {
                 EventKind::Collision => {
                     self.collide(event.id1, event.id2);
                     self.calculate_collisions();
+
+                    for &cell_index in self.grid.cells_for_object(event.id1) {
+                        Self::calculate_collisions_in_cell(
+                            &self.grid[cell_index].objects,
+                            &self.grid,
+                            &self.objects,
+                            &mut self.timeline,
+                        );
+                    }
                     // let mut current_cell = Vec::new();
                     // for cell in self
                     //     .grid
@@ -111,7 +120,7 @@ impl CollisionDetector {
     fn build_grid(&mut self) -> Grid {
         let mut grid_builder = GridBuilder::new();
         for (id, object) in &self.objects {
-            grid_builder.add(ObjectId(id), object.position, object.size);
+            grid_builder.add_object(ObjectId(id), object.position, object.size);
         }
         grid_builder.build()
     }
@@ -120,22 +129,26 @@ impl CollisionDetector {
         debug!("SCANNING FOR COLLISIONS (now {})", self.timeline.time());
 
         self.grid = self.build_grid();
-        let mut cell = Vec::<ObjectId>::new();
-        for ids in self.grid.cells(|_| true) {
-            debug!("cellmates: {}", ids.clone().join(", "));
-            cell.clear();
-            cell.extend(ids);
-            Self::calculate_collisions_in_cell(&cell, &self.objects, &mut self.timeline);
+        for cell in &self.grid.cells {
+            // debug!("cellmates: {}", cell_index.clone().join(", "));
+            Self::calculate_collisions_in_cell(
+                &cell.objects,
+                &self.grid,
+                &self.objects,
+                &mut self.timeline,
+            );
         }
     }
 
     pub fn calculate_collisions_in_cell(
-        cell: &[ObjectId],
+        cell: &[ObjectIndex],
+        grid: &Grid,
         objects: &Slab<Object>,
         timeline: &mut Timeline,
     ) {
         if cell.len() >= 2 {
-            for (id1, id2) in UniquePermutation2::new(cell) {
+            for (index1, index2) in UniquePermutation2::new(cell) {
+                let (id1, id2) = (grid[index1].object, grid[index2].object);
                 let (o1, o2) = (&objects[id1.0], &objects[id2.0]);
                 if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
                     let collision_time = timeline.time() + delay;
