@@ -30,7 +30,7 @@ impl GridBuilder {
         let half_size = size * 0.5;
         self.start.x = self.start.x.min(position.x - half_size);
         self.start.y = self.start.y.min(position.y - half_size);
-        self.cell_size = self.cell_size.max(size * 2.0);
+        self.cell_size = self.cell_size.max(size * 1.1);
         index
     }
 

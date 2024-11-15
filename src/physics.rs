@@ -131,7 +131,13 @@ impl CollisionDetector {
                 let (o1, o2) = (&objects[id1.0], &objects[id2.0]);
                 if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
                     let collision_time = timeline.time() + delay;
-                    let collision_matters = !timeline.contains_any_events(|event| {
+                    let mut interesting_events = timeline
+                        .object_events(id1)
+                        .into_iter()
+                        .flatten()
+                        .chain(timeline.object_events(id2).into_iter().flatten());
+                    debug!("{} interesting events", interesting_events.clone().count());
+                    let collision_matters = !interesting_events.any(|event| {
                         let these_are_separating = || {
                             event.contains(id1)
                                 && event.contains(id2)

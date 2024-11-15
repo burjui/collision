@@ -1,6 +1,6 @@
 use core::option::Option;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 
 use super::object::ObjectId;
 
@@ -8,16 +8,19 @@ use super::object::ObjectId;
 pub struct Timeline {
     time: f64,
     events: BinaryHeap<Event>,
+    events_by_id: HashMap<ObjectId, Vec<Event>>,
 }
 
 impl Timeline {
     pub fn add_event(&mut self, kind: EventKind, time: f64, id1: ObjectId, id2: ObjectId) {
-        self.events.push(Event {
+        let event = Event {
             time,
             kind,
             id1,
             id2,
-        });
+        };
+        self.events.push(event);
+        self.events_by_id.entry(id1).or_default().push(event);
     }
 
     pub fn len(&self) -> usize {
@@ -46,11 +49,14 @@ impl Timeline {
     }
 
     pub fn remove_events(&mut self, mut pred: impl FnMut(&Event) -> bool) {
-        self.events.retain(|event| !pred(event))
+        self.events.retain(|event| !pred(event));
+        for events in self.events_by_id.values_mut() {
+            events.retain(|event| !pred(event));
+        }
     }
 
-    pub fn contains_any_events(&self, pred: impl FnMut(&Event) -> bool) -> bool {
-        self.events.iter().any(pred)
+    pub fn object_events(&self, id: ObjectId) -> Option<&[Event]> {
+        self.events_by_id.get(&id).map(Vec::as_slice)
     }
 }
 
