@@ -20,6 +20,10 @@ impl Timeline {
         });
     }
 
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
     pub fn time(&self) -> f64 {
         self.time
     }

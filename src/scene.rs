@@ -27,7 +27,5 @@ pub fn create_scene(collision_detector: &mut CollisionDetector) {
         }
     }
 
-    collision_detector.calculate_collisions();
-
     // include!(concat!("../", emitted_scene_path!()));
 }

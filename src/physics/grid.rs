@@ -38,15 +38,12 @@ impl GridBuilder {
         let mut grid_size = Vector2::new(0, 0);
         let mut cell_indices = HashMap::new();
 
-        for (
-            object_index,
-            GridObject {
-                position,
-                size,
-                cells: object_cells,
-                ..
-            },
-        ) in self.grid.objects.iter_mut().enumerate()
+        for GridObject {
+            object,
+            position,
+            size,
+            cells: object_cells,
+        } in &mut self.grid.objects
         {
             let start = *position - Vector2::new(*size * 0.5, *size * 0.5);
             let end = start + Vector2::new(*size, *size);
@@ -70,9 +67,7 @@ impl GridBuilder {
                 });
                 object_cells.push(CellIndex(cell_index));
 
-                self.grid.cells[cell_index]
-                    .objects
-                    .push(ObjectIndex(object_index));
+                self.grid.cells[cell_index].objects.push(*object);
             }
         }
 
@@ -88,7 +83,7 @@ pub struct GridObject {
 }
 
 pub struct GridCell {
-    pub objects: Vec<ObjectIndex>,
+    pub objects: Vec<ObjectId>,
 }
 
 #[derive(Copy, Clone, Deref)]
