@@ -39,7 +39,7 @@ impl Timeline {
             .peek()
             .filter(|event| event.time < final_time)
             .map(|event| {
-                self.time = event.time;
+                self.time = event.time + f64::EPSILON;
                 Some((*event, final_time - event.time))
             })
             .unwrap_or_else(|| {
