@@ -9,7 +9,7 @@ use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::MouseButton;
-use sdl2::pixels::Color;
+use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::{Texture, TextureCreator, WindowCanvas};
 use sdl2::ttf::Font;
@@ -17,23 +17,24 @@ use sdl2::video::WindowContext;
 use sdl2::EventPump;
 
 use physics::object::{Object, ObjectId};
+use video_rs::encode::Settings;
+use video_rs::{Encoder, Frame, Time};
 
 use crate::config::Config;
-use crate::fenv::{feenableexcept, FE_INVALID};
 use crate::fps::FpsCalculator;
 use crate::physics::CollisionDetector;
 use crate::scene::*;
 
 mod config;
-mod fenv;
 mod fps;
 mod physics;
 
 #[macro_use]
 mod scene;
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     env_logger::init();
+    video_rs::init().expect("init video-rs");
 
     let config = Config::from_file(Path::new("config.toml")).context("load config")?;
 
@@ -77,17 +78,32 @@ fn main() -> Result<()> {
         },
     };
 
-    #[cfg(unix)]
-    unsafe {
-        // Catch NaNs as SIGFPE
-        feenableexcept(FE_INVALID);
-    }
+    // Interferes with ffmpeg, disable for now
+    // #[cfg(unix)]
+    // unsafe {
+    //     // Catch NaNs as SIGFPE
+    //     feenableexcept(FE_INVALID);
+    // }
 
     let mut collision_detector = CollisionDetector::new();
     create_scene(&mut collision_detector);
 
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
+
+    let mut encoder = Encoder::new(
+        Path::new("scene.mp4"),
+        Settings::preset_h264_yuv420p(
+            config.screen_width as usize,
+            config.screen_height as usize,
+            false,
+        ),
+    )
+    .context("failed to create encoder")?;
+
+    let frame_duration: Time = Time::from_nth_of_a_second(60);
+    let mut last_frame_position = Time::zero();
+    let mut last_frame_timestamp = collision_detector.time();
 
     'running: loop {
         match process_events(
@@ -101,7 +117,7 @@ fn main() -> Result<()> {
         }
 
         if advance_time {
-            collision_detector.advance(0.003);
+            collision_detector.advance(0.001);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -139,9 +155,46 @@ fn main() -> Result<()> {
         }
 
         canvas.present();
+
+        let frame_sim_duration = 0.3 / 60.0;
+        if collision_detector.time() - last_frame_timestamp >= frame_sim_duration {
+            last_frame_timestamp += frame_sim_duration;
+            encode_frame(&canvas, &config, &mut encoder, last_frame_position)?;
+            last_frame_position = last_frame_position.aligned_with(frame_duration).add();
+        }
+
         frame_count += 1;
     }
 
+    encoder.finish().expect("failed to finish encoder");
+
+    Ok(())
+}
+
+fn encode_frame(
+    canvas: &sdl2::render::Canvas<sdl2::video::Window>,
+    config: &Config,
+    encoder: &mut Encoder,
+    position: Time,
+) -> Result<(), anyhow::Error> {
+    let frame = canvas
+        .read_pixels(
+            Rect::new(0, 0, config.screen_width, config.screen_height),
+            PixelFormatEnum::RGB24,
+        )
+        .expect("read pixels");
+    let frame = Frame::from_shape_vec(
+        (
+            config.screen_width as usize,
+            config.screen_height as usize,
+            3,
+        ),
+        frame,
+    )
+    .context("frame conversion")?;
+    encoder
+        .encode(&frame, position)
+        .expect("failed to encode frame");
     Ok(())
 }
 

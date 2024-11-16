@@ -9,7 +9,7 @@ macro_rules! emitted_scene_path {
     };
 }
 
-const DEFAULT_PARTICLE_SIZE: f64 = 3.0;
+const DEFAULT_PARTICLE_SIZE: f64 = 4.0;
 const DEFAULT_PARTICLE_SPACING: f64 = 1.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
@@ -18,8 +18,7 @@ pub fn create_scene(collision_detector: &mut CollisionDetector) {
     create_wall(collision_detector, wall);
 
     let mut ball = Ball::new((500.0, 300.0), 14.0);
-    ball.velocity = Vector2::new(-400.0, 0.0);
-    ball.particle_mass = 5.0;
+    ball.velocity = Vector2::new(-1000.0, 0.0);
     create_ball(collision_detector, ball);
 
     // include!(concat!("../", emitted_scene_path!()));
