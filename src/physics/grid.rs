@@ -105,15 +105,6 @@ impl Grid {
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
     }
-
-    pub fn cells_for_object(&self, object: ObjectId) -> &[CellIndex] {
-        &self
-            .objects
-            .iter()
-            .find(|existing| existing.object == object)
-            .unwrap()
-            .cells
-    }
 }
 
 impl Index<CellIndex> for Grid {

@@ -43,6 +43,14 @@ impl CollisionDetector {
             .map(|(id, object)| (ObjectId(id), *object))
     }
 
+    pub fn object_mut(&mut self, id: ObjectId) -> &mut Object {
+        &mut self.objects[id.0]
+    }
+
+    pub fn object_count(&self) -> usize {
+        self.objects.len()
+    }
+
     pub fn grid_position(&self) -> Option<Vector2<f64>> {
         if self.grid.is_empty() {
             None
@@ -73,14 +81,6 @@ impl CollisionDetector {
                 EventKind::Collision => {
                     self.collide(event.id1, event.id2);
                     self.calculate_collisions();
-
-                    for &cell_index in self.grid.cells_for_object(event.id1) {
-                        Self::calculate_collisions_in_cell(
-                            &self.grid[cell_index],
-                            &self.objects,
-                            &mut self.timeline,
-                        );
-                    }
                 }
 
                 EventKind::Separation => self.separate(event.id1, event.id2),
@@ -95,10 +95,6 @@ impl CollisionDetector {
 
     pub fn time(&self) -> f64 {
         self.timeline.time()
-    }
-
-    pub fn object_mut(&mut self, id: ObjectId) -> &mut Object {
-        &mut self.objects[id.0]
     }
 
     #[must_use]

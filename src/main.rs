@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     let mut render_settings = RenderSettings {
         with_grid: false,
         details: RenderDetails {
-            circle: false,
+            circle: true,
             id: false,
             velocity: false,
         },
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
     let mut collision_detector = CollisionDetector::new();
     create_scene(&mut collision_detector);
 
-    let mut advance_time = true;
+    let mut advance_time = false;
     let mut min_fps = u128::MAX;
 
     'running: loop {
@@ -118,8 +118,9 @@ fn main() -> Result<()> {
         if let Some(fps) = fps_calculator.update(frame_count)? {
             min_fps = min_fps.min(fps);
             let stats_string = format!(
-                "FPS: {fps} (min {min_fps})\ntime: {}",
-                collision_detector.time()
+                "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}",
+                collision_detector.time(),
+                collision_detector.object_count()
             );
             stats_text = Some(render_text(
                 &stats_string,
