@@ -1,8 +1,9 @@
 use std::{collections::HashMap, ops::Index};
 
-use crate::physics::object::ObjectId;
 use cgmath::Vector2;
 use derive_deref::Deref;
+
+use crate::physics::object::ObjectId;
 
 pub struct GridBuilder {
     grid: Grid,

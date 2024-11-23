@@ -1,7 +1,9 @@
 use cgmath::{InnerSpace, Vector2};
 
-use crate::physics::object::{Object, ObjectId};
-use crate::physics::CollisionDetector;
+use crate::physics::{
+    object::{Object, ObjectId},
+    CollisionDetector,
+};
 
 macro_rules! emitted_scene_path {
     () => {

@@ -1,6 +1,8 @@
 use core::option::Option;
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::{
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap},
+};
 
 use super::object::ObjectId;
 

@@ -1,29 +1,24 @@
-use std::fs::File;
-use std::path::Path;
+use std::{fs::File, path::Path};
 
-use anyhow::anyhow;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use cgmath::{InnerSpace, Vector2};
 use itertools::Itertools;
-use sdl2::event::Event;
-use sdl2::gfx::primitives::DrawRenderer;
-use sdl2::keyboard::Keycode;
-use sdl2::mouse::MouseButton;
-use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::rect::Rect;
-use sdl2::render::{Texture, TextureCreator, WindowCanvas};
-use sdl2::ttf::Font;
-use sdl2::video::WindowContext;
-use sdl2::EventPump;
-
 use physics::object::{Object, ObjectId};
-use video_rs::encode::Settings;
-use video_rs::{Encoder, Frame, Time};
+use sdl2::{
+    event::Event,
+    gfx::primitives::DrawRenderer,
+    keyboard::Keycode,
+    mouse::MouseButton,
+    pixels::{Color, PixelFormatEnum},
+    rect::Rect,
+    render::{Texture, TextureCreator, WindowCanvas},
+    ttf::Font,
+    video::WindowContext,
+    EventPump,
+};
+use video_rs::{encode::Settings, Encoder, Frame, Time};
 
-use crate::config::Config;
-use crate::fps::FpsCalculator;
-use crate::physics::CollisionDetector;
-use crate::scene::*;
+use crate::{config::Config, fps::FpsCalculator, physics::CollisionDetector, scene::*};
 
 mod config;
 mod fps;

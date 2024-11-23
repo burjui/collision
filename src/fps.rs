@@ -1,9 +1,10 @@
+use core::option::{
+    Option,
+    Option::{None, Some},
+};
+use std::{collections::VecDeque, convert::TryFrom, time::Instant};
+
 use anyhow::{Context, Result};
-use core::option::Option;
-use core::option::Option::{None, Some};
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::time::Instant;
 
 pub struct FpsCalculator {
     last_measure_time: Instant,

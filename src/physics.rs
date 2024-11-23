@@ -1,17 +1,22 @@
-use core::iter::Iterator;
-use core::option::Option;
-use core::option::Option::{None, Some};
+use core::{
+    iter::Iterator,
+    option::{
+        Option,
+        Option::{None, Some},
+    },
+};
 
 use cgmath::{InnerSpace, Vector2};
 use log::debug;
-use slab::Slab;
-
-use crate::physics::grid::{Grid, GridBuilder};
 use object::{Object, ObjectId};
+use slab::Slab;
 use timeline::EventKind;
 
-use crate::physics::permutation::UniquePermutation2;
-use crate::physics::timeline::Timeline;
+use crate::physics::{
+    grid::{Grid, GridBuilder},
+    permutation::UniquePermutation2,
+    timeline::Timeline,
+};
 
 mod grid;
 pub mod object;

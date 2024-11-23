@@ -1,11 +1,8 @@
-use anyhow::anyhow;
-use anyhow::Context;
+use std::{fmt::Display, fs::File, io::Read, path::Path};
+
+use anyhow::{anyhow, Context};
 use num_traits::Zero;
 use serde_derive::Deserialize;
-use std::fmt::Display;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
 
 #[derive(Deserialize)]
 pub struct Config {
