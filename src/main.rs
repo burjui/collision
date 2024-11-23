@@ -91,8 +91,11 @@ fn main() -> anyhow::Result<()> {
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
 
+    let output_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "output.mp4".to_string());
     let mut encoder = Encoder::new(
-        Path::new("scene.mp4"),
+        Path::new(&output_path),
         Settings::preset_h264_yuv420p(
             config.screen_width as usize,
             config.screen_height as usize,
@@ -117,7 +120,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            collision_detector.advance(0.001);
+            collision_detector.advance(1.0 / 600.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
