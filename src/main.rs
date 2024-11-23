@@ -32,7 +32,17 @@ mod physics;
 #[macro_use]
 mod scene;
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short)]
+    video_output_path: Option<String>,
+}
+
 fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
     env_logger::init();
     video_rs::init().expect("init video-rs");
 
@@ -91,18 +101,20 @@ fn main() -> anyhow::Result<()> {
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
 
-    let output_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "output.mp4".to_string());
-    let mut encoder = Encoder::new(
-        Path::new(&output_path),
-        Settings::preset_h264_yuv420p(
-            config.screen_width as usize,
-            config.screen_height as usize,
-            false,
-        ),
-    )
-    .context("failed to create encoder")?;
+    let mut video_encoder = args
+        .video_output_path
+        .map(|video_output_path| {
+            Encoder::new(
+                Path::new(&video_output_path),
+                Settings::preset_h264_yuv420p(
+                    config.screen_width as usize,
+                    config.screen_height as usize,
+                    false,
+                ),
+            )
+            .context("failed to create encoder")
+        })
+        .transpose()?;
 
     let frame_duration: Time = Time::from_nth_of_a_second(60);
     let mut last_frame_position = Time::zero();
@@ -160,16 +172,20 @@ fn main() -> anyhow::Result<()> {
         canvas.present();
 
         let frame_sim_duration = 0.3 / 60.0;
-        if collision_detector.time() - last_frame_timestamp >= frame_sim_duration {
-            last_frame_timestamp += frame_sim_duration;
-            encode_frame(&canvas, &config, &mut encoder, last_frame_position)?;
-            last_frame_position = last_frame_position.aligned_with(frame_duration).add();
+        if let Some(video_encoder) = &mut video_encoder {
+            if collision_detector.time() - last_frame_timestamp >= frame_sim_duration {
+                last_frame_timestamp += frame_sim_duration;
+                encode_frame(&canvas, &config, video_encoder, last_frame_position)?;
+                last_frame_position = last_frame_position.aligned_with(frame_duration).add();
+            }
         }
 
         frame_count += 1;
     }
 
-    encoder.finish().expect("failed to finish encoder");
+    if let Some(video_encoder) = &mut video_encoder {
+        video_encoder.finish().expect("failed to finish encoder");
+    }
 
     Ok(())
 }
