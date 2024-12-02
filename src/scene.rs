@@ -16,10 +16,10 @@ const DEFAULT_PARTICLE_SPACING: f64 = 1.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 pub fn create_scene(collision_detector: &mut CollisionDetector) {
-    let wall = Wall::new((140.0, 200.0), (200.0, 200.0));
+    let wall = Wall::new((700.0, 200.0), (200.0, 200.0));
     create_wall(collision_detector, wall);
 
-    let mut ball = Ball::new((500.0, 300.0), 14.0);
+    let mut ball = Ball::new((1200.0, 300.0), 14.0);
     ball.velocity = Vector2::new(-1000.0, 0.0);
     create_ball(collision_detector, ball);
 
