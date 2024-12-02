@@ -364,6 +364,21 @@ fn render_object(
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
+    if details.velocity {
+        let magnitude = object.velocity.magnitude() + 0.0000001;
+        let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
+        canvas
+            .aa_line(
+                object.position.x as i16,
+                object.position.y as i16,
+                (object.position.x + object.velocity.x * scale_factor) as i16,
+                (object.position.y + object.velocity.y * scale_factor) as i16,
+                Color::RGB(127, 0, 127),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object velocity vector")?;
+    }
+
     let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
     let particle_color = spectrum(spectrum_position);
     if details.circle {
@@ -403,21 +418,6 @@ fn render_object(
             .copy(&id_text_texture, id_text_rect, dst_rect)
             .map_err(string_to_anyhow)
             .context("copy object id text to the window surface")?;
-    }
-
-    if details.velocity {
-        let magnitude = object.velocity.magnitude() + 0.0000001;
-        let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
-        canvas
-            .aa_line(
-                object.position.x as i16,
-                object.position.y as i16,
-                (object.position.x + object.velocity.x * scale_factor) as i16,
-                (object.position.y + object.velocity.y * scale_factor) as i16,
-                Color::RGB(127, 0, 127),
-            )
-            .map_err(string_to_anyhow)
-            .context("render object velocity vector")?;
     }
 
     Ok(())
