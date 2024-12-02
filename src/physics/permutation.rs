@@ -11,7 +11,7 @@ impl<'a, T> UniquePermutation2<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for UniquePermutation2<'a, T>
+impl<T> Iterator for UniquePermutation2<'_, T>
 where
     T: Clone,
 {
