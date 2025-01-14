@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            collision_detector.advance(1.0 / 6000.0);
+            collision_detector.advance(1.0 / 600.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -345,21 +345,21 @@ fn render_object(
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
     if details.velocity {
-        let magnitude = object.velocity().magnitude() + 0.0000001;
+        let magnitude = object.velocity.magnitude() + 0.0000001;
         let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
         canvas
             .aa_line(
                 object.position.x as i16,
                 object.position.y as i16,
-                (object.position.x + object.velocity().x * scale_factor) as i16,
-                (object.position.y + object.velocity().y * scale_factor) as i16,
+                (object.position.x + object.velocity.x * scale_factor) as i16,
+                (object.position.y + object.velocity.y * scale_factor) as i16,
                 Color::RGB(127, 0, 127),
             )
             .map_err(string_to_anyhow)
             .context("render object velocity vector")?;
     }
 
-    let spectrum_position = object.velocity().magnitude().sqrt().min(15.0) / 15.0;
+    let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
     let particle_color = spectrum(spectrum_position);
     if details.circle {
         canvas

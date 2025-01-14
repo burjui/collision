@@ -1,6 +1,6 @@
 use core::iter::Iterator;
 
-use cgmath::Vector2;
+use cgmath::{InnerSpace, Vector2};
 use log::debug;
 use object::{Object, ObjectId};
 
@@ -51,7 +51,6 @@ impl CollisionDetector {
     }
 
     fn update(&mut self, dt: f64) {
-        println!("dt: {}", dt);
         self.time += dt;
         self.process_collisions();
         self.update_objects(dt);
@@ -62,20 +61,15 @@ impl CollisionDetector {
     }
 
     fn process_collisions(&mut self) {
-        for id1 in (0..self.objects.len()).map(|id| ObjectId(id)) {
-            for id2 in (0..self.objects.len()).map(|id| ObjectId(id)) {
+        for id1 in 0..self.objects.len() {
+            for id2 in 0..self.objects.len() {
                 if id1 != id2 {
-                    let [o1, o2] = self
-                        .objects
-                        .get_many_mut([id1.0, id2.0])
-                        .expect("out of bounds or overlap");
+                    let [o1, o2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds or overlap");
                     if Self::intersect(o1, o2) {
                         debug!("COLLIDE {id1} {id2}");
-                        // Self::collision_elastic(objects, id1, id2);
                         let response_coef = 1.0;
                         let v = o1.position - o2.position;
-                        let dist2 = v.x * v.x + v.y * v.y;
-                        let dist = dist2.sqrt();
+                        let dist = v.magnitude();
                         let n = v / dist;
                         let o1_radius = o1.radius / 2.0;
                         let o2_radius = o2.radius / 2.0;
@@ -104,8 +98,6 @@ impl CollisionDetector {
 }
 
 fn update_object(object: &mut Object, dt: f64) {
-    let displacement = object.position - object.previous_position;
-    object.previous_position = object.position;
-    object.position += displacement + object.acceleration * (dt * dt);
+    object.position += object.velocity * dt + object.acceleration * (dt * dt);
     object.acceleration = Vector2::new(0.0, 0.0);
 }
