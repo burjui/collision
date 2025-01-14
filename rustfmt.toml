@@ -1,3 +1,4 @@
 imports_layout = "Mixed"
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
+max_width = 120

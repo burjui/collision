@@ -1,3 +1,5 @@
+#![feature(get_many_mut)]
+
 use std::{fs::File, path::Path};
 
 use anyhow::{anyhow, Context, Result};
@@ -43,9 +45,7 @@ fn main() -> anyhow::Result<()> {
 
     let config = Config::from_file(Path::new("config.toml")).context("load config")?;
 
-    let sdl_context = sdl2::init()
-        .map_err(string_to_anyhow)
-        .context("init SDL2")?;
+    let sdl_context = sdl2::init().map_err(string_to_anyhow).context("init SDL2")?;
     let video_subsystem = sdl_context
         .video()
         .map_err(string_to_anyhow)
@@ -56,11 +56,7 @@ fn main() -> anyhow::Result<()> {
         .position(1000, 0)
         .build()
         .context("create window")?;
-    let mut canvas = window
-        .into_canvas()
-        .accelerated()
-        .build()
-        .context("get canvas")?;
+    let mut canvas = window.into_canvas().accelerated().build().context("get canvas")?;
     let mut event_pump = sdl_context
         .event_pump()
         .map_err(string_to_anyhow)
@@ -101,11 +97,7 @@ fn main() -> anyhow::Result<()> {
         .map(|video_output_path| {
             Encoder::new(
                 Path::new(&video_output_path),
-                Settings::preset_h264_yuv420p(
-                    config.screen_width as usize,
-                    config.screen_height as usize,
-                    false,
-                ),
+                Settings::preset_h264_yuv420p(config.screen_width as usize, config.screen_height as usize, false),
             )
             .context("failed to create encoder")
         })
@@ -127,7 +119,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            collision_detector.advance(1.0 / 600.0);
+            collision_detector.advance(1.0 / 6000.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -197,18 +189,9 @@ fn encode_frame(
             PixelFormatEnum::RGB24,
         )
         .expect("read pixels");
-    let frame = Frame::from_shape_vec(
-        (
-            config.screen_width as usize,
-            config.screen_height as usize,
-            3,
-        ),
-        frame,
-    )
-    .context("frame conversion")?;
-    encoder
-        .encode(&frame, position)
-        .expect("failed to encode frame");
+    let frame = Frame::from_shape_vec((config.screen_width as usize, config.screen_height as usize, 3), frame)
+        .context("frame conversion")?;
+    encoder.encode(&frame, position).expect("failed to encode frame");
     Ok(())
 }
 
@@ -237,12 +220,7 @@ fn process_events(
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
             keydown!(Keycode::P) => emit_scene(collision_detector.objects()).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
-            keydown!(Keycode::Space) => {
-                *advance_time = !*advance_time;
-                if *advance_time {
-                    collision_detector.calculate_collisions();
-                }
-            }
+            keydown!(Keycode::Space) => *advance_time = !*advance_time,
 
             keydown!(Keycode::D) => {
                 render_settings.details = RenderDetails {
@@ -282,7 +260,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        collision_detector.object_mut(id).velocity += direction.normalize_to(100.0);
+                        collision_detector.object_mut(id).acceleration += direction.normalize_to(100.0);
                     }
                 }
             }
@@ -301,12 +279,14 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
     writeln!(file, "{{")?;
 
     for (_, object) in objects {
-        let Vector2 { x: px, y: py } = object.position;
-        let Vector2 { x: vx, y: vy } = object.velocity;
+        let Vector2 { x: ppx, y: ppy } = object.position;
+        let Vector2 { x: cpx, y: cpy } = object.position;
+        let Vector2 { x: ax, y: ay } = object.acceleration;
         writeln!(file, "collision_detector.add(Object {{")?;
-        writeln!(file, "    position: Vector2::new({:?}, {:?}),", px, py)?;
-        writeln!(file, "    velocity: Vector2::new({:?}, {:?}),", vx, vy)?;
-        writeln!(file, "    size: {:?},", object.size)?;
+        writeln!(file, "    previous_position: Vector2::new({ppx:?}, {ppy:?}),")?;
+        writeln!(file, "    position: Vector2::new({cpx:?}, {cpy:?}),")?;
+        writeln!(file, "    acceleration: Vector2::new({ax:?}, {ay:?}),")?;
+        writeln!(file, "    radius: {:?},", object.radius)?;
         writeln!(file, "    mass: {:?},", object.mass)?;
         writeln!(file, "}});")?;
     }
@@ -336,7 +316,7 @@ fn render_physics(
     settings: &RenderSettings,
 ) -> Result<()> {
     if settings.with_grid {
-        render_grid(collision_detector, canvas)?;
+        // render_grid(collision_detector, canvas)?;
     }
 
     let texture_creator = canvas.texture_creator();
@@ -365,39 +345,35 @@ fn render_object(
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
     if details.velocity {
-        let magnitude = object.velocity.magnitude() + 0.0000001;
+        let magnitude = object.velocity().magnitude() + 0.0000001;
         let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
         canvas
             .aa_line(
                 object.position.x as i16,
                 object.position.y as i16,
-                (object.position.x + object.velocity.x * scale_factor) as i16,
-                (object.position.y + object.velocity.y * scale_factor) as i16,
+                (object.position.x + object.velocity().x * scale_factor) as i16,
+                (object.position.y + object.velocity().y * scale_factor) as i16,
                 Color::RGB(127, 0, 127),
             )
             .map_err(string_to_anyhow)
             .context("render object velocity vector")?;
     }
 
-    let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
+    let spectrum_position = object.velocity().magnitude().sqrt().min(15.0) / 15.0;
     let particle_color = spectrum(spectrum_position);
     if details.circle {
         canvas
             .aa_circle(
                 object.position.x as i16,
                 object.position.y as i16,
-                (object.size * 0.5) as i16,
+                (object.radius * 0.5) as i16,
                 particle_color,
             )
             .map_err(string_to_anyhow)
             .context("render object circle")?;
     } else {
         canvas
-            .pixel(
-                object.position.x as i16,
-                object.position.y as i16,
-                particle_color,
-            )
+            .pixel(object.position.x as i16, object.position.y as i16, particle_color)
             .map_err(string_to_anyhow)
             .context("render object as pixel")?;
     }
@@ -412,8 +388,8 @@ fn render_object(
         )
         .context("draw_physics(): render object id text")?;
         let mut dst_rect = id_text_rect;
-        dst_rect.x += (object.position.x - object.size / 2.0) as i32;
-        dst_rect.y += (object.position.y - object.size / 2.0) as i32;
+        dst_rect.x += (object.position.x - object.radius / 2.0) as i32;
+        dst_rect.y += (object.position.y - object.radius / 2.0) as i32;
         canvas
             .copy(&id_text_texture, id_text_rect, dst_rect)
             .map_err(string_to_anyhow)
@@ -423,45 +399,45 @@ fn render_object(
     Ok(())
 }
 
-fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas) -> Result<()> {
-    let grid_position = collision_detector
-        .grid_position()
-        .ok_or_else(|| anyhow!("draw_physics(): grid_position()"))?;
-    let grid_size = collision_detector.grid_size();
-    let cell_size = collision_detector.grid_cell_size();
+// fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas) -> Result<()> {
+//     let grid_position = collision_detector
+//         .grid_position()
+//         .ok_or_else(|| anyhow!("draw_physics(): grid_position()"))?;
+//     let grid_size = collision_detector.grid_size();
+//     let cell_size = collision_detector.grid_cell_size();
 
-    let mut x = grid_position.x;
-    for _ in 0..=grid_size.x {
-        canvas
-            .line(
-                x as i16,
-                grid_position.y as i16,
-                x as i16,
-                (grid_position.y + cell_size * grid_size.y as f64) as i16,
-                Color::RGB(100, 100, 100),
-            )
-            .map_err(string_to_anyhow)
-            .context("render grid")?;
-        x += cell_size;
-    }
+//     let mut x = grid_position.x;
+//     for _ in 0..=grid_size.x {
+//         canvas
+//             .line(
+//                 x as i16,
+//                 grid_position.y as i16,
+//                 x as i16,
+//                 (grid_position.y + cell_size * grid_size.y as f64) as i16,
+//                 Color::RGB(100, 100, 100),
+//             )
+//             .map_err(string_to_anyhow)
+//             .context("render grid")?;
+//         x += cell_size;
+//     }
 
-    let mut y = grid_position.y;
-    for _ in 0..=grid_size.y {
-        canvas
-            .line(
-                grid_position.x as i16,
-                y as i16,
-                (grid_position.x + cell_size * grid_size.x as f64) as i16,
-                y as i16,
-                Color::RGB(100, 100, 100),
-            )
-            .map_err(string_to_anyhow)
-            .context("render grid")?;
-        y += cell_size;
-    }
+//     let mut y = grid_position.y;
+//     for _ in 0..=grid_size.y {
+//         canvas
+//             .line(
+//                 grid_position.x as i16,
+//                 y as i16,
+//                 (grid_position.x + cell_size * grid_size.x as f64) as i16,
+//                 y as i16,
+//                 Color::RGB(100, 100, 100),
+//             )
+//             .map_err(string_to_anyhow)
+//             .context("render grid")?;
+//         y += cell_size;
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 fn render_text<'texture>(
     s: &str,
