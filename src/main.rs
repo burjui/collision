@@ -366,7 +366,7 @@ fn render_object(
             .aa_circle(
                 object.position.x as i16,
                 object.position.y as i16,
-                (object.radius * 0.5) as i16,
+                object.radius as i16,
                 particle_color,
             )
             .map_err(string_to_anyhow)

@@ -1,7 +1,6 @@
 use core::iter::Iterator;
 
 use cgmath::{InnerSpace, Vector2};
-use log::debug;
 use object::{Object, ObjectId};
 
 mod grid;
@@ -62,42 +61,47 @@ impl CollisionDetector {
 
     fn process_collisions(&mut self) {
         for id1 in 0..self.objects.len() {
-            for id2 in 0..self.objects.len() {
+            for id2 in id1 + 1..self.objects.len() {
                 if id1 != id2 {
                     let [o1, o2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds or overlap");
-                    if Self::intersect(o1, o2) {
-                        debug!("COLLIDE {id1} {id2}");
-                        let response_coef = 1.0;
-                        let v = o1.position - o2.position;
-                        let dist = v.magnitude();
-                        let n = v / dist;
-                        let o1_radius = o1.radius / 2.0;
-                        let o2_radius = o2.radius / 2.0;
-                        let min_dist = o1_radius + o2_radius;
-                        let mass_ratio_1 = o1_radius / (o1_radius + o2_radius);
-                        let mass_ratio_2 = o2_radius / (o1_radius + o2_radius);
-                        let delta = 0.5 * response_coef * (dist - min_dist);
-                        // Update positions
-                        o1.position -= n * (mass_ratio_2 * delta);
-                        o2.position += n * (mass_ratio_1 * delta);
-                    }
+                    if intersects(o1, o2) {
+                        self.collide_elastic(id1, id2)
+                    };
                 }
             }
         }
     }
+    fn collide_elastic(&mut self, id1: usize, id2: usize) {
+        let [object1, object2] = self.objects.get_many_mut([id1, id2]).unwrap();
+        let [Object {
+            position: c1,
+            velocity: v1,
+            mass: m1,
+            ..
+        }, Object {
+            position: c2,
+            velocity: v2,
+            mass: m2,
+            ..
+        }] = [*object1, *object2];
+        object1.velocity =
+            v1 - ((c1 - c2).dot(v1 - v2) * (c1 - c2) * 2.0 * m2) * (1.0 / ((m1 + m2) * (c1 - c2).magnitude2()));
+        object2.velocity =
+            v2 - ((c2 - c1).dot(v2 - v1) * (c2 - c1) * 2.0 * m1) * (1.0 / ((m1 + m2) * (c2 - c1).magnitude2()));
+    }
 
     pub fn time(&self) -> f64 {
         self.time
-    }
-
-    fn intersect(o1: &Object, o2: &Object) -> bool {
-        let d = o1.position - o2.position;
-        let r = o1.radius + o2.radius;
-        d.x.abs() < r && d.y.abs() < r
     }
 }
 
 fn update_object(object: &mut Object, dt: f64) {
     object.position += object.velocity * dt + object.acceleration * (dt * dt);
     object.acceleration = Vector2::new(0.0, 0.0);
+}
+
+fn intersects(o1: &Object, o2: &Object) -> bool {
+    let d = o1.position - o2.position;
+    let r = o1.radius + o2.radius;
+    d.magnitude() < r
 }

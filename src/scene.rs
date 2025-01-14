@@ -16,10 +16,10 @@ const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 pub fn create_scene(collision_detector: &mut CollisionDetector) {
-    let wall = Wall::new((700.0, 200.0), (150.0, 150.0));
+    let wall = Wall::new((700.0, 200.0), (200.0, 200.0));
     create_wall(collision_detector, wall);
 
-    let mut ball = Ball::new((1000.0, 300.0), 14.0);
+    let mut ball = Ball::new((1000.0, 300.0), 20.0);
     ball.velocity = Vector2::new(-1000.0, 0.0);
     create_ball(collision_detector, ball);
 
@@ -47,7 +47,7 @@ impl Wall {
 }
 
 fn create_wall(collision_detector: &mut CollisionDetector, wall: Wall) -> Vec<ObjectId> {
-    let cell_size = wall.particle_radius + wall.particle_spacing;
+    let cell_size = wall.particle_radius * 2.0 + wall.particle_spacing;
     let dims = Vector2::new((wall.size.x / cell_size) as usize, (wall.size.y / cell_size) as usize);
     let mut result = Vec::new();
     for i in 0..dims.x {
@@ -96,8 +96,8 @@ fn create_ball(collision_detector: &mut CollisionDetector, ball: Ball) -> Vec<Ob
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
         for j in 0..num_particles {
-            let x = -ball.radius + (i as f64) * (ball.particle_radius + ball.particle_spacing);
-            let y = -ball.radius + (j as f64) * (ball.particle_radius + ball.particle_spacing);
+            let x = -ball.radius + (i as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let y = -ball.radius + (j as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;

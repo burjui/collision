@@ -12,12 +12,10 @@ pub struct Config {
 
 impl Config {
     pub fn from_file(config_path: &Path) -> anyhow::Result<Config> {
-        let mut config_file = File::open(config_path)
-            .context(format!("open config \"{}\"", config_path.to_string_lossy()))?;
+        let mut config_file =
+            File::open(config_path).context(format!("open config \"{}\"", config_path.to_string_lossy()))?;
         let mut config_string = String::new();
-        config_file
-            .read_to_string(&mut config_string)
-            .context("read config")?;
+        config_file.read_to_string(&mut config_string).context("read config")?;
         let config: Config = toml::from_str(&config_string).context("parse config")?;
         config.validate().context("validate config")?;
         Ok(config)
