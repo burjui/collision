@@ -22,6 +22,20 @@ pub fn create_scene(collision_detector: &mut CollisionDetector) {
     let mut ball = Ball::new((1000.0, 300.0), 20.0);
     ball.velocity = Vector2::new(-1000.0, 0.0);
     create_ball(collision_detector, ball);
+    // collision_detector.add(Object {
+    //     position: Vector2::new(1000.0, 300.0),
+    //     velocity: Vector2::new(-30.0, 0.0),
+    //     radius: 20.0,
+    //     mass: 100.0,
+    //     ..Default::default()
+    // });
+    // collision_detector.add(Object {
+    //     position: Vector2::new(900.0, 310.0),
+    //     velocity: Vector2::new(30.0, 0.0),
+    //     radius: 20.0,
+    //     mass: 100.0,
+    //     ..Default::default()
+    // });
 
     // include!(concat!("../", emitted_scene_path!()));
 }
@@ -107,7 +121,6 @@ fn create_ball(collision_detector: &mut CollisionDetector, ball: Ball) -> Vec<Ob
                     acceleration: ball.acceleration,
                     radius: ball.particle_radius,
                     mass: ball.particle_mass,
-                    ..Default::default()
                 });
                 result.push(id);
             }

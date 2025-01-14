@@ -1,6 +1,6 @@
 use core::iter::Iterator;
 
-use cgmath::{InnerSpace, Vector2};
+use cgmath::InnerSpace;
 use object::{Object, ObjectId};
 
 mod grid;
@@ -21,7 +21,7 @@ impl CollisionDetector {
 
     pub fn add(&mut self, object: Object) -> ObjectId {
         let id = ObjectId(self.objects.len());
-        self.objects.push(object);
+        self.objects.push(Object { ..object });
         id
     }
 
@@ -41,37 +41,41 @@ impl CollisionDetector {
     }
 
     pub fn advance(&mut self, dt: f64) {
-        self.update_substeps(dt, 8);
+        self.update_substeps(dt, 16);
     }
 
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
         let dt_substep = dt / substeps as f64;
-        (0..substeps).for_each(|_| self.update(dt_substep));
+        for _ in 0..substeps {
+            self.update(dt_substep)
+        }
     }
 
     fn update(&mut self, dt: f64) {
         self.time += dt;
-        self.process_collisions();
+        self.process_collisions(dt);
         self.update_objects(dt);
     }
 
     fn update_objects(&mut self, dt: f64) {
-        self.objects.iter_mut().for_each(|object| update_object(object, dt));
+        for object in &mut self.objects {
+            update_object(object, dt)
+        }
     }
 
-    fn process_collisions(&mut self) {
+    fn process_collisions(&mut self, dt: f64) {
         for id1 in 0..self.objects.len() {
             for id2 in id1 + 1..self.objects.len() {
                 if id1 != id2 {
                     let [o1, o2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds or overlap");
                     if intersects(o1, o2) {
-                        self.collide_elastic(id1, id2)
+                        self.collide_elastic(id1, id2, dt);
                     };
                 }
             }
         }
     }
-    fn collide_elastic(&mut self, id1: usize, id2: usize) {
+    fn collide_elastic(&mut self, id1: usize, id2: usize, dt: f64) {
         let [object1, object2] = self.objects.get_many_mut([id1, id2]).unwrap();
         let [Object {
             position: c1,
@@ -88,6 +92,10 @@ impl CollisionDetector {
             v1 - ((c1 - c2).dot(v1 - v2) * (c1 - c2) * 2.0 * m2) * (1.0 / ((m1 + m2) * (c1 - c2).magnitude2()));
         object2.velocity =
             v2 - ((c2 - c1).dot(v2 - v1) * (c2 - c1) * 2.0 * m1) * (1.0 / ((m1 + m2) * (c2 - c1).magnitude2()));
+        let coeff_m1 = m1 / (m1 + m2);
+        let coeff_m2 = m2 / (m1 + m2);
+        object1.position += (c1 - c2) * coeff_m1 * dt;
+        object2.position -= (c1 - c2) * coeff_m2 * dt;
     }
 
     pub fn time(&self) -> f64 {
@@ -96,8 +104,8 @@ impl CollisionDetector {
 }
 
 fn update_object(object: &mut Object, dt: f64) {
-    object.position += object.velocity * dt + object.acceleration * (dt * dt);
-    object.acceleration = Vector2::new(0.0, 0.0);
+    object.velocity += object.acceleration * dt;
+    object.position += object.velocity * dt;
 }
 
 fn intersects(o1: &Object, o2: &Object) -> bool {
