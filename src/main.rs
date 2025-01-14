@@ -260,7 +260,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        collision_detector.object_mut(id).acceleration += direction.normalize_to(100.0);
+                        collision_detector.object_mut(id).velocity += direction.normalize_to(100.0);
                     }
                 }
             }
