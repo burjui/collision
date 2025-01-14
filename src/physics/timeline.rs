@@ -4,17 +4,15 @@ use std::{
     collections::{BinaryHeap, HashMap},
 };
 
-use super::object::ObjectId;
-
 #[derive(Default)]
 pub struct Timeline {
     time: f64,
     events: BinaryHeap<Event>,
-    events_by_id: HashMap<ObjectId, Vec<Event>>,
+    events_by_id: HashMap<usize, Vec<Event>>,
 }
 
 impl Timeline {
-    pub fn add_event(&mut self, kind: EventKind, time: f64, id1: ObjectId, id2: ObjectId) {
+    pub fn add_event(&mut self, kind: EventKind, time: f64, id1: usize, id2: usize) {
         let event = Event {
             time,
             kind,
@@ -57,7 +55,7 @@ impl Timeline {
         }
     }
 
-    pub fn object_events(&self, id: ObjectId) -> Option<&[Event]> {
+    pub fn object_events(&self, id: usize) -> Option<&[Event]> {
         self.events_by_id.get(&id).map(Vec::as_slice)
     }
 }
@@ -66,12 +64,12 @@ impl Timeline {
 pub struct Event {
     pub kind: EventKind,
     pub time: f64,
-    pub id1: ObjectId,
-    pub id2: ObjectId,
+    pub id1: usize,
+    pub id2: usize,
 }
 
 impl Event {
-    pub fn contains(&self, id: ObjectId) -> bool {
+    pub fn contains(&self, id: usize) -> bool {
         self.id1 == id || self.id2 == id
     }
 }

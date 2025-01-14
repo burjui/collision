@@ -8,8 +8,7 @@ use core::{
 
 use cgmath::{InnerSpace, Vector2};
 use log::debug;
-use object::{Object, ObjectId};
-use slab::Slab;
+use object::Object;
 use timeline::EventKind;
 
 use crate::physics::{
@@ -24,36 +23,22 @@ mod permutation;
 mod timeline;
 
 pub struct CollisionDetector {
-    objects: Slab<Object>,
-    grid: Grid,
-    timeline: Timeline,
+    pub grid: Grid,
+    pub timeline: Timeline,
 }
 
 impl CollisionDetector {
     pub fn new() -> Self {
         Self {
-            objects: Slab::new(),
-            grid: Grid::new(),
+            grid: Grid::default(),
             timeline: Timeline::default(),
         }
     }
 
-    pub fn add(&mut self, object: Object) -> ObjectId {
-        ObjectId(self.objects.insert(object))
-    }
-
-    pub fn objects(&self) -> impl Iterator<Item = (ObjectId, Object)> + '_ {
-        self.objects
-            .iter()
-            .map(|(id, object)| (ObjectId(id), *object))
-    }
-
-    pub fn object_mut(&mut self, id: ObjectId) -> &mut Object {
-        &mut self.objects[id.0]
-    }
-
-    pub fn object_count(&self) -> usize {
-        self.objects.len()
+    pub fn add(&mut self, object: Object) -> usize {
+        let index = self.grid.objects.len();
+        self.grid.objects.push(object);
+        index
     }
 
     pub fn grid_position(&self) -> Option<Vector2<f64>> {
@@ -104,9 +89,9 @@ impl CollisionDetector {
 
     #[must_use]
     fn build_grid(&mut self) -> Grid {
-        let mut grid_builder = GridBuilder::new();
-        for (id, object) in &self.objects {
-            grid_builder.add_object(ObjectId(id), object.position, object.size);
+        let mut grid_builder = GridBuilder::default();
+        for object in self.grid.objects.iter() {
+            grid_builder.add_object(*object);
         }
         grid_builder.build()
     }
@@ -116,47 +101,54 @@ impl CollisionDetector {
 
         self.grid = self.build_grid();
         for cell in &self.grid.cells {
-            Self::calculate_collisions_in_cell(cell, &self.objects, &mut self.timeline);
+            Self::calculate_collisions_in_cell(
+                cell.as_slice(),
+                &mut self.grid.objects,
+                &mut self.timeline,
+            );
         }
 
         debug!("{} events left", self.timeline.len());
     }
 
     pub fn calculate_collisions_in_cell(
-        cell: &[ObjectId],
-        objects: &Slab<Object>,
+        cell: &[usize],
+        objects: &mut [Object],
         timeline: &mut Timeline,
     ) {
         if cell.len() >= 2 {
             for (id1, id2) in UniquePermutation2::new(cell) {
-                let (o1, o2) = (&objects[id1.0], &objects[id2.0]);
-                if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
-                    let collision_time = timeline.time() + delay;
-                    let mut interesting_events = timeline
-                        .object_events(id1)
-                        .into_iter()
-                        .flatten()
-                        .chain(timeline.object_events(id2).into_iter().flatten());
-                    debug!("{} interesting events", interesting_events.clone().count());
-                    let collision_matters = !interesting_events.any(|event| {
-                        let these_are_separating = || {
-                            event.contains(id1)
-                                && event.contains(id2)
-                                && (matches!(event.kind, EventKind::Separation))
-                        };
+                if id1 != id2 {
+                    let [o1, o2] = objects.get_many_mut([id1, id2]).unwrap();
+                    if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
+                        let collision_time = timeline.time() + delay;
+                        let mut interesting_events = timeline
+                            .object_events(id1)
+                            .into_iter()
+                            .flatten()
+                            .chain(timeline.object_events(id2).into_iter().flatten());
+                        debug!("{} interesting events", interesting_events.clone().count());
+                        let collision_matters = !interesting_events.any(|event| {
+                            let these_are_separating = || {
+                                event.contains(id1)
+                                    && event.contains(id2)
+                                    && (matches!(event.kind, EventKind::Separation))
+                            };
 
-                        let either_is_colliding_earlier = || {
-                            (event.contains(id1) || event.contains(id2))
-                                && matches!(event.kind, EventKind::Collision)
-                                && event.time <= collision_time
-                        };
+                            let either_is_colliding_earlier = || {
+                                (event.contains(id1) || event.contains(id2))
+                                    && matches!(event.kind, EventKind::Collision)
+                                    && event.time <= collision_time
+                            };
 
-                        these_are_separating() || either_is_colliding_earlier()
-                    });
+                            these_are_separating() || either_is_colliding_earlier()
+                        });
 
-                    if collision_matters {
-                        timeline.remove_events(|event| event.contains(id1) && event.contains(id2));
-                        timeline.add_event(EventKind::Collision, collision_time, id1, id2);
+                        if collision_matters {
+                            timeline
+                                .remove_events(|event| event.contains(id1) && event.contains(id2));
+                            timeline.add_event(EventKind::Collision, collision_time, id1, id2);
+                        }
                     }
                 }
             }
@@ -164,12 +156,12 @@ impl CollisionDetector {
     }
 
     fn advance_objects(&mut self, dt: f64) {
-        for (_, object) in &mut self.objects {
+        for object in &mut self.grid.objects {
             object.position += object.velocity * dt;
         }
     }
 
-    fn collide(&mut self, id1: ObjectId, id2: ObjectId) {
+    fn collide(&mut self, id1: usize, id2: usize) {
         debug!("COLLIDE {} {} (now {})", id1, id2, self.timeline.time());
         self.collision_elastic(id1, id2);
 
@@ -178,7 +170,7 @@ impl CollisionDetector {
             .remove_events(|event| event.contains(id1) || event.contains(id2));
 
         // Separation might not happen if objects didn't actually intersect at the time of collision
-        let (o1, o2) = (&self.objects[id1.0], &self.objects[id2.0]);
+        let (o1, o2) = (&self.grid.objects[id1], &self.grid.objects[id2]);
         if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Separation) {
             let time = self.timeline.time() + delay;
             self.timeline
@@ -186,7 +178,7 @@ impl CollisionDetector {
         }
     }
 
-    fn separate(&mut self, id1: ObjectId, id2: ObjectId) {
+    fn separate(&mut self, id1: usize, id2: usize) {
         debug!("SEPARATE {} {} (now {})", id1, id2, self.timeline.time());
         self.timeline.remove_events(|event| {
             matches!(event.kind, EventKind::Separation)
@@ -195,19 +187,23 @@ impl CollisionDetector {
         });
     }
 
-    fn collision_elastic(&mut self, id1: ObjectId, id2: ObjectId) {
-        let object1 = self.objects[id1.0];
-        let object2 = self.objects[id2.0];
-        let v1 = object1.velocity;
-        let v2 = object2.velocity;
-        let c1 = object1.position;
-        let c2 = object2.position;
-        let m1 = object1.mass;
-        let m2 = object2.mass;
-        self.objects[id1.0].velocity = v1
+    fn collision_elastic(&mut self, id1: usize, id2: usize) {
+        let [object1, object2] = self.grid.objects.get_many_mut([id1, id2]).unwrap();
+        let [Object {
+            position: c1,
+            velocity: v1,
+            mass: m1,
+            ..
+        }, Object {
+            position: c2,
+            velocity: v2,
+            mass: m2,
+            ..
+        }] = [*object1, *object2];
+        object1.velocity = v1
             - ((c1 - c2).dot(v1 - v2) * (c1 - c2) * 2.0 * m2)
                 * (1.0 / ((m1 + m2) * (c1 - c2).magnitude2()));
-        self.objects[id2.0].velocity = v2
+        object2.velocity = v2
             - ((c2 - c1).dot(v2 - v1) * (c2 - c1) * 2.0 * m1)
                 * (1.0 / ((m1 + m2) * (c2 - c1).magnitude2()));
     }

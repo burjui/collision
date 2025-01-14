@@ -1,9 +1,10 @@
-use std::{fs::File, path::Path};
+#![feature(get_many_mut)]
+
+use std::{fs::File, io::Write, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use cgmath::{InnerSpace, Vector2};
-use itertools::Itertools;
-use physics::object::{Object, ObjectId};
+use physics::object::Object;
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
@@ -146,7 +147,7 @@ fn main() -> anyhow::Result<()> {
             let stats_string = format!(
                 "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}",
                 collision_detector.time(),
-                collision_detector.object_count()
+                collision_detector.grid.objects.len()
             );
             stats_text = Some(render_text(
                 &stats_string,
@@ -235,7 +236,7 @@ fn process_events(
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
-            keydown!(Keycode::P) => emit_scene(collision_detector.objects()).unwrap(),
+            keydown!(Keycode::P) => emit_scene(&collision_detector.grid.objects).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
             keydown!(Keycode::Space) => {
                 *advance_time = !*advance_time;
@@ -278,11 +279,11 @@ fn process_events(
                 y,
                 ..
             } => {
-                for (id, object) in collision_detector.objects().collect_vec() {
+                for object in &mut collision_detector.grid.objects {
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        collision_detector.object_mut(id).velocity += direction.normalize_to(100.0);
+                        object.velocity += direction.normalize_to(100.0);
                     }
                 }
             }
@@ -294,13 +295,10 @@ fn process_events(
     EventResponse::Continue
 }
 
-fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Result<()> {
-    use std::io::Write;
-
+fn emit_scene(objects: &[Object]) -> std::io::Result<()> {
     let file = &mut File::create(emitted_scene_path!())?;
     writeln!(file, "{{")?;
-
-    for (_, object) in objects {
+    for object in objects {
         let Vector2 { x: px, y: py } = object.position;
         let Vector2 { x: vx, y: vy } = object.velocity;
         writeln!(file, "collision_detector.add(Object {{")?;
@@ -310,7 +308,6 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
         writeln!(file, "    mass: {:?},", object.mass)?;
         writeln!(file, "}});")?;
     }
-
     writeln!(file, "}}")?;
     println!("Emitted scene to \"{}\"", emitted_scene_path!());
     Ok(())
@@ -340,9 +337,9 @@ fn render_physics(
     }
 
     let texture_creator = canvas.texture_creator();
-    for (id, object) in collision_detector.objects() {
+    for (index, object) in collision_detector.grid.objects.iter().enumerate() {
         render_object(
-            id,
+            index,
             &object,
             &settings.details,
             screen_width,
@@ -356,7 +353,7 @@ fn render_physics(
 }
 
 fn render_object(
-    id: ObjectId,
+    id: usize,
     object: &Object,
     details: &RenderDetails,
     screen_width: u32,

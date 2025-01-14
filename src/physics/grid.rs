@@ -1,9 +1,9 @@
-use std::{collections::HashMap, ops::Index};
-
 use cgmath::Vector2;
 use derive_deref::Deref;
+use ndarray::Array2;
+use smallvec::SmallVec;
 
-use crate::physics::object::ObjectId;
+use super::object::Object;
 
 pub struct GridBuilder {
     grid: Grid,
@@ -12,40 +12,20 @@ pub struct GridBuilder {
 }
 
 impl GridBuilder {
-    pub fn new() -> Self {
-        GridBuilder {
-            grid: Grid::new(),
-            start: Vector2::new(f64::MAX, f64::MAX),
-            cell_size: 0.0,
-        }
-    }
-
-    pub fn add_object(&mut self, id: ObjectId, position: Vector2<f64>, size: f64) -> usize {
+    pub fn add_object(&mut self, object: Object) -> usize {
         let index = self.grid.objects.len();
-        self.grid.objects.push(GridObject {
-            object: id,
-            position,
-            size,
-            cells: Vec::new(),
-        });
-        let half_size = size * 0.5;
-        self.start.x = self.start.x.min(position.x - half_size);
-        self.start.y = self.start.y.min(position.y - half_size);
-        self.cell_size = self.cell_size.max(size * 1.1);
+        self.grid.objects.push(object);
+        self.grid.object_cells.push(Cell::new(0, 0));
+        let half_size = object.size * 0.5;
+        self.start.x = self.start.x.min(object.position.x - half_size);
+        self.start.y = self.start.y.min(object.position.y - half_size);
+        self.cell_size = self.cell_size.max(object.size * 1.1);
         index
     }
 
     pub fn build(mut self) -> Grid {
         let mut grid_size = Vector2::new(0, 0);
-        let mut cell_indices = HashMap::new();
-
-        for GridObject {
-            object,
-            position,
-            size,
-            cells: object_cells,
-        } in &mut self.grid.objects
-        {
+        for Object { position, size, .. } in &self.grid.objects {
             let start = *position - Vector2::new(*size * 0.5, *size * 0.5);
             let end = start + Vector2::new(*size, *size);
             let corners = [
@@ -58,15 +38,24 @@ impl GridBuilder {
                 let cell = cell_at(self.start, self.cell_size, corner);
                 grid_size.x = grid_size.x.max(cell.x);
                 grid_size.y = grid_size.y.max(cell.y);
+            }
+        }
 
-                let cell_index = *cell_indices.entry(cell).or_insert_with(|| {
-                    let index = self.grid.cells.len();
-                    self.grid.cells.push(Vec::new());
-                    index
-                });
-                object_cells.push(CellIndex(cell_index));
+        self.grid.cells = Array2::from_elem((grid_size.x + 1, grid_size.y + 1), SmallVec::new());
 
-                self.grid.cells[cell_index].push(*object);
+        for (object_index, Object { position, size, .. }) in self.grid.objects.iter().enumerate() {
+            let start = *position - Vector2::new(*size * 0.5, *size * 0.5);
+            let end = start + Vector2::new(*size, *size);
+            let corners = [
+                (start.x, start.y),
+                (start.x, end.y),
+                (end.x, start.y),
+                (end.x, end.y),
+            ];
+            for corner in corners {
+                let cell = cell_at(self.start, self.cell_size, corner);
+                self.grid.object_cells[object_index] = cell;
+                self.grid.cells[(cell.x, cell.y)].push(object_index);
             }
         }
 
@@ -74,11 +63,14 @@ impl GridBuilder {
     }
 }
 
-pub struct GridObject {
-    pub object: ObjectId,
-    position: Vector2<f64>,
-    size: f64,
-    cells: Vec<CellIndex>,
+impl Default for GridBuilder {
+    fn default() -> Self {
+        Self {
+            grid: Grid::default(),
+            start: Vector2::new(0.0, 0.0),
+            cell_size: 0.0,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Deref, PartialEq, Eq, Hash)]
@@ -88,30 +80,27 @@ pub struct Grid {
     pub position: Vector2<f64>,
     pub size: Vector2<usize>,
     pub cell_size: f64,
-    pub objects: Vec<GridObject>,
-    pub cells: Vec<Vec<ObjectId>>,
+    pub objects: Vec<Object>,
+    pub cells: Array2<SmallVec<[usize; 4]>>,
+    pub object_cells: Vec<Cell>,
 }
 
 impl Grid {
-    pub fn new() -> Self {
-        Self {
-            position: Vector2::new(0.0, 0.0),
-            size: Vector2::new(0, 0),
-            cell_size: 0.0,
-            objects: Vec::new(),
-            cells: Vec::new(),
-        }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
     }
 }
 
-impl Index<CellIndex> for Grid {
-    type Output = [ObjectId];
-    fn index(&self, index: CellIndex) -> &Self::Output {
-        &self.cells[index.0]
+impl Default for Grid {
+    fn default() -> Self {
+        Self {
+            position: Vector2::new(0.0, 0.0),
+            size: Vector2::new(0, 0),
+            cell_size: 0.0,
+            objects: Vec::new(),
+            cells: Array2::from_elem((0, 0), SmallVec::new()),
+            object_cells: Vec::new(),
+        }
     }
 }
 

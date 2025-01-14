@@ -1,9 +1,6 @@
 use cgmath::{InnerSpace, Vector2};
 
-use crate::physics::{
-    object::{Object, ObjectId},
-    CollisionDetector,
-};
+use crate::physics::{object::Object, CollisionDetector};
 
 macro_rules! emitted_scene_path {
     () => {
@@ -48,7 +45,7 @@ impl Wall {
     }
 }
 
-fn create_wall(collision_detector: &mut CollisionDetector, wall: Wall) -> Vec<ObjectId> {
+fn create_wall(collision_detector: &mut CollisionDetector, wall: Wall) -> Vec<usize> {
     let cell_size = wall.particle_size + wall.particle_spacing;
     let dims = Vector2::new(
         (wall.size.x / cell_size) as usize,
@@ -94,7 +91,7 @@ impl Ball {
     }
 }
 
-fn create_ball(collision_detector: &mut CollisionDetector, ball: Ball) -> Vec<ObjectId> {
+fn create_ball(collision_detector: &mut CollisionDetector, ball: Ball) -> Vec<usize> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_size + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
