@@ -5,15 +5,15 @@ use grid::{Cell, Grid};
 use itertools::Itertools;
 use object::{Object, ObjectId};
 
-mod grid;
+pub mod grid;
 pub mod object;
 
-pub struct CollisionDetector {
+pub struct PhysicsEngine {
     pub grid: Grid,
     pub time: f64,
 }
 
-impl CollisionDetector {
+impl PhysicsEngine {
     pub fn new() -> Self {
         Self {
             grid: Grid::new(),
@@ -69,8 +69,8 @@ impl CollisionDetector {
     }
 
     fn process_collisions(&mut self, dt: f64) {
-        // self.process_collisions_on_grid(dt);
-        self.process_collisions_bruteforce(dt);
+        self.process_collisions_on_grid(dt);
+        // self.process_collisions_bruteforce(dt);
     }
 
     fn process_collisions_on_grid(&mut self, dt: f64) {

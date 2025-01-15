@@ -60,7 +60,7 @@ impl Index<Cell> for Grid {
 
 pub type Cell = Vector2<usize>;
 
-fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> Cell {
+pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> Cell {
     Cell::new(
         ((position.x - cells_start.x) / cell_size).floor() as usize,
         ((position.y - cells_start.y) / cell_size).floor() as usize,

@@ -2,7 +2,7 @@ use cgmath::{InnerSpace, Vector2};
 
 use crate::physics::{
     object::{Object, ObjectId},
-    CollisionDetector,
+    PhysicsEngine,
 };
 
 macro_rules! emitted_scene_path {
@@ -15,14 +15,14 @@ const DEFAULT_PARTICLE_RADIUS: f64 = 2.0;
 const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
-pub fn create_scene(collision_detector: &mut CollisionDetector) {
+pub fn create_scene(physics: &mut PhysicsEngine) {
     let wall = Wall::new((700.0, 200.0), (200.0, 200.0));
-    create_wall(collision_detector, wall);
+    create_wall(physics, wall);
 
     // let mut ball = Ball::new((1000.0, 300.0), 20.0);
     // ball.velocity = Vector2::new(-1000.0, 0.0);
-    // create_ball(collision_detector, ball);
-    collision_detector.add(Object {
+    // create_ball(physics, ball);
+    physics.add(Object {
         position: Vector2::new(1000.0, 300.0),
         velocity: Vector2::new(-1000.0, 0.0),
         radius: 20.0,
@@ -30,7 +30,7 @@ pub fn create_scene(collision_detector: &mut CollisionDetector) {
         ..Default::default()
     });
 
-    collision_detector.grid.update();
+    physics.grid.update();
     // include!(concat!("../", emitted_scene_path!()));
 }
 
@@ -54,7 +54,7 @@ impl Wall {
     }
 }
 
-fn create_wall(collision_detector: &mut CollisionDetector, wall: Wall) -> Vec<ObjectId> {
+fn create_wall(physics: &mut PhysicsEngine, wall: Wall) -> Vec<ObjectId> {
     let cell_size = wall.particle_radius * 2.0 + wall.particle_spacing;
     let dims = Vector2::new((wall.size.x / cell_size) as usize, (wall.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -63,7 +63,7 @@ fn create_wall(collision_detector: &mut CollisionDetector, wall: Wall) -> Vec<Ob
             let p =
                 |position, index| position + (index + 1) as f64 * (wall.particle_radius * 2.0 + wall.particle_spacing);
             let position = Vector2::new(p(wall.position.x, i), p(wall.position.y, j));
-            let id = collision_detector.add(Object {
+            let id = physics.add(Object {
                 position,
                 radius: wall.particle_radius,
                 mass: wall.particle_mass,
@@ -99,7 +99,7 @@ impl Ball {
     }
 }
 
-fn create_ball(collision_detector: &mut CollisionDetector, ball: Ball) -> Vec<ObjectId> {
+fn create_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<ObjectId> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
@@ -109,7 +109,7 @@ fn create_ball(collision_detector: &mut CollisionDetector, ball: Ball) -> Vec<Ob
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
-                let id = collision_detector.add(Object {
+                let id = physics.add(Object {
                     position,
                     velocity: ball.velocity,
                     acceleration: ball.acceleration,

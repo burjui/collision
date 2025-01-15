@@ -5,7 +5,10 @@ use std::{fs::File, path::Path};
 use anyhow::{anyhow, Context, Result};
 use cgmath::{InnerSpace, Vector2};
 use itertools::Itertools;
-use physics::object::{Object, ObjectId};
+use physics::{
+    grid::Cell,
+    object::{Object, ObjectId},
+};
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
@@ -20,7 +23,12 @@ use sdl2::{
 };
 use video_rs::{encode::Settings, Encoder, Frame, Time};
 
-use crate::{config::Config, fps::FpsCalculator, physics::CollisionDetector, scene::*};
+use crate::{
+    config::Config,
+    fps::FpsCalculator,
+    physics::{grid::cell_at, PhysicsEngine},
+    scene::*,
+};
 
 mod config;
 mod fps;
@@ -73,7 +81,7 @@ fn main() -> anyhow::Result<()> {
     let mut render_settings = RenderSettings {
         with_grid: false,
         details: RenderDetails {
-            circle: true,
+            as_circle: true,
             id: false,
             velocity: false,
         },
@@ -86,8 +94,8 @@ fn main() -> anyhow::Result<()> {
     //     feenableexcept(FE_INVALID);
     // }
 
-    let mut collision_detector = CollisionDetector::new();
-    create_scene(&mut collision_detector);
+    let mut physics = PhysicsEngine::new();
+    create_scene(&mut physics);
 
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
@@ -105,40 +113,43 @@ fn main() -> anyhow::Result<()> {
 
     let frame_duration: Time = Time::from_nth_of_a_second(60);
     let mut last_frame_position = Time::zero();
-    let mut last_frame_timestamp = collision_detector.time();
+    let mut last_frame_timestamp = physics.time();
+    let mut mouse_position = Vector2::new(0.0, 0.0);
 
     'running: loop {
         match process_events(
             &mut event_pump,
             &mut render_settings,
-            &mut collision_detector,
+            &mut physics,
             &mut advance_time,
+            &mut mouse_position,
         ) {
             EventResponse::Continue => {}
             EventResponse::Quit => break 'running,
         }
 
         if advance_time {
-            collision_detector.advance(1.0 / 600.0);
+            physics.advance(1.0 / 600.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
 
         render_physics(
-            &collision_detector,
+            &physics,
             config.screen_width,
             &mut canvas,
             &font,
             &render_settings,
+            mouse_position,
         )?;
 
         if let Some(fps) = fps_calculator.update(frame_count)? {
             min_fps = min_fps.min(fps);
             let stats_string = format!(
                 "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}",
-                collision_detector.time(),
-                collision_detector.object_count()
+                physics.time(),
+                physics.object_count()
             );
             stats_text = Some(render_text(
                 &stats_string,
@@ -158,9 +169,9 @@ fn main() -> anyhow::Result<()> {
 
         canvas.present();
 
-        let frame_sim_duration = 0.3 / 60.0;
+        let frame_sim_duration = 0.1 / 60.0;
         if let Some(video_encoder) = &mut video_encoder {
-            if collision_detector.time() - last_frame_timestamp >= frame_sim_duration {
+            if physics.time() - last_frame_timestamp >= frame_sim_duration {
                 last_frame_timestamp += frame_sim_duration;
                 encode_frame(&canvas, &config, video_encoder, last_frame_position)?;
                 last_frame_position = last_frame_position.aligned_with(frame_duration).add();
@@ -212,19 +223,20 @@ macro_rules! keydown {
 fn process_events(
     event_pump: &mut EventPump,
     render_settings: &mut RenderSettings,
-    collision_detector: &mut CollisionDetector,
+    physics: &mut PhysicsEngine,
     advance_time: &mut bool,
+    mouse_position: &mut Vector2<f64>,
 ) -> EventResponse {
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
-            keydown!(Keycode::P) => emit_scene(collision_detector.objects()).unwrap(),
+            keydown!(Keycode::P) => emit_scene(physics.objects()).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
             keydown!(Keycode::Space) => *advance_time = !*advance_time,
 
             keydown!(Keycode::D) => {
                 render_settings.details = RenderDetails {
-                    circle: true,
+                    as_circle: true,
                     id: true,
                     velocity: true,
                 };
@@ -232,14 +244,14 @@ fn process_events(
 
             keydown!(Keycode::S) => {
                 render_settings.details = RenderDetails {
-                    circle: false,
+                    as_circle: false,
                     id: false,
                     velocity: false,
                 };
             }
 
             keydown!(Keycode::C) => {
-                render_settings.details.circle = !render_settings.details.circle;
+                render_settings.details.as_circle = !render_settings.details.as_circle;
             }
 
             keydown!(Keycode::I) => {
@@ -256,14 +268,16 @@ fn process_events(
                 y,
                 ..
             } => {
-                for (id, object) in collision_detector.objects().collect_vec() {
+                for (id, object) in physics.objects().collect_vec() {
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        collision_detector.object_mut(id).velocity += direction.normalize_to(100.0);
+                        physics.object_mut(id).velocity += direction.normalize_to(100.0);
                     }
                 }
             }
+
+            Event::MouseMotion { x, y, .. } => *mouse_position = Vector2::new(x as f64, y as f64),
 
             _ => {}
         }
@@ -282,7 +296,7 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
         let Vector2 { x: ppx, y: ppy } = object.position;
         let Vector2 { x: cpx, y: cpy } = object.position;
         let Vector2 { x: ax, y: ay } = object.acceleration;
-        writeln!(file, "collision_detector.add(Object {{")?;
+        writeln!(file, "physics.add(Object {{")?;
         writeln!(file, "    previous_position: Vector2::new({ppx:?}, {ppy:?}),")?;
         writeln!(file, "    position: Vector2::new({cpx:?}, {cpy:?}),")?;
         writeln!(file, "    acceleration: Vector2::new({ax:?}, {ay:?}),")?;
@@ -298,7 +312,7 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
 
 #[derive(Copy, Clone)]
 struct RenderDetails {
-    circle: bool,
+    as_circle: bool,
     id: bool,
     velocity: bool,
 }
@@ -309,18 +323,15 @@ struct RenderSettings {
 }
 
 fn render_physics(
-    collision_detector: &CollisionDetector,
+    physics: &PhysicsEngine,
     screen_width: u32,
     canvas: &mut WindowCanvas,
     font: &Font,
     settings: &RenderSettings,
+    mouse_position: Vector2<f64>,
 ) -> Result<()> {
-    if settings.with_grid {
-        render_grid(collision_detector, canvas)?;
-    }
-
     let texture_creator = canvas.texture_creator();
-    for (id, object) in collision_detector.objects() {
+    for (id, object) in physics.objects() {
         render_object(
             id,
             &object,
@@ -330,6 +341,10 @@ fn render_physics(
             font,
             &texture_creator,
         )?;
+    }
+
+    if settings.with_grid {
+        render_grid(physics, canvas, mouse_position, &settings.details)?;
     }
 
     Ok(())
@@ -361,22 +376,7 @@ fn render_object(
 
     let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
     let particle_color = spectrum(spectrum_position);
-    if details.circle {
-        canvas
-            .aa_circle(
-                object.position.x as i16,
-                object.position.y as i16,
-                object.radius as i16,
-                particle_color,
-            )
-            .map_err(string_to_anyhow)
-            .context("render object circle")?;
-    } else {
-        canvas
-            .pixel(object.position.x as i16, object.position.y as i16, particle_color)
-            .map_err(string_to_anyhow)
-            .context("render object as pixel")?;
-    }
+    render_object_outline(object, particle_color, canvas, details.as_circle)?;
 
     if details.id {
         let (id_text_texture, id_text_rect) = render_text(
@@ -399,12 +399,39 @@ fn render_object(
     Ok(())
 }
 
-fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas) -> Result<()> {
-    let grid_position = collision_detector.grid.position;
-    let grid_size = collision_detector.grid.size;
-    let cell_size = collision_detector.grid.cell_size;
+fn render_object_outline(
+    object: &Object,
+    color: Color,
+    canvas: &mut WindowCanvas,
+    as_circle: bool,
+) -> Result<(), anyhow::Error> {
+    Ok(if as_circle {
+        canvas
+            .aa_circle(
+                object.position.x as i16,
+                object.position.y as i16,
+                object.radius as i16,
+                color,
+            )
+            .map_err(string_to_anyhow)
+            .context("render object circle")?;
+    } else {
+        canvas
+            .pixel(object.position.x as i16, object.position.y as i16, color)
+            .map_err(string_to_anyhow)
+            .context("render object as pixel")?;
+    })
+}
 
-    println!("render grid: size {grid_size:?}, cell size {cell_size}, position {grid_position:?}");
+fn render_grid(
+    physics: &PhysicsEngine,
+    canvas: &mut WindowCanvas,
+    mouse_position: Vector2<f64>,
+    details: &RenderDetails,
+) -> Result<()> {
+    let grid_position = physics.grid.position;
+    let grid_size = physics.grid.size;
+    let cell_size = physics.grid.cell_size;
 
     let mut x = grid_position.x;
     for _ in 0..=grid_size.x {
@@ -434,6 +461,45 @@ fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas
             .map_err(string_to_anyhow)
             .context("render grid")?;
         y += cell_size;
+    }
+
+    let cell = cell_at(mouse_position, grid_position, cell_size);
+    if cell.x < grid_size.x && cell.y < grid_size.y {
+        canvas.set_draw_color(Color::WHITE);
+        let highlight_rect = Rect::new(
+            (grid_position.x + cell.x as f64 * cell_size) as i32,
+            (grid_position.y + cell.y as f64 * cell_size) as i32,
+            cell_size as u32,
+            cell_size as u32,
+        );
+        canvas
+            .draw_rect(highlight_rect)
+            .map_err(string_to_anyhow)
+            .with_context(|| format!("highlight mouse cell {cell:?}"))?;
+
+        for &object_index in &physics.grid.cells[(cell.x, cell.y)] {
+            let object = &physics.grid.objects[object_index];
+            render_object_outline(object, Color::YELLOW, canvas, details.as_circle).context("highlight object")?;
+        }
+
+        for adjacent_cell in (cell.x - 1..=cell.x + 1)
+            .cartesian_product(cell.y - 1..=cell.y + 1)
+            .map(|(x, y)| Cell::new(x, y))
+        {
+            if adjacent_cell != cell && adjacent_cell.x < grid_size.x && adjacent_cell.y < grid_size.y {
+                canvas.set_draw_color(Color::MAGENTA);
+                let highlight_rect = Rect::new(
+                    (grid_position.x + adjacent_cell.x as f64 * cell_size) as i32,
+                    (grid_position.y + adjacent_cell.y as f64 * cell_size) as i32,
+                    cell_size as u32,
+                    cell_size as u32,
+                );
+                canvas
+                    .draw_rect(highlight_rect)
+                    .map_err(string_to_anyhow)
+                    .with_context(|| format!("highlight mouse cell {adjacent_cell:?}"))?;
+            }
+        }
     }
 
     Ok(())
