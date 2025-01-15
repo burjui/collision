@@ -19,24 +19,18 @@ pub fn create_scene(collision_detector: &mut CollisionDetector) {
     let wall = Wall::new((700.0, 200.0), (200.0, 200.0));
     create_wall(collision_detector, wall);
 
-    let mut ball = Ball::new((1000.0, 300.0), 20.0);
-    ball.velocity = Vector2::new(-1000.0, 0.0);
-    create_ball(collision_detector, ball);
-    // collision_detector.add(Object {
-    //     position: Vector2::new(1000.0, 300.0),
-    //     velocity: Vector2::new(-30.0, 0.0),
-    //     radius: 20.0,
-    //     mass: 100.0,
-    //     ..Default::default()
-    // });
-    // collision_detector.add(Object {
-    //     position: Vector2::new(900.0, 310.0),
-    //     velocity: Vector2::new(30.0, 0.0),
-    //     radius: 20.0,
-    //     mass: 100.0,
-    //     ..Default::default()
-    // });
+    // let mut ball = Ball::new((1000.0, 300.0), 20.0);
+    // ball.velocity = Vector2::new(-1000.0, 0.0);
+    // create_ball(collision_detector, ball);
+    collision_detector.add(Object {
+        position: Vector2::new(1000.0, 300.0),
+        velocity: Vector2::new(-1000.0, 0.0),
+        radius: 20.0,
+        mass: 100.0,
+        ..Default::default()
+    });
 
+    collision_detector.grid.update();
     // include!(concat!("../", emitted_scene_path!()));
 }
 

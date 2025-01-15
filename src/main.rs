@@ -316,7 +316,7 @@ fn render_physics(
     settings: &RenderSettings,
 ) -> Result<()> {
     if settings.with_grid {
-        // render_grid(collision_detector, canvas)?;
+        render_grid(collision_detector, canvas)?;
     }
 
     let texture_creator = canvas.texture_creator();
@@ -399,45 +399,45 @@ fn render_object(
     Ok(())
 }
 
-// fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas) -> Result<()> {
-//     let grid_position = collision_detector
-//         .grid_position()
-//         .ok_or_else(|| anyhow!("draw_physics(): grid_position()"))?;
-//     let grid_size = collision_detector.grid_size();
-//     let cell_size = collision_detector.grid_cell_size();
+fn render_grid(collision_detector: &CollisionDetector, canvas: &mut WindowCanvas) -> Result<()> {
+    let grid_position = collision_detector.grid.position;
+    let grid_size = collision_detector.grid.size;
+    let cell_size = collision_detector.grid.cell_size;
 
-//     let mut x = grid_position.x;
-//     for _ in 0..=grid_size.x {
-//         canvas
-//             .line(
-//                 x as i16,
-//                 grid_position.y as i16,
-//                 x as i16,
-//                 (grid_position.y + cell_size * grid_size.y as f64) as i16,
-//                 Color::RGB(100, 100, 100),
-//             )
-//             .map_err(string_to_anyhow)
-//             .context("render grid")?;
-//         x += cell_size;
-//     }
+    println!("render grid: size {grid_size:?}, cell size {cell_size}, position {grid_position:?}");
 
-//     let mut y = grid_position.y;
-//     for _ in 0..=grid_size.y {
-//         canvas
-//             .line(
-//                 grid_position.x as i16,
-//                 y as i16,
-//                 (grid_position.x + cell_size * grid_size.x as f64) as i16,
-//                 y as i16,
-//                 Color::RGB(100, 100, 100),
-//             )
-//             .map_err(string_to_anyhow)
-//             .context("render grid")?;
-//         y += cell_size;
-//     }
+    let mut x = grid_position.x;
+    for _ in 0..=grid_size.x {
+        canvas
+            .line(
+                x as i16,
+                grid_position.y as i16,
+                x as i16,
+                (grid_position.y + cell_size * grid_size.y as f64) as i16,
+                Color::RGB(100, 100, 100),
+            )
+            .map_err(string_to_anyhow)
+            .context("render grid")?;
+        x += cell_size;
+    }
 
-//     Ok(())
-// }
+    let mut y = grid_position.y;
+    for _ in 0..=grid_size.y {
+        canvas
+            .line(
+                grid_position.x as i16,
+                y as i16,
+                (grid_position.x + cell_size * grid_size.x as f64) as i16,
+                y as i16,
+                Color::RGB(100, 100, 100),
+            )
+            .map_err(string_to_anyhow)
+            .context("render grid")?;
+        y += cell_size;
+    }
+
+    Ok(())
+}
 
 fn render_text<'texture>(
     s: &str,
