@@ -11,7 +11,6 @@ serde_derive = "1.0.188"
 toml = "0.5.11"
 num-traits = "0.2.16"
 slab = "0.4.9"
-cgmath = "0.18.0"
 itertools = "0.10.5"
 anyhow = "1.0.75"
 env_logger = "0.11.5"
@@ -21,6 +20,7 @@ video-rs = { version = "0.10.1", features = ["ndarray"] }
 ndarray = "0.16.1"
 clap = { version = "4.5.21", features = ["derive"] }
 smallvec = "1.13.2"
+nalgebra = "0.33.2"
 
 [profile.release]
 debug = true

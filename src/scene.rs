@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, Vector2};
+use nalgebra::Vector2;
 
 use crate::physics::{
     object::{Object, ObjectId},
@@ -16,19 +16,19 @@ const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 pub fn create_scene(physics: &mut PhysicsEngine) {
-    let wall = Wall::new((700.0, 200.0), (200.0, 200.0));
+    let wall = Wall::new(Vector2::new(700.0, 200.0), Vector2::new(200.0, 200.0));
     create_wall(physics, wall);
 
     // let mut ball = Ball::new((1000.0, 300.0), 20.0);
     // ball.velocity = Vector2::new(-1000.0, 0.0);
     // create_ball(physics, ball);
-    physics.add(Object {
-        position: Vector2::new(1000.0, 300.0),
-        velocity: Vector2::new(-1000.0, 0.0),
-        radius: 20.0,
-        mass: 100.0,
-        ..Default::default()
-    });
+    // physics.add(Object {
+    //     position: Vector2::new(1000.0, 300.0),
+    //     velocity: Vector2::new(-1000.0, 0.0),
+    //     radius: 20.0,
+    //     mass: 100.0,
+    //     ..Default::default()
+    // });
 
     physics.grid.update();
     // include!(concat!("../", emitted_scene_path!()));
@@ -43,10 +43,10 @@ struct Wall {
 }
 
 impl Wall {
-    fn new(position: (f64, f64), size: (f64, f64)) -> Self {
+    fn new(position: Vector2<f64>, size: Vector2<f64>) -> Self {
         Self {
-            position: position.into(),
-            size: size.into(),
+            position,
+            size,
             particle_radius: DEFAULT_PARTICLE_RADIUS,
             particle_spacing: DEFAULT_PARTICLE_SPACING,
             particle_mass: DEFAULT_PARTICLE_MASS,
@@ -86,9 +86,9 @@ struct Ball {
 }
 
 impl Ball {
-    fn new(position: (f64, f64), radius: f64) -> Self {
+    fn new(position: Vector2<f64>, radius: f64) -> Self {
         Self {
-            position: position.into(),
+            position,
             radius,
             velocity: Vector2::new(0.0, 0.0),
             acceleration: Vector2::new(0.0, 0.0),

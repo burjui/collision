@@ -3,8 +3,8 @@
 use std::{fs::File, path::Path};
 
 use anyhow::{anyhow, Context, Result};
-use cgmath::{InnerSpace, Vector2};
 use itertools::Itertools;
+use nalgebra::Vector2;
 use physics::{
     grid::Cell,
     object::{Object, ObjectId},
@@ -272,7 +272,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        physics.object_mut(id).velocity += direction.normalize_to(100.0);
+                        physics.object_mut(id).velocity += direction.normalize() * 100.0;
                     }
                 }
             }
@@ -293,9 +293,9 @@ fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Res
     writeln!(file, "{{")?;
 
     for (_, object) in objects {
-        let Vector2 { x: ppx, y: ppy } = object.position;
-        let Vector2 { x: cpx, y: cpy } = object.position;
-        let Vector2 { x: ax, y: ay } = object.acceleration;
+        let (ppx, ppy) = (object.position.x, object.position.y);
+        let (cpx, cpy) = (object.velocity.x, object.velocity.y);
+        let (ax, ay) = (object.acceleration.x, object.acceleration.y);
         writeln!(file, "physics.add(Object {{")?;
         writeln!(file, "    previous_position: Vector2::new({ppx:?}, {ppy:?}),")?;
         writeln!(file, "    position: Vector2::new({cpx:?}, {cpy:?}),")?;

@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-use cgmath::Vector2;
+use nalgebra::Vector2;
 
 #[derive(Copy, Clone)]
 pub struct Object {

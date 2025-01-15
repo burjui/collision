@@ -1,6 +1,6 @@
 use std::ops::Index;
 
-use cgmath::Vector2;
+use nalgebra::Vector2;
 use ndarray::Array2;
 use smallvec::SmallVec;
 
@@ -47,6 +47,17 @@ impl Grid {
                 let cell = cell_at(position, self.position, self.cell_size);
                 self.cells[(cell.x, cell.y)].push(index);
             }
+        }
+    }
+
+    // TODO remove from former cell
+    pub fn update_object_cell(&mut self, object_index: usize, previous_position: Vector2<f64>) {
+        let object = &self.objects[object_index];
+        let new_cell = cell_at(object.position, self.position, self.cell_size);
+        let old_cell = cell_at(previous_position, self.position, self.cell_size);
+        if new_cell != old_cell {
+            self.cells[(old_cell.x, old_cell.y)].retain(|i| *i != object_index);
+            self.cells[(new_cell.x, new_cell.y)].push(object_index);
         }
     }
 }
