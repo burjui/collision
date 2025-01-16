@@ -56,7 +56,7 @@ impl PhysicsEngine {
     fn update(&mut self, dt: f64) {
         self.time += dt;
         self.apply_gravity();
-        self.process_collisions(dt);
+        self.process_collisions();
         if let Some(constraint_box) = self.constraints {
             self.apply_constraints(constraint_box);
         }
@@ -69,9 +69,9 @@ impl PhysicsEngine {
         }
     }
 
-    fn process_collisions(&mut self, dt: f64) {
-        // self.process_collisions_on_grid(dt);
-        self.process_collisions_bruteforce(dt);
+    fn process_collisions(&mut self) {
+        self.process_collisions_on_grid();
+        self.process_collisions_bruteforce();
     }
 
     fn process_collisions_on_grid(&mut self) {
@@ -117,7 +117,7 @@ impl PhysicsEngine {
         }
     }
 
-    fn process_collisions_bruteforce(&mut self, dt: f64) {
+    fn process_collisions_bruteforce(&mut self) {
         for id1 in 0..self.grid.objects.len() {
             for id2 in id1 + 1..self.grid.objects.len() {
                 if id1 != id2 {
