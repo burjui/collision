@@ -110,13 +110,10 @@ impl PhysicsEngine {
     }
 
     fn apply_gravity(&mut self) {
-        for object_index in 0..self.grid.objects.len() {
-            if !self.planets.contains(&object_index) {
-                self.grid.objects[object_index].acceleration += Vector2::new(0.0, 10000.0);
-            }
-            for planet_index in 0..self.planets.len() {
-                if planet_index != object_index {
-                    let [object, planet] = self.grid.objects.get_many_mut([object_index, planet_index]).unwrap();
+        for object in 0..self.grid.objects.len() {
+            for planet in 0..self.planets.len() {
+                if planet != object {
+                    let [object, planet] = self.grid.objects.get_many_mut([object, planet]).unwrap();
                     object.acceleration += (planet.position - object.position).normalize() * planet.mass * 1.0;
                 }
             }
