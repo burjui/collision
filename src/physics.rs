@@ -70,7 +70,7 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
-        self.process_collisions_on_grid();
+        // self.process_collisions_on_grid();
         self.process_collisions_bruteforce();
     }
 

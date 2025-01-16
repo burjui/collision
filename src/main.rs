@@ -131,7 +131,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            physics.advance(1.0 / 60.0);
+            physics.advance(1.0 / 600.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
