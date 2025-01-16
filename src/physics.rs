@@ -39,7 +39,7 @@ pub struct PhysicsEngine {
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
-    planet_object: usize,
+    planets: Vec<usize>,
 }
 
 impl PhysicsEngine {
@@ -49,9 +49,10 @@ impl PhysicsEngine {
             grid: Grid::new(),
             time: 0.0,
             constraints,
-            planet_object: 0,
+            planets: Vec::new(),
         };
-        physics_engine.planet_object = physics_engine.add({
+
+        let planet1 = physics_engine.add({
             Object {
                 radius: 20.0,
                 mass: 10000.0,
@@ -59,6 +60,18 @@ impl PhysicsEngine {
                 ..Object::new(Vector2::new(800.0, 300.0))
             }
         });
+        physics_engine.planets.push(planet1);
+
+        let planet2 = physics_engine.add({
+            Object {
+                radius: 30.0,
+                mass: 12000.0,
+                color: Some(Color::GRAY),
+                ..Object::new(Vector2::new(400.0, 700.0))
+            }
+        });
+        physics_engine.planets.push(planet2);
+
         physics_engine
     }
 
@@ -77,7 +90,7 @@ impl PhysicsEngine {
     }
 
     pub fn advance(&mut self, dt: f64) {
-        self.update_substeps(dt, 16);
+        self.update_substeps(dt, 4);
     }
 
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
@@ -98,14 +111,14 @@ impl PhysicsEngine {
 
     fn apply_gravity(&mut self) {
         for object_index in 0..self.grid.objects.len() {
-            if object_index != self.planet_object {
-                let [object, planet] = self
-                    .grid
-                    .objects
-                    .get_many_mut([object_index, self.planet_object])
-                    .unwrap();
-                object.acceleration +=
-                    Vector2::new(0.0, 10000.0) + (planet.position - object.position).normalize() * 50000.0;
+            if !self.planets.contains(&object_index) {
+                self.grid.objects[object_index].acceleration += Vector2::new(0.0, 10000.0);
+            }
+            for planet_index in 0..self.planets.len() {
+                if planet_index != object_index {
+                    let [object, planet] = self.grid.objects.get_many_mut([object_index, planet_index]).unwrap();
+                    object.acceleration += (planet.position - object.position).normalize() * planet.mass * 1.0;
+                }
             }
         }
     }
