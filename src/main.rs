@@ -6,7 +6,7 @@ use std::{fs::File, path::Path};
 use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
 use nalgebra::Vector2;
-use physics::{grid::Cell, object::Object};
+use physics::{grid::Cell, object::Object, ConstraintBox};
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
@@ -94,6 +94,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut physics = PhysicsEngine::new();
     create_scene(&mut physics);
+    physics.constraints = Some(ConstraintBox::new(
+        Vector2::new(0.0, 0.0),
+        Vector2::new(config.screen_width as f64, config.screen_height as f64),
+    ));
 
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
@@ -127,7 +131,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            physics.advance(1.0 / 600.0);
+            physics.advance(1.0 / 60.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -270,7 +274,8 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        physics.object_mut(id).velocity += direction.normalize() * 100.0;
+                        let object = physics.object_mut(id);
+                        object.set_velocity(object.velocity() + direction.normalize() * 1.0, 1.0);
                     }
                 }
             }
@@ -292,7 +297,7 @@ fn emit_scene(objects: impl Iterator<Item = (usize, Object)>) -> std::io::Result
 
     for (_, object) in objects {
         let (ppx, ppy) = (object.position.x, object.position.y);
-        let (cpx, cpy) = (object.velocity.x, object.velocity.y);
+        let (cpx, cpy) = (object.velocity().x, object.velocity().y);
         let (ax, ay) = (object.acceleration.x, object.acceleration.y);
         writeln!(file, "physics.add(Object {{")?;
         writeln!(file, "    previous_position: Vector2::new({ppx:?}, {ppy:?}),")?;
@@ -358,22 +363,22 @@ fn render_object(
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
     if details.velocity {
-        let magnitude = object.velocity.magnitude() + 0.0000001;
+        let magnitude = object.velocity().magnitude() + 0.0000001;
         let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
         canvas
             .aa_line(
                 object.position.x as i16,
                 object.position.y as i16,
-                (object.position.x + object.velocity.x * scale_factor) as i16,
-                (object.position.y + object.velocity.y * scale_factor) as i16,
+                (object.position.x + object.velocity().x * scale_factor) as i16,
+                (object.position.y + object.velocity().y * scale_factor) as i16,
                 Color::RGB(127, 0, 127),
             )
             .map_err(string_to_anyhow)
             .context("render object velocity vector")?;
     }
 
-    let spectrum_position = object.velocity.magnitude().sqrt().min(15.0) / 15.0;
-    let particle_color = spectrum(spectrum_position);
+    let spectrum_position = object.velocity().magnitude().min(1.0);
+    let particle_color = object.color.unwrap_or_else(|| spectrum(spectrum_position));
     render_object_outline(object, particle_color, canvas, details.as_circle)?;
 
     if details.id {

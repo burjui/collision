@@ -13,38 +13,38 @@ const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 pub fn create_scene(physics: &mut PhysicsEngine) {
-    // let wall = Wall::new(Vector2::new(700.0, 200.0), Vector2::new(200.0, 200.0));
-    // create_wall(physics, wall);
+    let brick = Brick::new(Vector2::new(400.0, 200.0), Vector2::new(200.0, 200.0));
+    create_wall(physics, brick);
+
+    // let mut ball = Object {
+    //     radius: 20.0,
+    //     mass: 100.0,
+    //     ..Object::new(Vector2::new(800.0, 300.0))
+    // };
+    // ball.set_velocity(Vector2::new(-3.0, 0.0), 1.0);
+    // physics.add(ball);
 
     // let mut ball = Ball::new(Vector2::new(1000.0, 300.0), 20.0);
     // ball.velocity = Vector2::new(-1000.0, 0.0);
     // create_ball(physics, ball);
 
-    // physics.add(Object {
-    //     position: Vector2::new(1000.0, 300.0),
-    //     velocity: Vector2::new(-1000.0, 0.0),
-    //     radius: 20.0,
-    //     mass: 100.0,
-    //     ..Default::default()
-    // });
-
-    let mut x_offset = 0.0;
-    for y in 0..10 {
-        for x in 0..10 {
-            physics.add(Object {
-                position: Vector2::new(700.0 + x as f64 * 10.0 + x_offset, 500.0 + y as f64 * 10.0),
-                radius: 3.0,
-                ..Default::default()
-            });
-        }
-        // x_offset += 3.0;
-    }
+    // let mut x_offset = false;
+    // for y in 0..10 {
+    //     for x in 0..10 {
+    //         let position = Vector2::new(300.0 + x as f64 * 10.0 + x_offset as u8 as f64, 500.0 + y as f64 * 10.0);
+    //         physics.add(Object {
+    //             radius: 1.0,
+    //             ..Object::new(position)
+    //         });
+    //     }
+    //     x_offset = !x_offset;
+    // }
 
     physics.grid.update();
     // include!(concat!("../", emitted_scene_path!()));
 }
 
-struct Wall {
+struct Brick {
     position: Vector2<f64>,
     size: Vector2<f64>,
     particle_radius: f64,
@@ -52,7 +52,7 @@ struct Wall {
     particle_mass: f64,
 }
 
-impl Wall {
+impl Brick {
     fn new(position: Vector2<f64>, size: Vector2<f64>) -> Self {
         Self {
             position,
@@ -64,7 +64,7 @@ impl Wall {
     }
 }
 
-fn create_wall(physics: &mut PhysicsEngine, wall: Wall) -> Vec<usize> {
+fn create_wall(physics: &mut PhysicsEngine, wall: Brick) -> Vec<usize> {
     let cell_size = wall.particle_radius * 2.0 + wall.particle_spacing;
     let dims = Vector2::new((wall.size.x / cell_size) as usize, (wall.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -74,10 +74,9 @@ fn create_wall(physics: &mut PhysicsEngine, wall: Wall) -> Vec<usize> {
                 |position, index| position + (index + 1) as f64 * (wall.particle_radius * 2.0 + wall.particle_spacing);
             let position = Vector2::new(p(wall.position.x, i), p(wall.position.y, j));
             let id = physics.add(Object {
-                position,
                 radius: wall.particle_radius,
                 mass: wall.particle_mass,
-                ..Default::default()
+                ..Object::new(position)
             });
             result.push(id);
         }
@@ -119,13 +118,14 @@ fn create_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<usize> {
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
-                let id = physics.add(Object {
-                    position,
-                    velocity: ball.velocity,
+                let mut object = Object {
                     acceleration: ball.acceleration,
                     radius: ball.particle_radius,
                     mass: ball.particle_mass,
-                });
+                    ..Object::new(position)
+                };
+                object.set_velocity(ball.velocity, 1.0);
+                let id = physics.add(object);
                 result.push(id);
             }
         }

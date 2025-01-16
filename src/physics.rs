@@ -11,6 +11,7 @@ pub mod object;
 pub struct PhysicsEngine {
     pub grid: Grid,
     pub time: f64,
+    pub constraints: Option<ConstraintBox>,
 }
 
 impl PhysicsEngine {
@@ -18,6 +19,7 @@ impl PhysicsEngine {
         Self {
             grid: Grid::new(),
             time: 0.0,
+            constraints: None,
         }
     }
 
@@ -53,15 +55,17 @@ impl PhysicsEngine {
 
     fn update(&mut self, dt: f64) {
         self.time += dt;
-        self.apply_gravity(dt);
+        // self.apply_gravity();
         self.process_collisions(dt);
-        self.apply_constraints();
+        if let Some(constraint_box) = self.constraints {
+            self.apply_constraints(constraint_box);
+        }
         self.update_objects(dt);
     }
 
-    fn apply_gravity(&mut self, dt: f64) {
+    fn apply_gravity(&mut self) {
         for object in &mut self.grid.objects {
-            object.acceleration += Vector2::new(0.0, 1000.0) * dt;
+            object.acceleration += Vector2::new(0.0, 10000.0);
         }
     }
 
@@ -114,12 +118,28 @@ impl PhysicsEngine {
     }
 
     fn process_collisions_bruteforce(&mut self, dt: f64) {
+        const RESPONSE_COEF: f64 = 0.75;
+
         for id1 in 0..self.grid.objects.len() {
             for id2 in id1 + 1..self.grid.objects.len() {
                 if id1 != id2 {
-                    let [o1, o2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
-                    if intersects(o1, o2) {
-                        collide_elastic(o1, o2, dt);
+                    let [object_1, object_2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
+                    if intersects(object_1, object_2) {
+                        // collide_elastic(o1, o2, dt);
+                        let v = object_1.position - object_2.position;
+                        let min_dist = object_1.radius + object_2.radius;
+                        // Check overlapping
+                        let dist = v.magnitude();
+                        if v.magnitude() < min_dist {
+                            let n = v / dist;
+                            let total_mass = object_1.mass + object_2.mass;
+                            let mass_ratio_1 = object_1.mass / total_mass;
+                            let mass_ratio_2 = object_2.mass / total_mass;
+                            let delta = 0.5 * RESPONSE_COEF * (dist - min_dist);
+                            // Update positions
+                            object_1.position -= n * (mass_ratio_2 * delta);
+                            object_2.position += n * (mass_ratio_1 * delta);
+                        }
                     };
                 }
             }
@@ -132,21 +152,22 @@ impl PhysicsEngine {
         }
     }
 
-    fn apply_constraints(&mut self) {
+    fn apply_constraints(&mut self, cb: ConstraintBox) {
         for object in &mut self.grid.objects {
-            const BOTTOM: f64 = 600.0;
-            const LEFT: f64 = 300.0;
-            const RIGHT: f64 = 900.0;
-            if object.position.y + object.radius > BOTTOM {
-                object.position.y = BOTTOM - object.radius;
-                object.velocity.y = 0.0;
-                object.acceleration.y = 0.0;
+            if object.position.x - object.radius < cb.topleft.x {
+                object.position.x = cb.topleft.x + object.radius;
             }
 
-            if object.position.x + object.radius < LEFT {
-                object.position.x = LEFT + object.radius;
-            } else if object.position.x - object.radius > RIGHT {
-                object.position.x = RIGHT - object.radius;
+            if object.position.x + object.radius > cb.bottomright.x {
+                object.position.x = cb.bottomright.x - object.radius;
+            }
+
+            if object.position.y - object.radius < cb.topleft.y {
+                object.position.y = cb.topleft.y + object.radius;
+            }
+
+            if object.position.y + object.radius > cb.bottomright.y {
+                object.position.y = cb.bottomright.y - object.radius;
             }
         }
     }
@@ -157,9 +178,10 @@ impl PhysicsEngine {
 }
 
 fn update_object(object: &mut Object, dt: f64) {
-    object.velocity += object.acceleration * dt;
-    object.position += object.velocity * dt;
-    // object.acceleration = Vector2::new(0.0, 0.0);
+    let displacement = object.position - object.previous_position;
+    object.previous_position = object.position;
+    object.position += displacement + object.acceleration * (dt * dt);
+    object.acceleration = Vector2::new(0.0, 0.0);
 }
 
 fn intersects(o1: &Object, o2: &Object) -> bool {
@@ -169,23 +191,35 @@ fn intersects(o1: &Object, o2: &Object) -> bool {
 }
 
 fn collide_elastic(object1: &mut Object, object2: &mut Object, dt: f64) {
+    let v1 = object1.velocity();
+    let v2 = object2.velocity();
     let [Object {
-        position: c1,
-        velocity: v1,
-        mass: m1,
-        ..
+        position: c1, mass: m1, ..
     }, Object {
-        position: c2,
-        velocity: v2,
-        mass: m2,
-        ..
+        position: c2, mass: m2, ..
     }] = [*object1, *object2];
-    object1.velocity =
-        v1 - ((c1 - c2).dot(&(v1 - v2)) * (c1 - c2) * 2.0 * m2) * (1.0 / ((m1 + m2) * (c1 - c2).magnitude_squared()));
-    object2.velocity =
-        v2 - ((c2 - c1).dot(&(v2 - v1)) * (c2 - c1) * 2.0 * m1) * (1.0 / ((m1 + m2) * (c2 - c1).magnitude_squared()));
+    object1.set_velocity(
+        v1 - ((c1 - c2).dot(&(v1 - v2)) * (c1 - c2) * 2.0 * m2) * (1.0 / ((m1 + m2) * (c1 - c2).magnitude_squared())),
+        dt,
+    );
+    object2.set_velocity(
+        v2 - ((c2 - c1).dot(&(v2 - v1)) * (c2 - c1) * 2.0 * m1) * (1.0 / ((m1 + m2) * (c2 - c1).magnitude_squared())),
+        dt,
+    );
     let coeff_m1 = m1 / (m1 + m2);
     let coeff_m2 = m2 / (m1 + m2);
     object1.position += (c1 - c2) * coeff_m1 * dt + Vector2::new(0.1 * dt, 0.1 * dt);
     object2.position -= (c1 - c2) * coeff_m2 * dt + Vector2::new(0.1 * dt, 0.1 * dt);
+}
+
+#[derive(Clone, Copy)]
+pub struct ConstraintBox {
+    topleft: Vector2<f64>,
+    bottomright: Vector2<f64>,
+}
+
+impl ConstraintBox {
+    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
+        Self { topleft, bottomright }
+    }
 }
