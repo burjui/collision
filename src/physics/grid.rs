@@ -1,5 +1,3 @@
-use std::ops::Index;
-
 use nalgebra::Vector2;
 use ndarray::Array2;
 use smallvec::SmallVec;
@@ -7,11 +5,11 @@ use smallvec::SmallVec;
 use super::object::Object;
 
 pub struct Grid {
-    pub position: Vector2<f64>,
-    pub size: Vector2<usize>,
-    pub cell_size: f64,
-    pub objects: Vec<Object>,
-    pub cells: Array2<SmallVec<[usize; 4]>>,
+    position: Vector2<f64>,
+    size: Vector2<usize>,
+    cell_size: f64,
+    pub(super) objects: Vec<Object>,
+    pub(super) cells: Array2<SmallVec<[usize; 4]>>,
 }
 
 impl Grid {
@@ -45,34 +43,45 @@ impl Grid {
 
             for (index, &Object { position, .. }) in self.objects.iter().enumerate() {
                 let cell = cell_at(position, self.position, self.cell_size);
-                self.cells[(cell.x, cell.y)].push(index);
+                self.cells[cell].push(index);
             }
         }
     }
 
     // TODO remove from former cell
-    pub fn update_object_cell(&mut self, object_index: usize, previous_position: Vector2<f64>) {
-        let object = &self.objects[object_index];
-        let new_cell = cell_at(object.position, self.position, self.cell_size);
-        let old_cell = cell_at(previous_position, self.position, self.cell_size);
-        if new_cell != old_cell {
-            self.cells[(old_cell.x, old_cell.y)].retain(|i| *i != object_index);
-            self.cells[(new_cell.x, new_cell.y)].push(object_index);
-        }
+    // pub fn update_object_cell(&mut self, object_index: usize, previous_position: Vector2<f64>) {
+    //     let object = &self.objects[object_index];
+    //     let new_cell = cell_at(object.position, self.position, self.cell_size);
+    //     let old_cell = cell_at(previous_position, self.position, self.cell_size);
+    //     if new_cell != old_cell {
+    //         self.cells[old_cell].retain(|i| *i != object_index);
+    //         self.cells[new_cell].push(object_index);
+    //     }
+    // }
+
+    pub fn position(&self) -> Vector2<f64> {
+        self.position
+    }
+
+    pub fn size(&self) -> Vector2<usize> {
+        self.size
+    }
+
+    pub fn cell_size(&self) -> f64 {
+        self.cell_size
+    }
+
+    pub fn objects(&self) -> &[Object] {
+        &self.objects
+    }
+
+    pub fn cells(&self) -> &Array2<SmallVec<[usize; 4]>> {
+        &self.cells
     }
 }
 
-impl Index<Cell> for Grid {
-    type Output = [usize];
-    fn index(&self, id: Cell) -> &Self::Output {
-        &self.cells[(id.x, id.y)]
-    }
-}
-
-pub type Cell = Vector2<usize>;
-
-pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> Cell {
-    Cell::new(
+pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> (usize, usize) {
+    (
         ((position.x - cells_start.x) / cell_size).floor() as usize,
         ((position.y - cells_start.y) / cell_size).floor() as usize,
     )

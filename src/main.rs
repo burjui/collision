@@ -4,13 +4,13 @@
 use std::{fs::File, path::Path};
 
 use anyhow::{anyhow, Context, Result};
+use collision::physics::{grid::cell_at, object::Object, ConstraintBox, PhysicsEngine};
 use itertools::Itertools;
 use nalgebra::Vector2;
-use physics::{grid::Cell, object::Object, ConstraintBox};
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
-    keyboard::Keycode,
+    keyboard::{Keycode, Mod},
     mouse::MouseButton,
     pixels::{Color, PixelFormatEnum},
     rect::Rect,
@@ -21,16 +21,10 @@ use sdl2::{
 };
 use video_rs::{encode::Settings, Encoder, Frame, Time};
 
-use crate::{
-    config::Config,
-    fps::FpsCalculator,
-    physics::{grid::cell_at, PhysicsEngine},
-    scene::*,
-};
+use crate::{config::Config, fps::FpsCalculator, scene::*};
 
 mod config;
 mod fps;
-mod physics;
 
 #[macro_use]
 mod scene;
@@ -91,13 +85,12 @@ fn main() -> anyhow::Result<()> {
     //     // Catch NaNs as SIGFPE
     //     feenableexcept(FE_INVALID);
     // }
-
-    let mut physics = PhysicsEngine::new();
-    create_scene(&mut physics);
-    physics.constraints = Some(ConstraintBox::new(
+    let constraints = ConstraintBox::new(
         Vector2::new(0.0, 0.0),
         Vector2::new(config.screen_width as f64, config.screen_height as f64),
-    ));
+    );
+    let mut physics = PhysicsEngine::new(constraints);
+    create_scene(&mut physics);
 
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
@@ -131,7 +124,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            physics.advance(1.0 / 600.0);
+            physics.advance(1.0 / 60.0 / 10.0);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -149,9 +142,10 @@ fn main() -> anyhow::Result<()> {
         if let Some(fps) = fps_calculator.update(frame_count)? {
             min_fps = min_fps.min(fps);
             let stats_string = format!(
-                "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}",
+                "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}\nsolver: {}",
                 physics.time(),
-                physics.object_count()
+                physics.grid().objects().len(),
+                physics.solver_kind
             );
             stats_text = Some(render_text(
                 &stats_string,
@@ -220,6 +214,13 @@ macro_rules! keydown {
             ..
         }
     };
+    ($keycode: pat, $keymod: pat) => {
+        Event::KeyDown {
+            keycode: Some($keycode),
+            keymod: $keymod,
+            ..
+        }
+    };
 }
 
 fn process_events(
@@ -232,9 +233,17 @@ fn process_events(
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
-            keydown!(Keycode::P) => emit_scene(physics.objects()).unwrap(),
+            keydown!(Keycode::P) => emit_scene(physics.grid().objects()).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
             keydown!(Keycode::Space) => *advance_time = !*advance_time,
+
+            keydown!(Keycode::D, Mod::LSHIFTMOD | Mod::RSHIFTMOD) => {
+                render_settings.details = RenderDetails {
+                    as_circle: false,
+                    id: false,
+                    velocity: false,
+                };
+            }
 
             keydown!(Keycode::D) => {
                 render_settings.details = RenderDetails {
@@ -244,13 +253,7 @@ fn process_events(
                 };
             }
 
-            keydown!(Keycode::S) => {
-                render_settings.details = RenderDetails {
-                    as_circle: false,
-                    id: false,
-                    velocity: false,
-                };
-            }
+            keydown!(Keycode::S) => physics.solver_kind = physics.solver_kind.next(),
 
             keydown!(Keycode::C) => {
                 render_settings.details.as_circle = !render_settings.details.as_circle;
@@ -270,11 +273,11 @@ fn process_events(
                 y,
                 ..
             } => {
-                for (id, object) in physics.objects().collect_vec() {
+                for (object_index, object) in physics.grid().objects().to_vec().into_iter().enumerate() {
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        let object = physics.object_mut(id);
+                        let object = physics.object_mut(object_index);
                         object.set_velocity(object.velocity() + direction.normalize() * 1.0, 1.0);
                     }
                 }
@@ -289,13 +292,13 @@ fn process_events(
     EventResponse::Continue
 }
 
-fn emit_scene(objects: impl Iterator<Item = (usize, Object)>) -> std::io::Result<()> {
+fn emit_scene(objects: &[Object]) -> std::io::Result<()> {
     use std::io::Write;
 
     let file = &mut File::create(emitted_scene_path!())?;
     writeln!(file, "{{")?;
 
-    for (_, object) in objects {
+    for object in objects {
         let (ppx, ppy) = (object.position.x, object.position.y);
         let (cpx, cpy) = (object.velocity().x, object.velocity().y);
         let (ax, ay) = (object.acceleration.x, object.acceleration.y);
@@ -334,9 +337,9 @@ fn render_physics(
     mouse_position: Vector2<f64>,
 ) -> Result<()> {
     let texture_creator = canvas.texture_creator();
-    for (id, object) in physics.objects() {
+    for (object_index, object) in physics.grid().objects().iter().enumerate() {
         render_object(
-            id,
+            object_index,
             &object,
             &settings.details,
             screen_width,
@@ -432,9 +435,9 @@ fn render_grid(
     mouse_position: Vector2<f64>,
     details: &RenderDetails,
 ) -> Result<()> {
-    let grid_position = physics.grid.position;
-    let grid_size = physics.grid.size;
-    let cell_size = physics.grid.cell_size;
+    let grid_position = physics.grid().position();
+    let grid_size = physics.grid().size();
+    let cell_size = physics.grid().cell_size();
 
     let mut x = grid_position.x;
     for _ in 0..=grid_size.x {
@@ -466,12 +469,12 @@ fn render_grid(
         y += cell_size;
     }
 
-    let cell = cell_at(mouse_position, grid_position, cell_size);
-    if cell.x < grid_size.x && cell.y < grid_size.y {
+    let cell @ (x, y) = cell_at(mouse_position, grid_position, cell_size);
+    if x < grid_size.x && y < grid_size.y {
         canvas.set_draw_color(Color::WHITE);
         let highlight_rect = Rect::new(
-            (grid_position.x + cell.x as f64 * cell_size) as i32,
-            (grid_position.y + cell.y as f64 * cell_size) as i32,
+            (grid_position.x + x as f64 * cell_size) as i32,
+            (grid_position.y + y as f64 * cell_size) as i32,
             cell_size as u32,
             cell_size as u32,
         );
@@ -480,20 +483,17 @@ fn render_grid(
             .map_err(string_to_anyhow)
             .with_context(|| format!("highlight mouse cell {cell:?}"))?;
 
-        for &object_index in &physics.grid.cells[(cell.x, cell.y)] {
-            let object = &physics.grid.objects[object_index];
+        for &object_index in &physics.grid().cells()[(x, y)] {
+            let object = &physics.grid().objects()[object_index];
             render_object_outline(object, Color::YELLOW, canvas, details.as_circle).context("highlight object")?;
         }
 
-        for adjacent_cell in (cell.x - 1..=cell.x + 1)
-            .cartesian_product(cell.y - 1..=cell.y + 1)
-            .map(|(x, y)| Cell::new(x, y))
-        {
-            if adjacent_cell != cell && adjacent_cell.x < grid_size.x && adjacent_cell.y < grid_size.y {
+        for adjacent_cell @ (x, y) in (x - 1..=x + 1).cartesian_product(y - 1..=y + 1) {
+            if adjacent_cell != cell && x < grid_size.x && y < grid_size.y {
                 canvas.set_draw_color(Color::MAGENTA);
                 let highlight_rect = Rect::new(
-                    (grid_position.x + adjacent_cell.x as f64 * cell_size) as i32,
-                    (grid_position.y + adjacent_cell.y as f64 * cell_size) as i32,
+                    (grid_position.x + x as f64 * cell_size) as i32,
+                    (grid_position.y + y as f64 * cell_size) as i32,
                     cell_size as u32,
                     cell_size as u32,
                 );
