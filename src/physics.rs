@@ -55,7 +55,7 @@ impl PhysicsEngine {
 
     fn update(&mut self, dt: f64) {
         self.time += dt;
-        // self.apply_gravity();
+        self.apply_gravity();
         self.process_collisions(dt);
         if let Some(constraint_box) = self.constraints {
             self.apply_constraints(constraint_box);
@@ -74,7 +74,7 @@ impl PhysicsEngine {
         self.process_collisions_bruteforce(dt);
     }
 
-    fn process_collisions_on_grid(&mut self, dt: f64) {
+    fn process_collisions_on_grid(&mut self) {
         for cell in (1..self.grid.size.x - 1)
             .cartesian_product(1..self.grid.size.y - 1)
             .map(|(x, y)| Cell::new(x, y))
@@ -84,7 +84,7 @@ impl PhysicsEngine {
                 .cartesian_product(cell.y - 1..=cell.y + 1)
                 .map(|(x, y)| Cell::new(x, y))
             {
-                self.process_cell_collisions(cell, adjacent_cell, dt);
+                self.process_cell_collisions(cell, adjacent_cell);
                 // let mut collision = None;
                 // for &id2 in &self.grid.cells[(adjacent_cell.x, adjacent_cell.y)] {
                 //     if id1 != id2 {
@@ -104,43 +104,27 @@ impl PhysicsEngine {
         }
     }
 
-    fn process_cell_collisions(&mut self, cell1: Cell, cell2: Cell, dt: f64) {
+    fn process_cell_collisions(&mut self, cell1: Cell, cell2: Cell) {
         for &id1 in &self.grid.cells[(cell1.x, cell1.y)] {
             for &id2 in &self.grid.cells[(cell2.x, cell2.y)] {
                 if id1 != id2 {
                     let [o1, o2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
                     if intersects(o1, o2) {
-                        collide_elastic(o1, o2, dt);
-                    };
+                        collide(o1, o2);
+                    }
                 }
             }
         }
     }
 
     fn process_collisions_bruteforce(&mut self, dt: f64) {
-        const RESPONSE_COEF: f64 = 0.75;
-
         for id1 in 0..self.grid.objects.len() {
             for id2 in id1 + 1..self.grid.objects.len() {
                 if id1 != id2 {
                     let [object_1, object_2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
                     if intersects(object_1, object_2) {
-                        // collide_elastic(o1, o2, dt);
-                        let v = object_1.position - object_2.position;
-                        let min_dist = object_1.radius + object_2.radius;
-                        // Check overlapping
-                        let dist = v.magnitude();
-                        if v.magnitude() < min_dist {
-                            let n = v / dist;
-                            let total_mass = object_1.mass + object_2.mass;
-                            let mass_ratio_1 = object_1.mass / total_mass;
-                            let mass_ratio_2 = object_2.mass / total_mass;
-                            let delta = 0.5 * RESPONSE_COEF * (dist - min_dist);
-                            // Update positions
-                            object_1.position -= n * (mass_ratio_2 * delta);
-                            object_2.position += n * (mass_ratio_1 * delta);
-                        }
-                    };
+                        collide(object_1, object_2);
+                    }
                 }
             }
         }
@@ -177,6 +161,18 @@ impl PhysicsEngine {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ConstraintBox {
+    topleft: Vector2<f64>,
+    bottomright: Vector2<f64>,
+}
+
+impl ConstraintBox {
+    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
+        Self { topleft, bottomright }
+    }
+}
+
 fn update_object(object: &mut Object, dt: f64) {
     let displacement = object.position - object.previous_position;
     object.previous_position = object.position;
@@ -190,36 +186,17 @@ fn intersects(o1: &Object, o2: &Object) -> bool {
     d.magnitude() <= r
 }
 
-fn collide_elastic(object1: &mut Object, object2: &mut Object, dt: f64) {
-    let v1 = object1.velocity();
-    let v2 = object2.velocity();
-    let [Object {
-        position: c1, mass: m1, ..
-    }, Object {
-        position: c2, mass: m2, ..
-    }] = [*object1, *object2];
-    object1.set_velocity(
-        v1 - ((c1 - c2).dot(&(v1 - v2)) * (c1 - c2) * 2.0 * m2) * (1.0 / ((m1 + m2) * (c1 - c2).magnitude_squared())),
-        dt,
-    );
-    object2.set_velocity(
-        v2 - ((c2 - c1).dot(&(v2 - v1)) * (c2 - c1) * 2.0 * m1) * (1.0 / ((m1 + m2) * (c2 - c1).magnitude_squared())),
-        dt,
-    );
-    let coeff_m1 = m1 / (m1 + m2);
-    let coeff_m2 = m2 / (m1 + m2);
-    object1.position += (c1 - c2) * coeff_m1 * dt + Vector2::new(0.1 * dt, 0.1 * dt);
-    object2.position -= (c1 - c2) * coeff_m2 * dt + Vector2::new(0.1 * dt, 0.1 * dt);
-}
+fn collide(object_1: &mut Object, object_2: &mut Object) {
+    const RESPONSE_COEF: f64 = 1.0;
 
-#[derive(Clone, Copy)]
-pub struct ConstraintBox {
-    topleft: Vector2<f64>,
-    bottomright: Vector2<f64>,
-}
-
-impl ConstraintBox {
-    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
-        Self { topleft, bottomright }
+    let axis_vector = object_1.position - object_2.position;
+    let collision_distance = object_1.radius + object_2.radius;
+    let distance = axis_vector.magnitude();
+    if distance < collision_distance {
+        let axis_vectoer_unit = axis_vector.normalize();
+        let total_mass = object_1.mass + object_2.mass;
+        let abs_displacement = 0.5 * RESPONSE_COEF * (distance - collision_distance);
+        object_1.position -= axis_vectoer_unit * ((object_2.mass / total_mass) * abs_displacement);
+        object_2.position += axis_vectoer_unit * ((object_1.mass / total_mass) * abs_displacement);
     }
 }
