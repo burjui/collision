@@ -2,7 +2,8 @@ use core::iter::Iterator;
 
 use grid::{Cell, Grid};
 use itertools::Itertools;
-use object::{Object, ObjectId};
+use nalgebra::Vector2;
+use object::Object;
 
 pub mod grid;
 pub mod object;
@@ -20,22 +21,18 @@ impl PhysicsEngine {
         }
     }
 
-    pub fn add(&mut self, object: Object) -> ObjectId {
-        let id = ObjectId(self.grid.objects.len());
+    pub fn add(&mut self, object: Object) -> usize {
+        let id = self.grid.objects.len();
         self.grid.objects.push(Object { ..object });
         id
     }
 
-    pub fn objects(&self) -> impl Iterator<Item = (ObjectId, Object)> + '_ {
-        self.grid
-            .objects
-            .iter()
-            .enumerate()
-            .map(|(id, object)| (ObjectId(id), *object))
+    pub fn objects(&self) -> impl Iterator<Item = (usize, Object)> + '_ {
+        self.grid.objects.iter().copied().enumerate()
     }
 
-    pub fn object_mut(&mut self, id: ObjectId) -> &mut Object {
-        &mut self.grid.objects[id.0]
+    pub fn object_mut(&mut self, id: usize) -> &mut Object {
+        &mut self.grid.objects[id]
     }
 
     pub fn object_count(&self) -> usize {
@@ -44,7 +41,7 @@ impl PhysicsEngine {
 
     pub fn advance(&mut self, dt: f64) {
         self.grid.update();
-        self.update_substeps(dt, 16);
+        self.update_substeps(dt, 8);
     }
 
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
@@ -56,13 +53,15 @@ impl PhysicsEngine {
 
     fn update(&mut self, dt: f64) {
         self.time += dt;
+        self.apply_gravity(dt);
         self.process_collisions(dt);
+        self.apply_constraints();
         self.update_objects(dt);
     }
 
-    fn update_objects(&mut self, dt: f64) {
+    fn apply_gravity(&mut self, dt: f64) {
         for object in &mut self.grid.objects {
-            update_object(object, dt)
+            object.acceleration += Vector2::new(0.0, 1000.0) * dt;
         }
     }
 
@@ -127,6 +126,31 @@ impl PhysicsEngine {
         }
     }
 
+    fn update_objects(&mut self, dt: f64) {
+        for object in &mut self.grid.objects {
+            update_object(object, dt)
+        }
+    }
+
+    fn apply_constraints(&mut self) {
+        for object in &mut self.grid.objects {
+            const BOTTOM: f64 = 600.0;
+            const LEFT: f64 = 300.0;
+            const RIGHT: f64 = 900.0;
+            if object.position.y + object.radius > BOTTOM {
+                object.position.y = BOTTOM - object.radius;
+                object.velocity.y = 0.0;
+                object.acceleration.y = 0.0;
+            }
+
+            if object.position.x + object.radius < LEFT {
+                object.position.x = LEFT + object.radius;
+            } else if object.position.x - object.radius > RIGHT {
+                object.position.x = RIGHT - object.radius;
+            }
+        }
+    }
+
     pub fn time(&self) -> f64 {
         self.time
     }
@@ -135,6 +159,7 @@ impl PhysicsEngine {
 fn update_object(object: &mut Object, dt: f64) {
     object.velocity += object.acceleration * dt;
     object.position += object.velocity * dt;
+    // object.acceleration = Vector2::new(0.0, 0.0);
 }
 
 fn intersects(o1: &Object, o2: &Object) -> bool {
@@ -161,6 +186,6 @@ fn collide_elastic(object1: &mut Object, object2: &mut Object, dt: f64) {
         v2 - ((c2 - c1).dot(&(v2 - v1)) * (c2 - c1) * 2.0 * m1) * (1.0 / ((m1 + m2) * (c2 - c1).magnitude_squared()));
     let coeff_m1 = m1 / (m1 + m2);
     let coeff_m2 = m2 / (m1 + m2);
-    object1.position += (c1 - c2) * coeff_m1 * dt;
-    object2.position -= (c1 - c2) * coeff_m2 * dt;
+    object1.position += (c1 - c2) * coeff_m1 * dt + Vector2::new(0.1 * dt, 0.1 * dt);
+    object2.position -= (c1 - c2) * coeff_m2 * dt + Vector2::new(0.1 * dt, 0.1 * dt);
 }

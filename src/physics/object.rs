@@ -1,5 +1,3 @@
-use std::fmt::{Display, Formatter};
-
 use nalgebra::Vector2;
 
 #[derive(Copy, Clone)]
@@ -20,15 +18,5 @@ impl Default for Object {
             radius: 1.0,
             mass: 1.0,
         }
-    }
-}
-
-//TODO get rid of indirection and ObjectId
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct ObjectId(pub(crate) usize);
-
-impl Display for ObjectId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }

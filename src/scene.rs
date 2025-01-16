@@ -1,9 +1,6 @@
 use nalgebra::Vector2;
 
-use crate::physics::{
-    object::{Object, ObjectId},
-    PhysicsEngine,
-};
+use crate::physics::{object::Object, PhysicsEngine};
 
 macro_rules! emitted_scene_path {
     () => {
@@ -16,12 +13,13 @@ const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 pub fn create_scene(physics: &mut PhysicsEngine) {
-    let wall = Wall::new(Vector2::new(700.0, 200.0), Vector2::new(200.0, 200.0));
-    create_wall(physics, wall);
+    // let wall = Wall::new(Vector2::new(700.0, 200.0), Vector2::new(200.0, 200.0));
+    // create_wall(physics, wall);
 
-    // let mut ball = Ball::new((1000.0, 300.0), 20.0);
+    // let mut ball = Ball::new(Vector2::new(1000.0, 300.0), 20.0);
     // ball.velocity = Vector2::new(-1000.0, 0.0);
     // create_ball(physics, ball);
+
     // physics.add(Object {
     //     position: Vector2::new(1000.0, 300.0),
     //     velocity: Vector2::new(-1000.0, 0.0),
@@ -29,6 +27,18 @@ pub fn create_scene(physics: &mut PhysicsEngine) {
     //     mass: 100.0,
     //     ..Default::default()
     // });
+
+    let mut x_offset = 0.0;
+    for y in 0..10 {
+        for x in 0..10 {
+            physics.add(Object {
+                position: Vector2::new(700.0 + x as f64 * 10.0 + x_offset, 500.0 + y as f64 * 10.0),
+                radius: 3.0,
+                ..Default::default()
+            });
+        }
+        // x_offset += 3.0;
+    }
 
     physics.grid.update();
     // include!(concat!("../", emitted_scene_path!()));
@@ -54,7 +64,7 @@ impl Wall {
     }
 }
 
-fn create_wall(physics: &mut PhysicsEngine, wall: Wall) -> Vec<ObjectId> {
+fn create_wall(physics: &mut PhysicsEngine, wall: Wall) -> Vec<usize> {
     let cell_size = wall.particle_radius * 2.0 + wall.particle_spacing;
     let dims = Vector2::new((wall.size.x / cell_size) as usize, (wall.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -99,7 +109,7 @@ impl Ball {
     }
 }
 
-fn create_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<ObjectId> {
+fn create_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<usize> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {

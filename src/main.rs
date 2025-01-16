@@ -1,14 +1,12 @@
 #![feature(get_many_mut)]
+#![feature(anonymous_lifetime_in_impl_trait)]
 
 use std::{fs::File, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
 use nalgebra::Vector2;
-use physics::{
-    grid::Cell,
-    object::{Object, ObjectId},
-};
+use physics::{grid::Cell, object::Object};
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
@@ -286,7 +284,7 @@ fn process_events(
     EventResponse::Continue
 }
 
-fn emit_scene(objects: impl Iterator<Item = (ObjectId, Object)>) -> std::io::Result<()> {
+fn emit_scene(objects: impl Iterator<Item = (usize, Object)>) -> std::io::Result<()> {
     use std::io::Write;
 
     let file = &mut File::create(emitted_scene_path!())?;
@@ -351,7 +349,7 @@ fn render_physics(
 }
 
 fn render_object(
-    id: ObjectId,
+    object_index: usize,
     object: &Object,
     details: &RenderDetails,
     screen_width: u32,
@@ -380,7 +378,7 @@ fn render_object(
 
     if details.id {
         let (id_text_texture, id_text_rect) = render_text(
-            &id.to_string(),
+            &object_index.to_string(),
             screen_width,
             font,
             Color::RGB(100, 100, 100),
