@@ -5,6 +5,7 @@ use itertools::Itertools;
 use nalgebra::Vector2;
 use ndarray::Array2;
 use object::Object;
+use sdl2::pixels::Color;
 use smallvec::SmallVec;
 
 pub mod grid;
@@ -38,16 +39,27 @@ pub struct PhysicsEngine {
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
+    planet_object: usize,
 }
 
 impl PhysicsEngine {
     pub fn new(constraints: ConstraintBox) -> Self {
-        Self {
+        let mut physics_engine = Self {
             solver_kind: SolverKind::Grid,
             grid: Grid::new(),
             time: 0.0,
             constraints,
-        }
+            planet_object: 0,
+        };
+        physics_engine.planet_object = physics_engine.add({
+            Object {
+                radius: 20.0,
+                mass: 10000.0,
+                color: Some(Color::MAGENTA),
+                ..Object::new(Vector2::new(800.0, 300.0))
+            }
+        });
+        physics_engine
     }
 
     pub fn add(&mut self, object: Object) -> usize {
@@ -85,8 +97,16 @@ impl PhysicsEngine {
     }
 
     fn apply_gravity(&mut self) {
-        for object in &mut self.grid.objects {
-            object.acceleration += Vector2::new(0.0, 10000.0);
+        for object_index in 0..self.grid.objects.len() {
+            if object_index != self.planet_object {
+                let [object, planet] = self
+                    .grid
+                    .objects
+                    .get_many_mut([object_index, self.planet_object])
+                    .unwrap();
+                object.acceleration +=
+                    Vector2::new(0.0, 10000.0) + (planet.position - object.position).normalize() * 50000.0;
+            }
         }
     }
 
