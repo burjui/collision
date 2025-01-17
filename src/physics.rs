@@ -123,8 +123,8 @@ impl PhysicsEngine {
         &mut self.grid.objects[index]
     }
 
-    pub fn advance(&mut self, dt: f64) {
-        self.update_substeps(dt, 4);
+    pub fn advance(&mut self, dt: f64, substeps: usize) {
+        self.update_substeps(dt, substeps);
     }
 
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
