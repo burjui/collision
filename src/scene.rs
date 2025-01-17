@@ -13,7 +13,7 @@ macro_rules! emitted_scene_path {
 pub fn create_scene(physics: &mut PhysicsEngine) {
     let brick = Brick {
         particle_radius: 3.0,
-        ..Brick::new(Vector2::new(400.0, 200.0), Vector2::new(400.0, 400.0))
+        ..Brick::new(Vector2::new(400.0, 200.0), Vector2::new(350.0, 350.0))
     };
     generate_brick(physics, brick);
 
