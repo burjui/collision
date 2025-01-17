@@ -21,6 +21,7 @@ ndarray = "0.16.1"
 clap = { version = "4.5.21", features = ["derive"] }
 smallvec = "1.13.2"
 nalgebra = "0.33.2"
+rand = "0.8.5"
 
 [profile.release]
 debug = true

@@ -85,6 +85,7 @@ fn main() -> anyhow::Result<()> {
     //     // Catch NaNs as SIGFPE
     //     feenableexcept(FE_INVALID);
     // }
+
     let constraints = ConstraintBox::new(
         Vector2::new(0.0, 0.0),
         Vector2::new(config.screen_width as f64, config.screen_height as f64),
@@ -341,6 +342,7 @@ fn render_physics(
         render_object(
             object_index,
             &object,
+            &physics,
             &settings.details,
             screen_width,
             canvas,
@@ -359,6 +361,7 @@ fn render_physics(
 fn render_object(
     object_index: usize,
     object: &Object,
+    physics: &PhysicsEngine,
     details: &RenderDetails,
     screen_width: u32,
     canvas: &mut WindowCanvas,
@@ -366,8 +369,7 @@ fn render_object(
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
     if details.velocity {
-        let magnitude = object.velocity().magnitude() + 0.0000001;
-        let scale_factor = 4.0 * magnitude.sqrt() / magnitude;
+        let scale_factor = object.velocity().magnitude() * 100.0;
         canvas
             .aa_line(
                 object.position.x as i16,
@@ -384,12 +386,12 @@ fn render_object(
     let particle_color = object.color.unwrap_or_else(|| spectrum(spectrum_position));
     render_object_outline(object, particle_color, canvas, details.as_circle)?;
 
-    if details.id {
+    if details.id && physics.is_planet(object_index) {
         let (id_text_texture, id_text_rect) = render_text(
             &object_index.to_string(),
             screen_width,
             font,
-            Color::RGB(100, 100, 100),
+            Color::WHITE,
             texture_creator,
         )
         .context("draw_physics(): render object id text")?;
