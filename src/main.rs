@@ -449,7 +449,7 @@ fn render_object(
     }
 
     if details.velocity {
-        const SCALE_FACTOR: f64 = 2.0;
+        const SCALE_FACTOR: f64 = 1.5;
         let factor = (velocity_magnitude * SCALE_FACTOR).min(1.0);
         canvas
             .filled_circle(
