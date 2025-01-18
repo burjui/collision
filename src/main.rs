@@ -75,6 +75,7 @@ fn main() -> anyhow::Result<()> {
         details: RenderDetails {
             as_circle: true,
             id: false,
+            energy: false,
             velocity: false,
         },
     };
@@ -117,7 +118,6 @@ fn main() -> anyhow::Result<()> {
             &mut physics,
             &mut advance_time,
             &mut mouse_position,
-            DEFAULT_DT,
         ) {
             EventResponse::Continue => {}
             EventResponse::Quit => break 'running,
@@ -229,7 +229,6 @@ fn process_events(
     physics: &mut PhysicsEngine,
     advance_time: &mut bool,
     mouse_position: &mut Vector2<f64>,
-    dt: f64,
 ) -> EventResponse {
     for event in event_pump.poll_iter() {
         match event {
@@ -242,6 +241,7 @@ fn process_events(
                 render_settings.details = RenderDetails {
                     as_circle: false,
                     id: false,
+                    energy: false,
                     velocity: false,
                 };
             }
@@ -250,6 +250,7 @@ fn process_events(
                 render_settings.details = RenderDetails {
                     as_circle: true,
                     id: true,
+                    energy: true,
                     velocity: true,
                 };
             }
@@ -262,6 +263,10 @@ fn process_events(
 
             keydown!(Keycode::I) => {
                 render_settings.details.id = !render_settings.details.id;
+            }
+
+            keydown!(Keycode::E) => {
+                render_settings.details.energy = !render_settings.details.energy;
             }
 
             keydown!(Keycode::V) => {
@@ -279,7 +284,7 @@ fn process_events(
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
                         let object = physics.object_mut(object_index);
-                        object.set_velocity(object.velocity() + direction.normalize() * 10000.0, dt);
+                        object.set_velocity(object.velocity() + direction.normalize() * 1.0, 1.0);
                     }
                 }
             }
@@ -321,6 +326,7 @@ fn emit_scene(objects: &[Object]) -> std::io::Result<()> {
 struct RenderDetails {
     as_circle: bool,
     id: bool,
+    energy: bool,
     velocity: bool,
 }
 
@@ -381,20 +387,6 @@ fn render_object(
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
-    if details.velocity {
-        let scale_factor = object.velocity().magnitude() * 100.0;
-        canvas
-            .aa_line(
-                object.position.x as i16,
-                object.position.y as i16,
-                (object.position.x + object.velocity().x * scale_factor) as i16,
-                (object.position.y + object.velocity().y * scale_factor) as i16,
-                Color::RGB(127, 0, 127),
-            )
-            .map_err(string_to_anyhow)
-            .context("render object velocity vector")?;
-    }
-
     let spectrum_position = object.velocity().magnitude().min(1.0);
     let particle_color = object.color.unwrap_or_else(|| spectrum(spectrum_position));
     render_object_outline(object, particle_color, canvas, details.as_circle)?;
@@ -417,6 +409,33 @@ fn render_object(
             .context("copy object id text to the window surface")?;
     }
 
+    let magnitude = object.velocity().magnitude();
+    if details.energy {
+        let energy_scale_factor = (0.5 * magnitude * magnitude * object.mass * 100.0).min(1.0);
+        canvas
+            .filled_circle(
+                object.position.x as i16,
+                object.position.y as i16,
+                3,
+                Color::RGBA(255, 0, 255, (energy_scale_factor * 255.0) as u8),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object velocity vector")?;
+    }
+
+    if details.velocity {
+        let velocity_scale_factor = (magnitude * 2.0).min(1.0);
+        canvas
+            .filled_circle(
+                object.position.x as i16,
+                object.position.y as i16,
+                3,
+                Color::RGBA(0, 255, 255, (velocity_scale_factor * 255.0) as u8),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object velocity vector")?;
+    }
+
     Ok(())
 }
 
@@ -428,7 +447,7 @@ fn render_object_outline(
 ) -> Result<(), anyhow::Error> {
     Ok(if as_circle {
         canvas
-            .aa_circle(
+            .filled_circle(
                 object.position.x as i16,
                 object.position.y as i16,
                 object.radius as i16,
