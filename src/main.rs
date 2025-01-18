@@ -109,7 +109,7 @@ fn main() -> anyhow::Result<()> {
     let mut last_frame_timestamp = physics.time();
     let mut mouse_position = Vector2::new(0.0, 0.0);
 
-    const DT: f64 = 1.0 / 60.0 / 32.0;
+    const DEFAULT_DT: f64 = 1.0 / 60.0 / 64.0;
     'running: loop {
         match process_events(
             &mut event_pump,
@@ -117,14 +117,14 @@ fn main() -> anyhow::Result<()> {
             &mut physics,
             &mut advance_time,
             &mut mouse_position,
-            DT,
+            DEFAULT_DT,
         ) {
             EventResponse::Continue => {}
             EventResponse::Quit => break 'running,
         }
 
         if advance_time {
-            physics.advance(DT, 8);
+            physics.advance(DEFAULT_DT, 2);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));

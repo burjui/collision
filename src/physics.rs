@@ -252,7 +252,7 @@ fn update_object(object: &mut Object, dt: f64) {
     let displacement = object.position - object.previous_position;
     object.previous_position = object.position;
     object.position += displacement + object.acceleration * (dt * dt);
-    object.acceleration = Vector2::new(0.0, 0.0);
+    // object.acceleration = Vector2::new(0.0, 0.0);
 }
 
 fn process_object_collision(object_1: &mut Object, object_2: &mut Object) {
