@@ -86,10 +86,7 @@ fn main() -> anyhow::Result<()> {
     //     feenableexcept(FE_INVALID);
     // }
 
-    let constraints = ConstraintBox::new(
-        Vector2::new(0.0, 0.0),
-        Vector2::new(config.screen_width as f64, config.screen_height as f64),
-    );
+    let constraints = ConstraintBox::new(Vector2::new(200.0, 100.0), Vector2::new(1200.0, 700.0));
     let mut physics = PhysicsEngine::new(constraints);
     create_scene(&mut physics);
 
@@ -112,6 +109,7 @@ fn main() -> anyhow::Result<()> {
     let mut last_frame_timestamp = physics.time();
     let mut mouse_position = Vector2::new(0.0, 0.0);
 
+    const DT: f64 = 1.0 / 60.0 / 32.0;
     'running: loop {
         match process_events(
             &mut event_pump,
@@ -119,13 +117,14 @@ fn main() -> anyhow::Result<()> {
             &mut physics,
             &mut advance_time,
             &mut mouse_position,
+            DT,
         ) {
             EventResponse::Continue => {}
             EventResponse::Quit => break 'running,
         }
 
         if advance_time {
-            physics.advance(1.0 / 60.0 / 8.0, 2);
+            physics.advance(DT, 8);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -230,6 +229,7 @@ fn process_events(
     physics: &mut PhysicsEngine,
     advance_time: &mut bool,
     mouse_position: &mut Vector2<f64>,
+    dt: f64,
 ) -> EventResponse {
     for event in event_pump.poll_iter() {
         match event {
@@ -279,7 +279,7 @@ fn process_events(
                     let direction = object.position - click_position;
                     if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
                         let object = physics.object_mut(object_index);
-                        object.set_velocity(object.velocity() + direction.normalize() * 1.0, 1.0);
+                        object.set_velocity(object.velocity() + direction.normalize() * 10000.0, dt);
                     }
                 }
             }
@@ -354,6 +354,19 @@ fn render_physics(
     if settings.with_grid {
         render_grid(physics, canvas, mouse_position, &settings.details)?;
     }
+
+    let p1 = physics.constraints().topleft;
+    let p2 = physics.constraints().bottomright;
+    canvas.set_draw_color(Color::WHITE);
+    canvas
+        .draw_rect(Rect::new(
+            p1.x as i32,
+            p1.y as i32,
+            (p2.x - p1.x) as u32,
+            (p2.y - p1.y) as u32,
+        ))
+        .map_err(string_to_anyhow)
+        .context("render constraints")?;
 
     Ok(())
 }

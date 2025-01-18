@@ -5,7 +5,6 @@ use itertools::Itertools;
 use nalgebra::Vector2;
 use ndarray::Array2;
 use object::Object;
-use sdl2::pixels::Color;
 use smallvec::SmallVec;
 
 pub mod grid;
@@ -44,7 +43,7 @@ pub struct PhysicsEngine {
 
 impl PhysicsEngine {
     pub fn new(constraints: ConstraintBox) -> Self {
-        let mut physics_engine = Self {
+        let physics_engine = Self {
             solver_kind: SolverKind::Grid,
             grid: Grid::new(),
             time: 0.0,
@@ -52,52 +51,35 @@ impl PhysicsEngine {
             planets: Vec::new(),
         };
 
-        // for _ in 0..4 {
-        //     physics_engine.add_planet({
-        //         let position = Vector2::new(
-        //             random::<f64>() * (constraints.bottomright.x - constraints.topleft.x),
-        //             random::<f64>() * (constraints.bottomright.y - constraints.topleft.y),
-        //         );
-        //         Object {
-        //             previous_position: position,
-        //             position,
-        //             radius: 20.0,
-        //             mass: 5000.0 + 5000.0 * random::<f64>(),
-        //             color: Some(Color::MAGENTA),
-        //             ..Object::new(Vector2::new(800.0, 300.0))
-        //         }
-        //     });
-        // }
+        // let planet1 = physics_engine.add({
+        //     Object {
+        //         radius: 20.0,
+        //         mass: 10000.0,
+        //         color: Some(Color::MAGENTA),
+        //         ..Object::new(Vector2::new(800.0, 300.0))
+        //     }
+        // });
+        // physics_engine.planets.push(planet1);
 
-        let planet1 = physics_engine.add({
-            Object {
-                radius: 20.0,
-                mass: 10000.0,
-                color: Some(Color::MAGENTA),
-                ..Object::new(Vector2::new(800.0, 300.0))
-            }
-        });
-        physics_engine.planets.push(planet1);
+        // let planet2 = physics_engine.add({
+        //     Object {
+        //         radius: 25.0,
+        //         mass: 12000.0,
+        //         color: Some(Color::YELLOW),
+        //         ..Object::new(Vector2::new(400.0, 650.0))
+        //     }
+        // });
+        // physics_engine.planets.push(planet2);
 
-        let planet2 = physics_engine.add({
-            Object {
-                radius: 25.0,
-                mass: 12000.0,
-                color: Some(Color::GRAY),
-                ..Object::new(Vector2::new(400.0, 700.0))
-            }
-        });
-        physics_engine.planets.push(planet2);
-
-        let planet3 = physics_engine.add({
-            Object {
-                radius: 10.0,
-                mass: 5000.0,
-                color: Some(Color::GRAY),
-                ..Object::new(Vector2::new(900.0, 500.0))
-            }
-        });
-        physics_engine.planets.push(planet3);
+        // let planet3 = physics_engine.add({
+        //     Object {
+        //         radius: 10.0,
+        //         mass: 5000.0,
+        //         color: Some(Color::BLUE),
+        //         ..Object::new(Vector2::new(900.0, 500.0))
+        //     }
+        // });
+        // physics_engine.planets.push(planet3);
 
         physics_engine
     }
@@ -127,6 +109,18 @@ impl PhysicsEngine {
         self.update_substeps(dt, substeps);
     }
 
+    pub fn constraints(&self) -> &ConstraintBox {
+        &self.constraints
+    }
+
+    pub fn time(&self) -> f64 {
+        self.time
+    }
+
+    pub fn is_planet(&self, object_index: usize) -> bool {
+        self.planets.contains(&object_index)
+    }
+
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
         let dt_substep = dt / substeps as f64;
         for _ in 0..substeps {
@@ -144,11 +138,15 @@ impl PhysicsEngine {
     }
 
     fn apply_gravity(&mut self) {
+        self.grid
+            .objects
+            .iter_mut()
+            .for_each(|object| object.acceleration = Vector2::new(0.0, 10000.0));
         for object in 0..self.grid.objects.len() {
             for planet in 0..self.planets.len() {
                 if planet != object {
                     let [object, planet] = self.grid.objects.get_many_mut([object, planet]).unwrap();
-                    object.acceleration += (planet.position - object.position).normalize() * planet.mass * 0.3;
+                    object.acceleration += (planet.position - object.position).normalize() * planet.mass * 0.03;
                 }
             }
         }
@@ -236,20 +234,12 @@ impl PhysicsEngine {
             }
         }
     }
-
-    pub fn time(&self) -> f64 {
-        self.time
-    }
-
-    pub fn is_planet(&self, object_index: usize) -> bool {
-        self.planets.contains(&object_index)
-    }
 }
 
 #[derive(Clone, Copy)]
 pub struct ConstraintBox {
-    topleft: Vector2<f64>,
-    bottomright: Vector2<f64>,
+    pub topleft: Vector2<f64>,
+    pub bottomright: Vector2<f64>,
 }
 
 impl ConstraintBox {

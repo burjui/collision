@@ -27,18 +27,19 @@ impl Brick {
     }
 }
 
-pub fn generate_brick(physics: &mut PhysicsEngine, wall: Brick) -> Vec<usize> {
-    let cell_size = wall.particle_radius * 2.0 + wall.particle_spacing;
-    let dims = Vector2::new((wall.size.x / cell_size) as usize, (wall.size.y / cell_size) as usize);
+pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
+    let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
+    let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
     for i in 0..dims.x {
         for j in 0..dims.y {
-            let p =
-                |position, index| position + (index + 1) as f64 * (wall.particle_radius * 2.0 + wall.particle_spacing);
-            let position = Vector2::new(p(wall.position.x, i), p(wall.position.y, j));
+            let p = |position, index| {
+                position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
+            };
+            let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
             let id = physics.add(Object {
-                radius: wall.particle_radius,
-                mass: wall.particle_mass,
+                radius: brick.particle_radius,
+                mass: brick.particle_mass,
                 ..Object::new(position)
             });
             result.push(id);
