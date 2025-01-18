@@ -31,18 +31,21 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
     let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
+    let mut x_offset = false;
     for i in 0..dims.x {
         for j in 0..dims.y {
-            let p = |position, index| {
+            let py = |position, index| {
                 position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
-            let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
+            let px = |position, index| py(position, index);// + x_offset as u8 as f64;
+            let position = Vector2::new(px(brick.position.x, i), py(brick.position.y, j));
             let id = physics.add(Object {
                 radius: brick.particle_radius,
                 mass: brick.particle_mass,
                 ..Object::new(position)
             });
             result.push(id);
+            x_offset = !x_offset;
         }
     }
     result

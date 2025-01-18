@@ -76,6 +76,7 @@ fn main() -> anyhow::Result<()> {
             as_circle: true,
             id: false,
             energy: false,
+            momentum: false,
             velocity: false,
         },
     };
@@ -242,6 +243,7 @@ fn process_events(
                     as_circle: false,
                     id: false,
                     energy: false,
+                    momentum: false,
                     velocity: false,
                 };
             }
@@ -251,6 +253,7 @@ fn process_events(
                     as_circle: true,
                     id: true,
                     energy: true,
+                    momentum: true,
                     velocity: true,
                 };
             }
@@ -267,6 +270,10 @@ fn process_events(
 
             keydown!(Keycode::E) => {
                 render_settings.details.energy = !render_settings.details.energy;
+            }
+
+            keydown!(Keycode::M) => {
+                render_settings.details.momentum = !render_settings.details.momentum;
             }
 
             keydown!(Keycode::V) => {
@@ -327,6 +334,7 @@ struct RenderDetails {
     as_circle: bool,
     id: bool,
     energy: bool,
+    momentum: bool,
     velocity: bool,
 }
 
@@ -409,28 +417,46 @@ fn render_object(
             .context("copy object id text to the window surface")?;
     }
 
-    let magnitude = object.velocity().magnitude();
+    let velocity_magnitude = object.velocity().magnitude();
     if details.energy {
-        let energy_scale_factor = (0.5 * magnitude * magnitude * object.mass * 100.0).min(1.0);
+        let energy = 0.5 * velocity_magnitude * velocity_magnitude * object.mass;
+        const SCALE_FACTOR: f64 = 100.0;
+        let factor = (energy * SCALE_FACTOR).min(1.0);
         canvas
             .filled_circle(
                 object.position.x as i16,
                 object.position.y as i16,
                 3,
-                Color::RGBA(255, 0, 255, (energy_scale_factor * 255.0) as u8),
+                Color::RGBA(255, 0, 255, (factor * 255.0) as u8),
+            )
+            .map_err(string_to_anyhow)
+            .context("render object velocity vector")?;
+    }
+
+    if details.momentum {
+        let momentum = velocity_magnitude * object.mass;
+        const SCALE_FACTOR: f64 = 2.0;
+        let factor = (momentum * SCALE_FACTOR).min(1.0);
+        canvas
+            .filled_circle(
+                object.position.x as i16,
+                object.position.y as i16,
+                3,
+                Color::RGBA(0, 0, 255, (factor * 255.0) as u8),
             )
             .map_err(string_to_anyhow)
             .context("render object velocity vector")?;
     }
 
     if details.velocity {
-        let velocity_scale_factor = (magnitude * 2.0).min(1.0);
+        const SCALE_FACTOR: f64 = 2.0;
+        let factor = (velocity_magnitude * SCALE_FACTOR).min(1.0);
         canvas
             .filled_circle(
                 object.position.x as i16,
                 object.position.y as i16,
                 3,
-                Color::RGBA(0, 255, 255, (velocity_scale_factor * 255.0) as u8),
+                Color::RGBA(0, 255, 255, (factor * 255.0) as u8),
             )
             .map_err(string_to_anyhow)
             .context("render object velocity vector")?;

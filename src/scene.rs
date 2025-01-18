@@ -14,7 +14,7 @@ pub fn create_scene(physics: &mut PhysicsEngine) {
     let brick = Brick {
         particle_radius: 2.5,
         particle_spacing: 0.0,
-        ..Brick::new(Vector2::new(200.0, 100.0), Vector2::new(1000.0, 590.0))
+        ..Brick::new(Vector2::new(200.0, 100.0), Vector2::new(990.0, 590.0))
     };
     generate_brick(physics, brick);
 
