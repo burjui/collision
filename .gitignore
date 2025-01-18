@@ -4,3 +4,4 @@
 /.vscode
 /*.mp4
 /flamegraph.svg
+/emitted_scene.rs
