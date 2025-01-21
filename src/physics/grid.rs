@@ -13,16 +13,6 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn new() -> Self {
-        Self {
-            position: Vector2::new(0.0, 0.0),
-            size: Vector2::new(0, 0),
-            cell_size: 0.0,
-            objects: Vec::new(),
-            cells: Array2::from_elem((0, 0), SmallVec::new()),
-        }
-    }
-
     pub fn update(&mut self) {
         let mut end = Vector2::new(f64::MIN, f64::MIN);
         self.position = Vector2::new(f64::MAX, f64::MAX);
@@ -75,8 +65,24 @@ impl Grid {
         &self.objects
     }
 
+    pub fn objects_mut(&mut self) -> &mut [Object] {
+        &mut self.objects
+    }
+
     pub fn cells(&self) -> &Array2<SmallVec<[usize; 4]>> {
         &self.cells
+    }
+}
+
+impl Default for Grid {
+    fn default() -> Self {
+        Self {
+            position: Vector2::new(0.0, 0.0),
+            size: Vector2::new(0, 0),
+            cell_size: 0.0,
+            objects: Vec::new(),
+            cells: Array2::from_elem((0, 0), SmallVec::new()),
+        }
     }
 }
 

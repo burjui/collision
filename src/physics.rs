@@ -38,67 +38,41 @@ pub struct PhysicsEngine {
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
-    planets: Vec<usize>,
+    collision_damping_coefficient: f64,
+    planets_end: usize,
 }
 
 impl PhysicsEngine {
     pub fn new(constraints: ConstraintBox) -> Self {
-        let physics_engine = Self {
+        Self {
             solver_kind: SolverKind::Grid,
-            grid: Grid::new(),
+            grid: Grid::default(),
             time: 0.0,
             constraints,
-            planets: Vec::new(),
-        };
-
-        // let planet1 = physics_engine.add({
-        //     Object {
-        //         radius: 20.0,
-        //         mass: 10000.0,
-        //         color: Some(Color::MAGENTA),
-        //         ..Object::new(Vector2::new(800.0, 300.0))
-        //     }
-        // });
-        // physics_engine.planets.push(planet1);
-
-        // let planet2 = physics_engine.add({
-        //     Object {
-        //         radius: 25.0,
-        //         mass: 12000.0,
-        //         color: Some(Color::YELLOW),
-        //         ..Object::new(Vector2::new(400.0, 650.0))
-        //     }
-        // });
-        // physics_engine.planets.push(planet2);
-
-        // let planet3 = physics_engine.add({
-        //     Object {
-        //         radius: 10.0,
-        //         mass: 5000.0,
-        //         color: Some(Color::BLUE),
-        //         ..Object::new(Vector2::new(900.0, 500.0))
-        //     }
-        // });
-        // physics_engine.planets.push(planet3);
-
-        physics_engine
+            collision_damping_coefficient: 1.0 - 0.00007,
+            planets_end: 0,
+        }
     }
 
     pub fn add(&mut self, object: Object) -> usize {
-        let id = self.grid().objects.len();
-        self.grid.objects.push(Object { ..object });
-        id
-    }
-
-    pub fn add_planet(&mut self, object: Object) -> usize {
-        let object_index = self.add(object);
-        let planet_index = self.planets.len();
-        self.planets.push(object_index);
-        planet_index
+        let object_index = self.grid().objects.len();
+        assert!(
+            !object.is_planet || object_index == self.planets_end,
+            "planets must be added before any other objects"
+        );
+        self.grid.objects.push(object);
+        if object.is_planet {
+            self.planets_end += 1;
+        }
+        object_index
     }
 
     pub fn grid(&self) -> &Grid {
         &self.grid
+    }
+
+    pub fn grid_mut(&mut self) -> &mut Grid {
+        &mut self.grid
     }
 
     pub fn object_mut(&mut self, index: usize) -> &mut Object {
@@ -115,10 +89,6 @@ impl PhysicsEngine {
 
     pub fn time(&self) -> f64 {
         self.time
-    }
-
-    pub fn is_planet(&self, object_index: usize) -> bool {
-        self.planets.contains(&object_index)
     }
 
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
@@ -138,15 +108,17 @@ impl PhysicsEngine {
     }
 
     fn apply_gravity(&mut self) {
-        self.grid
-            .objects
-            .iter_mut()
-            .for_each(|object| object.acceleration = Vector2::new(0.0, 10000.0));
-        for object in 0..self.grid.objects.len() {
-            for planet in 0..self.planets.len() {
-                if planet != object {
-                    let [object, planet] = self.grid.objects.get_many_mut([object, planet]).unwrap();
-                    object.acceleration += (planet.position - object.position).normalize() * planet.mass * 0.03;
+        for object in &mut self.grid.objects {
+            object.acceleration = Vector2::new(0.0, 0.0);
+        }
+        for object_index in 0..self.grid.objects.len() {
+            for planet_index in 0..self.planets_end {
+                if planet_index != object_index {
+                    let [object, planet] = self.grid.objects.get_many_mut([object_index, planet_index]).unwrap();
+                    let direction = (planet.position - object.position).normalize();
+                    let distance = (planet.position - object.position).magnitude();
+                    let scale_factor = if object.is_planet { 1.0 } else { 1700.0 };
+                    object.acceleration += direction * planet.mass * object.mass * scale_factor / distance.powf(1.0);
                 }
             }
         }
@@ -177,6 +149,7 @@ impl PhysicsEngine {
                         adjacent_cell,
                         &self.grid.cells,
                         &mut self.grid.objects,
+                        self.collision_damping_coefficient,
                     );
                 }
             }
@@ -188,11 +161,12 @@ impl PhysicsEngine {
         cell: (usize, usize),
         cells: &Array2<SmallVec<[usize; 4]>>,
         objects: &mut [Object],
+        collision_damping_coefficient: f64,
     ) {
         for &object2_index in &cells[cell] {
             if object1_index != object2_index {
                 let [object1, object2] = objects.get_many_mut([object1_index, object2_index]).unwrap();
-                process_object_collision(object1, object2);
+                process_object_collision(object1, object2, collision_damping_coefficient);
             }
         }
     }
@@ -201,8 +175,8 @@ impl PhysicsEngine {
         for id1 in 0..self.grid.objects.len() {
             for id2 in id1 + 1..self.grid.objects.len() {
                 if id1 != id2 {
-                    let [object_1, object_2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
-                    process_object_collision(object_1, object_2);
+                    let [object1, object2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
+                    process_object_collision(object1, object2, self.collision_damping_coefficient);
                 }
             }
         }
@@ -252,20 +226,23 @@ fn update_object(object: &mut Object, dt: f64) {
     let displacement = object.position - object.previous_position;
     object.previous_position = object.position;
     object.position += displacement + object.acceleration * (dt * dt);
-    // object.acceleration = Vector2::new(0.0, 0.0);
 }
 
-fn process_object_collision(object_1: &mut Object, object_2: &mut Object) {
-    const RESPONSE_COEF: f64 = 1.0;
-
-    let axis_vector = object_1.position - object_2.position;
-    let collision_distance = object_1.radius + object_2.radius;
+fn process_object_collision(object1: &mut Object, object2: &mut Object, collision_damping_coefficient: f64) {
+    let axis_vector = object1.position - object2.position;
+    let collision_distance = object1.radius + object2.radius;
     let distance = axis_vector.magnitude();
     if distance < collision_distance {
         let axis_vector_unit = axis_vector.normalize();
-        let total_mass = object_1.mass + object_2.mass;
-        let abs_displacement = 0.5 * RESPONSE_COEF * (distance - collision_distance);
-        object_1.position -= axis_vector_unit * ((object_2.mass / total_mass) * abs_displacement);
-        object_2.position += axis_vector_unit * ((object_1.mass / total_mass) * abs_displacement);
+        let total_mass = object1.mass + object2.mass;
+        let abs_displacement = 0.5 * (distance - collision_distance);
+        object1.position -= axis_vector_unit * ((object2.mass / total_mass) * abs_displacement);
+        object2.position += axis_vector_unit * ((object1.mass / total_mass) * abs_displacement);
+        if !object1.is_planet {
+            object1.set_velocity(object1.velocity() * collision_damping_coefficient, 1.0);
+        }
+        if !object2.is_planet {
+            object2.set_velocity(object2.velocity() * collision_damping_coefficient, 1.0);
+        }
     }
 }

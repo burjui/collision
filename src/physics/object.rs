@@ -9,6 +9,7 @@ pub struct Object {
     pub radius: f64,
     pub mass: f64,
     pub color: Option<Color>,
+    pub is_planet: bool,
 }
 
 impl Object {
@@ -20,6 +21,7 @@ impl Object {
             radius: 1.0,
             mass: 1.0,
             color: None,
+            is_planet: false,
         }
     }
 

@@ -88,7 +88,10 @@ fn main() -> anyhow::Result<()> {
     //     feenableexcept(FE_INVALID);
     // }
 
-    let constraints = ConstraintBox::new(Vector2::new(200.0, 100.0), Vector2::new(1200.0, 700.0));
+    let constraints = ConstraintBox::new(
+        Vector2::new(0.0, 0.0),
+        Vector2::new(config.screen_width as f64, config.screen_height as f64),
+    );
     let mut physics = PhysicsEngine::new(constraints);
     create_scene(&mut physics);
 
@@ -111,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     let mut last_frame_timestamp = physics.time();
     let mut mouse_position = Vector2::new(0.0, 0.0);
 
-    const DEFAULT_DT: f64 = 1.0 / 60.0 / 64.0;
+    const DEFAULT_DT: f64 = 1.0 / 60.0 / 16.0;
     'running: loop {
         match process_events(
             &mut event_pump,
@@ -286,12 +289,11 @@ fn process_events(
                 y,
                 ..
             } => {
-                for (object_index, object) in physics.grid().objects().to_vec().into_iter().enumerate() {
+                for object in physics.grid_mut().objects_mut() {
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
-                    if direction.magnitude() > 1.0 && direction.magnitude() < 70.0 {
-                        let object = physics.object_mut(object_index);
-                        object.set_velocity(object.velocity() + direction.normalize() * 1.0, 1.0);
+                    if direction.magnitude() > 0.0 && direction.magnitude() < 70.0 {
+                        object.set_velocity(object.velocity() + direction.normalize(), 1.0);
                     }
                 }
             }
@@ -355,8 +357,8 @@ fn render_physics(
     for (object_index, object) in physics.grid().objects().iter().enumerate() {
         render_object(
             object_index,
-            &object,
-            &physics,
+            object,
+            physics,
             &settings.details,
             screen_width,
             canvas,
@@ -385,6 +387,7 @@ fn render_physics(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_object(
     object_index: usize,
     object: &Object,
@@ -399,7 +402,7 @@ fn render_object(
     let particle_color = object.color.unwrap_or_else(|| spectrum(spectrum_position));
     render_object_outline(object, particle_color, canvas, details.as_circle)?;
 
-    if details.id && physics.is_planet(object_index) {
+    if details.id && physics.grid().objects()[object_index].is_planet {
         let (id_text_texture, id_text_rect) = render_text(
             &object_index.to_string(),
             screen_width,
@@ -471,7 +474,7 @@ fn render_object_outline(
     canvas: &mut WindowCanvas,
     as_circle: bool,
 ) -> Result<(), anyhow::Error> {
-    Ok(if as_circle {
+    if as_circle {
         canvas
             .filled_circle(
                 object.position.x as i16,
@@ -480,13 +483,13 @@ fn render_object_outline(
                 color,
             )
             .map_err(string_to_anyhow)
-            .context("render object circle")?;
+            .context("render object circle")
     } else {
         canvas
             .pixel(object.position.x as i16, object.position.y as i16, color)
             .map_err(string_to_anyhow)
-            .context("render object as pixel")?;
-    })
+            .context("render object as pixel")
+    }
 }
 
 fn render_grid(
