@@ -12,7 +12,7 @@ macro_rules! emitted_scene_path {
 }
 
 pub fn create_scene(physics: &mut PhysicsEngine) {
-    let position = Vector2::new(700.0, 300.0);
+    let position = Vector2::new(700.0, 450.0);
     let velocity = Vector2::new(-2.0, 0.0);
     let planet1 = Object {
         previous_position: position - velocity,

@@ -49,7 +49,7 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            collision_damping_coefficient: 1.0 - 0.00007,
+            collision_damping_coefficient: 1.0 - 0.00009,
             planets_end: 0,
         }
     }
@@ -117,7 +117,7 @@ impl PhysicsEngine {
                     let [object, planet] = self.grid.objects.get_many_mut([object_index, planet_index]).unwrap();
                     let direction = (planet.position - object.position).normalize();
                     let distance = (planet.position - object.position).magnitude();
-                    let scale_factor = if object.is_planet { 1.0 } else { 1700.0 };
+                    let scale_factor = if object.is_planet { 1.0 } else { 2000.0 };
                     object.acceleration += direction * planet.mass * object.mass * scale_factor / distance.powf(1.0);
                 }
             }
