@@ -35,6 +35,7 @@ impl fmt::Display for SolverKind {
 
 pub struct PhysicsEngine {
     pub solver_kind: SolverKind,
+    objects: Vec<Object>,
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
@@ -46,6 +47,7 @@ impl PhysicsEngine {
     pub fn new(constraints: ConstraintBox) -> Self {
         Self {
             solver_kind: SolverKind::Grid,
+            objects: Vec::new(),
             grid: Grid::default(),
             time: 0.0,
             constraints,
@@ -55,12 +57,12 @@ impl PhysicsEngine {
     }
 
     pub fn add(&mut self, object: Object) -> usize {
-        let object_index = self.grid().objects.len();
+        let object_index = self.objects.len();
         assert!(
             !object.is_planet || object_index == self.planets_end,
             "planets must be added before any other objects"
         );
-        self.grid.objects.push(object);
+        self.objects.push(object);
         if object.is_planet {
             self.planets_end += 1;
         }
@@ -75,8 +77,12 @@ impl PhysicsEngine {
         &mut self.grid
     }
 
-    pub fn object_mut(&mut self, index: usize) -> &mut Object {
-        &mut self.grid.objects[index]
+    pub fn objects(&self) -> &[Object] {
+        &self.objects
+    }
+
+    pub fn objects_mut(&mut self) -> &mut [Object] {
+        &mut self.objects
     }
 
     pub fn advance(&mut self, dt: f64, substeps: usize) {
@@ -100,7 +106,7 @@ impl PhysicsEngine {
 
     fn update(&mut self, dt: f64) {
         self.time += dt;
-        self.grid.update();
+        self.grid.update(&self.objects);
         self.apply_gravity();
         self.process_collisions();
         self.apply_constraints();
@@ -108,13 +114,13 @@ impl PhysicsEngine {
     }
 
     fn apply_gravity(&mut self) {
-        for object in &mut self.grid.objects {
+        for object in &mut self.objects {
             object.acceleration = Vector2::new(0.0, 0.0);
         }
-        for object_index in 0..self.grid.objects.len() {
+        for object_index in 0..self.objects.len() {
             for planet_index in 0..self.planets_end {
                 if planet_index != object_index {
-                    let [object, planet] = self.grid.objects.get_many_mut([object_index, planet_index]).unwrap();
+                    let [object, planet] = self.objects.get_many_mut([object_index, planet_index]).unwrap();
                     let direction = (planet.position - object.position).normalize();
                     let distance = (planet.position - object.position).magnitude();
                     let scale_factor = if object.is_planet { 1.0 } else { 2000.0 };
@@ -148,7 +154,7 @@ impl PhysicsEngine {
                         object_index,
                         adjacent_cell,
                         &self.grid.cells,
-                        &mut self.grid.objects,
+                        &mut self.objects,
                         self.collision_damping_coefficient,
                     );
                 }
@@ -172,10 +178,10 @@ impl PhysicsEngine {
     }
 
     fn process_collisions_bruteforce(&mut self) {
-        for id1 in 0..self.grid.objects.len() {
-            for id2 in id1 + 1..self.grid.objects.len() {
+        for id1 in 0..self.objects.len() {
+            for id2 in id1 + 1..self.objects.len() {
                 if id1 != id2 {
-                    let [object1, object2] = self.grid.objects.get_many_mut([id1, id2]).expect("out of bounds");
+                    let [object1, object2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds");
                     process_object_collision(object1, object2, self.collision_damping_coefficient);
                 }
             }
@@ -183,14 +189,14 @@ impl PhysicsEngine {
     }
 
     fn update_objects(&mut self, dt: f64) {
-        for object in &mut self.grid.objects {
+        for object in &mut self.objects {
             update_object(object, dt)
         }
     }
 
     fn apply_constraints(&mut self) {
         let cb = &self.constraints;
-        for object in &mut self.grid.objects {
+        for object in &mut self.objects {
             if object.position.x - object.radius < cb.topleft.x {
                 object.position.x = cb.topleft.x + object.radius;
             }
@@ -222,6 +228,7 @@ impl ConstraintBox {
     }
 }
 
+//TODO separate objects from grid and parallelize this
 fn update_object(object: &mut Object, dt: f64) {
     let displacement = object.position - object.previous_position;
     object.previous_position = object.position;

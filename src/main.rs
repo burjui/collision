@@ -148,7 +148,7 @@ fn main() -> anyhow::Result<()> {
             let stats_string = format!(
                 "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}\nsolver: {}",
                 physics.time(),
-                physics.grid().objects().len(),
+                physics.objects().len(),
                 physics.solver_kind
             );
             stats_text = Some(render_text(
@@ -237,7 +237,7 @@ fn process_events(
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
-            keydown!(Keycode::P) => emit_scene(physics.grid().objects()).unwrap(),
+            keydown!(Keycode::P) => emit_scene(physics.objects()).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
             keydown!(Keycode::Space) => *advance_time = !*advance_time,
 
@@ -289,7 +289,7 @@ fn process_events(
                 y,
                 ..
             } => {
-                for object in physics.grid_mut().objects_mut() {
+                for object in physics.objects_mut() {
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 0.0 && direction.magnitude() < 70.0 {
@@ -354,7 +354,7 @@ fn render_physics(
     mouse_position: Vector2<f64>,
 ) -> Result<()> {
     let texture_creator = canvas.texture_creator();
-    for (object_index, object) in physics.grid().objects().iter().enumerate() {
+    for (object_index, object) in physics.objects().iter().enumerate() {
         render_object(
             object_index,
             object,
@@ -402,7 +402,7 @@ fn render_object(
     let particle_color = object.color.unwrap_or_else(|| spectrum(spectrum_position));
     render_object_outline(object, particle_color, canvas, details.as_circle)?;
 
-    if details.id && physics.grid().objects()[object_index].is_planet {
+    if details.id && physics.objects()[object_index].is_planet {
         let (id_text_texture, id_text_rect) = render_text(
             &object_index.to_string(),
             screen_width,
@@ -547,7 +547,7 @@ fn render_grid(
             .with_context(|| format!("highlight mouse cell {cell:?}"))?;
 
         for &object_index in &physics.grid().cells()[(x, y)] {
-            let object = &physics.grid().objects()[object_index];
+            let object = &physics.objects()[object_index];
             render_object_outline(object, Color::YELLOW, canvas, details.as_circle).context("highlight object")?;
         }
 
