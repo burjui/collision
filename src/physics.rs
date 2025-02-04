@@ -1,10 +1,12 @@
 use core::fmt;
+use std::time::Instant;
 
-use grid::Grid;
+use grid::{Grid, GridCell};
 use itertools::Itertools;
 use nalgebra::Vector2;
 use ndarray::Array2;
 use object::Object;
+use ocl::ProQue;
 use smallvec::SmallVec;
 
 pub mod grid;
@@ -41,11 +43,12 @@ pub struct PhysicsEngine {
     constraints: ConstraintBox,
     collision_damping_coefficient: f64,
     planets_end: usize,
+    proque: ProQue,
 }
 
 impl PhysicsEngine {
-    pub fn new(constraints: ConstraintBox) -> Self {
-        Self {
+    pub fn new(constraints: ConstraintBox) -> anyhow::Result<Self> {
+        Ok(Self {
             solver_kind: SolverKind::Grid,
             objects: Vec::new(),
             grid: Grid::default(),
@@ -53,7 +56,17 @@ impl PhysicsEngine {
             constraints,
             collision_damping_coefficient: 1.0 - 0.00009,
             planets_end: 0,
-        }
+            proque: ProQue::builder()
+                .src(
+                    r#"
+                    __kernel void add(__global uint* buffer, uint scalar) {
+                        uint index = get_global_id(0);
+                        buffer[index] *= scalar;
+                    }
+                "#,
+                )
+                .build()?,
+        })
     }
 
     pub fn add(&mut self, object: Object) -> usize {
@@ -107,10 +120,16 @@ impl PhysicsEngine {
     fn update(&mut self, dt: f64) {
         self.time += dt;
         self.grid.update(&self.objects);
+        let start = Instant::now();
         self.apply_gravity();
+        println!("t(gravity): {:?}", start.elapsed());
+        let start = Instant::now();
         self.process_collisions();
+        println!("t(collisions): {:?}", start.elapsed());
         self.apply_constraints();
+        let start = Instant::now();
         self.update_objects(dt);
+        println!("t(updates): {:?}", start.elapsed());
     }
 
     fn apply_gravity(&mut self) {
@@ -165,7 +184,7 @@ impl PhysicsEngine {
     fn process_object_with_cell_collisions(
         object1_index: usize,
         cell: (usize, usize),
-        cells: &Array2<SmallVec<[usize; 4]>>,
+        cells: &Array2<GridCell>,
         objects: &mut [Object],
         collision_damping_coefficient: f64,
     ) {

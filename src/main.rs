@@ -92,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         Vector2::new(0.0, 0.0),
         Vector2::new(config.screen_width as f64, config.screen_height as f64),
     );
-    let mut physics = PhysicsEngine::new(constraints);
+    let mut physics = PhysicsEngine::new(constraints)?;
     create_scene(&mut physics);
 
     let mut advance_time = false;

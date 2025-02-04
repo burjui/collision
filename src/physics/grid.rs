@@ -4,11 +4,13 @@ use smallvec::SmallVec;
 
 use super::object::Object;
 
+pub type GridCell = SmallVec<[usize; 32]>;
+
 pub struct Grid {
     position: Vector2<f64>,
     size: Vector2<usize>,
     cell_size: f64,
-    pub(super) cells: Array2<SmallVec<[usize; 4]>>,
+    pub(super) cells: Array2<GridCell>,
 }
 
 impl Grid {
@@ -50,7 +52,7 @@ impl Grid {
         self.cell_size
     }
 
-    pub fn cells(&self) -> &Array2<SmallVec<[usize; 4]>> {
+    pub fn cells(&self) -> &Array2<GridCell> {
         &self.cells
     }
 }
