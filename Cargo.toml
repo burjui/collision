@@ -5,22 +5,31 @@ authors = ["Artem Borisovskiy <bytefu@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-sdl2 = { version = "0.34.5", features = ["gfx", "ttf"] }
-serde = "1.0.188"
-serde_derive = "1.0.188"
-toml = "0.5.11"
-num-traits = "0.2.16"
+sdl2 = { version = "0.37.0", features = ["gfx", "ttf", "image"] }
+serde = "1.0.217"
+serde_derive = "1.0.217"
+toml = "0.8.19"
+num-traits = "0.2.19"
 slab = "0.4.9"
-cgmath = "0.18.0"
-itertools = "0.10.5"
-anyhow = "1.0.75"
-env_logger = "0.11.5"
-log = "0.4.20"
+itertools = "0.14.0"
+anyhow = "1.0.95"
+env_logger = "0.11.6"
+log = "0.4.25"
 derive_deref = "1.1.1"
-video-rs = { version = "0.10.1", features = ["ndarray"] }
+video-rs = { version = "0.10.3", features = ["ndarray"] }
 ndarray = "0.16.1"
-clap = { version = "4.5.21", features = ["derive"] }
+clap = { version = "4.5.27", features = ["derive"] }
 smallvec = "1.13.2"
+nalgebra = "0.33.2"
+rand = "0.8.5"
+rayon = "1.10.0"
+ocl-core = { version = "0.11.5", default-features = false, features = [
+    "opencl_version_2_1",
+] }
+ocl = { version = "0.19.7", default-features = false, features = [
+    "opencl_version_2_1",
+] }
+soa-rs = "0.7.6"
 
 [profile.release]
 debug = true

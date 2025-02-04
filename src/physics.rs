@@ -1,271 +1,274 @@
-use core::{
-    iter::Iterator,
-    option::{
-        Option,
-        Option::{None, Some},
-    },
-};
+use core::fmt;
+use std::time::Instant;
 
-use cgmath::{InnerSpace, Vector2};
-use log::debug;
+use grid::{Grid, GridCell};
+use itertools::Itertools;
+use nalgebra::Vector2;
+use ndarray::Array2;
 use object::Object;
-use timeline::EventKind;
+use ocl::ProQue;
+use smallvec::SmallVec;
 
-use crate::physics::{
-    grid::{Grid, GridBuilder},
-    permutation::UniquePermutation2,
-    timeline::Timeline,
-};
-
-mod grid;
+pub mod grid;
 pub mod object;
-mod permutation;
-mod timeline;
 
-pub struct CollisionDetector {
-    pub grid: Grid,
-    pub timeline: Timeline,
+pub enum SolverKind {
+    Bruteforce,
+    Grid,
 }
 
-impl CollisionDetector {
-    pub fn new() -> Self {
-        Self {
-            grid: Grid::default(),
-            timeline: Timeline::default(),
+impl SolverKind {
+    pub fn next(&self) -> Self {
+        match self {
+            SolverKind::Bruteforce => SolverKind::Grid,
+            SolverKind::Grid => SolverKind::Bruteforce,
         }
+    }
+}
+
+impl fmt::Display for SolverKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SolverKind::Bruteforce => write!(f, "bruteforce"),
+            SolverKind::Grid => write!(f, "grid"),
+        }
+    }
+}
+
+pub struct PhysicsEngine {
+    pub solver_kind: SolverKind,
+    objects: Vec<Object>,
+    grid: Grid,
+    time: f64,
+    constraints: ConstraintBox,
+    collision_damping_coefficient: f64,
+    planets_end: usize,
+    proque: ProQue,
+}
+
+impl PhysicsEngine {
+    pub fn new(constraints: ConstraintBox) -> anyhow::Result<Self> {
+        Ok(Self {
+            solver_kind: SolverKind::Grid,
+            objects: Vec::new(),
+            grid: Grid::default(),
+            time: 0.0,
+            constraints,
+            collision_damping_coefficient: 1.0 - 0.00009,
+            planets_end: 0,
+            proque: ProQue::builder()
+                .src(
+                    r#"
+                    __kernel void add(__global uint* buffer, uint scalar) {
+                        uint index = get_global_id(0);
+                        buffer[index] *= scalar;
+                    }
+                "#,
+                )
+                .build()?,
+        })
     }
 
     pub fn add(&mut self, object: Object) -> usize {
-        let index = self.grid.objects.len();
-        self.grid.objects.push(object);
-        index
-    }
-
-    pub fn grid_position(&self) -> Option<Vector2<f64>> {
-        if self.grid.is_empty() {
-            None
-        } else {
-            Some(self.grid.position)
+        let object_index = self.objects.len();
+        assert!(
+            !object.is_planet || object_index == self.planets_end,
+            "planets must be added before any other objects"
+        );
+        self.objects.push(object);
+        if object.is_planet {
+            self.planets_end += 1;
         }
+        object_index
     }
 
-    pub fn grid_cell_size(&self) -> f64 {
-        self.grid.cell_size
+    pub fn grid(&self) -> &Grid {
+        &self.grid
     }
 
-    pub fn grid_size(&self) -> Vector2<usize> {
-        self.grid.size
+    pub fn grid_mut(&mut self) -> &mut Grid {
+        &mut self.grid
     }
 
-    pub fn advance(&mut self, mut dt: f64) {
-        while let Some((event, dt_leftover)) = self.timeline.advance(dt) {
-            if dt <= 0.0 {
-                break;
-            }
+    pub fn objects(&self) -> &[Object] {
+        &self.objects
+    }
 
-            let event_dt = dt - dt_leftover;
-            dt = dt_leftover;
-            self.advance_objects(event_dt);
+    pub fn objects_mut(&mut self) -> &mut [Object] {
+        &mut self.objects
+    }
 
-            match event.kind {
-                EventKind::Collision => {
-                    self.collide(event.id1, event.id2);
-                    self.calculate_collisions();
-                }
+    pub fn advance(&mut self, dt: f64, substeps: usize) {
+        self.update_substeps(dt, substeps);
+    }
 
-                EventKind::Separation => self.separate(event.id1, event.id2),
-            }
-        }
-
-        if dt >= 0.0 {
-            self.advance_objects(dt);
-            self.calculate_collisions();
-        }
+    pub fn constraints(&self) -> &ConstraintBox {
+        &self.constraints
     }
 
     pub fn time(&self) -> f64 {
-        self.timeline.time()
+        self.time
     }
 
-    #[must_use]
-    fn build_grid(&mut self) -> Grid {
-        let mut grid_builder = GridBuilder::default();
-        for object in self.grid.objects.iter() {
-            grid_builder.add_object(*object);
+    fn update_substeps(&mut self, dt: f64, substeps: usize) {
+        let dt_substep = dt / substeps as f64;
+        for _ in 0..substeps {
+            self.update(dt_substep)
         }
-        grid_builder.build()
     }
 
-    pub fn calculate_collisions(&mut self) {
-        debug!("Scanning for collisions (now {})", self.timeline.time());
+    fn update(&mut self, dt: f64) {
+        self.time += dt;
+        self.grid.update(&self.objects);
+        let start = Instant::now();
+        self.apply_gravity();
+        println!("t(gravity): {:?}", start.elapsed());
+        let start = Instant::now();
+        self.process_collisions();
+        println!("t(collisions): {:?}", start.elapsed());
+        self.apply_constraints();
+        let start = Instant::now();
+        self.update_objects(dt);
+        println!("t(updates): {:?}", start.elapsed());
+    }
 
-        self.grid = self.build_grid();
-        for cell in &self.grid.cells {
-            Self::calculate_collisions_in_cell(
-                cell.as_slice(),
-                &mut self.grid.objects,
-                &mut self.timeline,
-            );
+    fn apply_gravity(&mut self) {
+        for object in &mut self.objects {
+            object.acceleration = Vector2::new(0.0, 0.0);
         }
-
-        debug!("{} events left", self.timeline.len());
-    }
-
-    pub fn calculate_collisions_in_cell(
-        cell: &[usize],
-        objects: &mut [Object],
-        timeline: &mut Timeline,
-    ) {
-        if cell.len() >= 2 {
-            for (id1, id2) in UniquePermutation2::new(cell) {
-                if id1 != id2 {
-                    let [o1, o2] = objects.get_many_mut([id1, id2]).unwrap();
-                    if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Collision) {
-                        let collision_time = timeline.time() + delay;
-                        let mut interesting_events = timeline
-                            .object_events(id1)
-                            .into_iter()
-                            .flatten()
-                            .chain(timeline.object_events(id2).into_iter().flatten());
-                        debug!("{} interesting events", interesting_events.clone().count());
-                        let collision_matters = !interesting_events.any(|event| {
-                            let these_are_separating = || {
-                                event.contains(id1)
-                                    && event.contains(id2)
-                                    && (matches!(event.kind, EventKind::Separation))
-                            };
-
-                            let either_is_colliding_earlier = || {
-                                (event.contains(id1) || event.contains(id2))
-                                    && matches!(event.kind, EventKind::Collision)
-                                    && event.time <= collision_time
-                            };
-
-                            these_are_separating() || either_is_colliding_earlier()
-                        });
-
-                        if collision_matters {
-                            timeline
-                                .remove_events(|event| event.contains(id1) && event.contains(id2));
-                            timeline.add_event(EventKind::Collision, collision_time, id1, id2);
-                        }
-                    }
+        for object_index in 0..self.objects.len() {
+            for planet_index in 0..self.planets_end {
+                if planet_index != object_index {
+                    let [object, planet] = self.objects.get_many_mut([object_index, planet_index]).unwrap();
+                    let direction = (planet.position - object.position).normalize();
+                    let distance = (planet.position - object.position).magnitude();
+                    let scale_factor = if object.is_planet { 1.0 } else { 2000.0 };
+                    object.acceleration += direction * planet.mass * object.mass * scale_factor / distance.powf(1.0);
                 }
             }
         }
     }
 
-    fn advance_objects(&mut self, dt: f64) {
-        for object in &mut self.grid.objects {
-            object.position += object.velocity * dt;
+    fn process_collisions(&mut self) {
+        match self.solver_kind {
+            SolverKind::Grid => self.process_collisions_on_grid(),
+            SolverKind::Bruteforce => self.process_collisions_bruteforce(),
         }
     }
 
-    fn collide(&mut self, id1: usize, id2: usize) {
-        debug!("COLLIDE {} {} (now {})", id1, id2, self.timeline.time());
-        self.collision_elastic(id1, id2);
-
-        // After collision, velocities change, making further events invalid
-        self.timeline
-            .remove_events(|event| event.contains(id1) || event.contains(id2));
-
-        // Separation might not happen if objects didn't actually intersect at the time of collision
-        let (o1, o2) = (&self.grid.objects[id1], &self.grid.objects[id2]);
-        if let Some(delay) = Self::calculate_event_delay(o1, o2, EventKind::Separation) {
-            let time = self.timeline.time() + delay;
-            self.timeline
-                .add_event(EventKind::Separation, time, id1, id2);
+    fn process_collisions_on_grid(&mut self) {
+        let cells = (0..self.grid.size().x as isize - 1).cartesian_product(0..self.grid.size().y as isize - 1);
+        for (x, y) in cells {
+            let cell = (x as usize, y as usize);
+            for &object_index in &self.grid.cells[cell] {
+                let adjacent_cells = (x - 1..=x + 1)
+                    .cartesian_product(y - 1..=y + 1)
+                    .filter(|&(x, y)| {
+                        x >= 0 && x < self.grid.size().x as isize && y >= 0 && y < self.grid.size().y as isize
+                    })
+                    .collect::<SmallVec<[(isize, isize); 9]>>();
+                for (x, y) in adjacent_cells {
+                    let adjacent_cell = (x as usize, y as usize);
+                    Self::process_object_with_cell_collisions(
+                        object_index,
+                        adjacent_cell,
+                        &self.grid.cells,
+                        &mut self.objects,
+                        self.collision_damping_coefficient,
+                    );
+                }
+            }
         }
     }
 
-    fn separate(&mut self, id1: usize, id2: usize) {
-        debug!("SEPARATE {} {} (now {})", id1, id2, self.timeline.time());
-        self.timeline.remove_events(|event| {
-            matches!(event.kind, EventKind::Separation)
-                && event.contains(id1)
-                && event.contains(id2)
-        });
+    fn process_object_with_cell_collisions(
+        object1_index: usize,
+        cell: (usize, usize),
+        cells: &Array2<GridCell>,
+        objects: &mut [Object],
+        collision_damping_coefficient: f64,
+    ) {
+        for &object2_index in &cells[cell] {
+            if object1_index != object2_index {
+                let [object1, object2] = objects.get_many_mut([object1_index, object2_index]).unwrap();
+                process_object_collision(object1, object2, collision_damping_coefficient);
+            }
+        }
     }
 
-    fn collision_elastic(&mut self, id1: usize, id2: usize) {
-        let [object1, object2] = self.grid.objects.get_many_mut([id1, id2]).unwrap();
-        let [Object {
-            position: c1,
-            velocity: v1,
-            mass: m1,
-            ..
-        }, Object {
-            position: c2,
-            velocity: v2,
-            mass: m2,
-            ..
-        }] = [*object1, *object2];
-        object1.velocity = v1
-            - ((c1 - c2).dot(v1 - v2) * (c1 - c2) * 2.0 * m2)
-                * (1.0 / ((m1 + m2) * (c1 - c2).magnitude2()));
-        object2.velocity = v2
-            - ((c2 - c1).dot(v2 - v1) * (c2 - c1) * 2.0 * m1)
-                * (1.0 / ((m1 + m2) * (c2 - c1).magnitude2()));
+    fn process_collisions_bruteforce(&mut self) {
+        for id1 in 0..self.objects.len() {
+            for id2 in id1 + 1..self.objects.len() {
+                if id1 != id2 {
+                    let [object1, object2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds");
+                    process_object_collision(object1, object2, self.collision_damping_coefficient);
+                }
+            }
+        }
     }
 
-    // Based on the following paper:
-    //
-    // "Collision Detection Between two Circular Rigid Bodies
-    // A comparison of two methods: Periodic Interference Test (PIT) and
-    // Predicted Instance of Collision (PIC) Calculation"
-    //
-    // by Madhav Deshpande, Neha Kharsikar and Priyanka Prabhu
-    //
-    fn calculate_event_delay(o1: &Object, o2: &Object, kind: EventKind) -> Option<f64> {
-        // a = |vy21|^2
-        // b = 2*(p21.y*v21.y + p21.x*v21.x)
-        // c = |p21|^2 - R^2
-        // discriminant = b^2 - 4ac
-        let coeff_sign = match kind {
-            EventKind::Collision => 1.0,
-            EventKind::Separation => -1.0,
-        };
-        let p21 = o2.position - o1.position;
-        let v21 = o2.velocity - o1.velocity;
-        let a = coeff_sign * v21.magnitude2();
-        let b = coeff_sign * 2.0 * (p21.y * v21.y + p21.x * v21.x);
-        let rr = (o1.size + o2.size) * 0.5;
-        let c = coeff_sign * (p21.magnitude2() - rr * rr);
-        let discriminant = b * b - 4.0 * a * c;
-        if discriminant < 0.0 || a == 0.0 {
-            None
-        } else {
-            let t1 = (-b + discriminant.sqrt()) / (2.0 * a);
-            let t2 = (-b - discriminant.sqrt()) / (2.0 * a);
-            let t = if t1 < 0.0 {
-                t2
-            } else if t2 < 0.0 {
-                t1
-            } else {
-                t1.min(t2)
-            };
-            if t >= 0.0 {
-                Some(t)
-            } else {
-                None
+    fn update_objects(&mut self, dt: f64) {
+        for object in &mut self.objects {
+            update_object(object, dt)
+        }
+    }
+
+    fn apply_constraints(&mut self) {
+        let cb = &self.constraints;
+        for object in &mut self.objects {
+            if object.position.x - object.radius < cb.topleft.x {
+                object.position.x = cb.topleft.x + object.radius;
+            }
+
+            if object.position.x + object.radius > cb.bottomright.x {
+                object.position.x = cb.bottomright.x - object.radius;
+            }
+
+            if object.position.y - object.radius < cb.topleft.y {
+                object.position.y = cb.topleft.y + object.radius;
+            }
+
+            if object.position.y + object.radius > cb.bottomright.y {
+                object.position.y = cb.bottomright.y - object.radius;
             }
         }
     }
 }
 
-#[allow(unused)]
-mod debug_utils {
-    const PROBLEMATIC_IDS: [usize; 2] = [16, 26];
+#[derive(Clone, Copy)]
+pub struct ConstraintBox {
+    pub topleft: Vector2<f64>,
+    pub bottomright: Vector2<f64>,
+}
 
-    pub(crate) fn are_problematic(id1: usize, id2: usize) -> bool {
-        let mut a_ids = PROBLEMATIC_IDS;
-        let mut b_ids = [id1, id2];
-        a_ids.sort_unstable();
-        b_ids.sort_unstable();
-        a_ids == b_ids
+impl ConstraintBox {
+    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
+        Self { topleft, bottomright }
     }
+}
 
-    pub(crate) fn is_problematic(id: usize) -> bool {
-        PROBLEMATIC_IDS.iter().any(|&pid| pid == id)
+//TODO separate objects from grid and parallelize this
+fn update_object(object: &mut Object, dt: f64) {
+    let displacement = object.position - object.previous_position;
+    object.previous_position = object.position;
+    object.position += displacement + object.acceleration * (dt * dt);
+}
+
+fn process_object_collision(object1: &mut Object, object2: &mut Object, collision_damping_coefficient: f64) {
+    let axis_vector = object1.position - object2.position;
+    let collision_distance = object1.radius + object2.radius;
+    let distance = axis_vector.magnitude();
+    if distance < collision_distance {
+        let axis_vector_unit = axis_vector.normalize();
+        let total_mass = object1.mass + object2.mass;
+        let abs_displacement = 0.5 * (distance - collision_distance);
+        object1.position -= axis_vector_unit * ((object2.mass / total_mass) * abs_displacement);
+        object2.position += axis_vector_unit * ((object1.mass / total_mass) * abs_displacement);
+        if !object1.is_planet {
+            object1.set_velocity(object1.velocity() * collision_damping_coefficient, 1.0);
+        }
+        if !object2.is_planet {
+            object2.set_velocity(object2.velocity() * collision_damping_coefficient, 1.0);
+        }
     }
 }
