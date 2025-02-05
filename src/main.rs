@@ -237,7 +237,6 @@ fn process_events(
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } | keydown!(Keycode::Escape) => return EventResponse::Quit,
-            keydown!(Keycode::P) => emit_scene(physics.objects()).unwrap(),
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
             keydown!(Keycode::Space) => *advance_time = !*advance_time,
 
@@ -305,29 +304,6 @@ fn process_events(
     }
 
     EventResponse::Continue
-}
-
-fn emit_scene(objects: &[Object]) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let file = &mut File::create(emitted_scene_path!())?;
-    writeln!(file, "{{")?;
-
-    for object in objects {
-        let (ppx, ppy) = (object.position.x, object.position.y);
-        let (cpx, cpy) = (object.velocity().x, object.velocity().y);
-        let (ax, ay) = (object.acceleration.x, object.acceleration.y);
-        writeln!(file, "physics.add(Object {{")?;
-        writeln!(file, "    previous_position: Vector2::new({ppx:?}, {ppy:?}),")?;
-        writeln!(file, "    position: Vector2::new({cpx:?}, {cpy:?}),")?;
-        writeln!(file, "    acceleration: Vector2::new({ax:?}, {ay:?}),")?;
-        writeln!(file, "    radius: {:?},", object.radius)?;
-        writeln!(file, "    mass: {:?},", object.mass)?;
-        writeln!(file, "}});")?;
-    }
-    writeln!(file, "}}")?;
-    println!("Emitted scene to \"{}\"", emitted_scene_path!());
-    Ok(())
 }
 
 #[derive(Copy, Clone)]

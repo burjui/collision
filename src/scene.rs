@@ -5,12 +5,6 @@ use collision::{
 use nalgebra::Vector2;
 use sdl2::pixels::Color;
 
-macro_rules! emitted_scene_path {
-    () => {
-        "emitted_scene.rs"
-    };
-}
-
 pub fn create_scene(physics: &mut PhysicsEngine) {
     // let position = Vector2::new(700.0, 400.0);
     // let velocity = Vector2::new(-0.5, 0.0);
@@ -51,6 +45,4 @@ pub fn create_scene(physics: &mut PhysicsEngine) {
         ..Brick::new(Vector2::new(200.0, 100.0), Vector2::new(600.0, 300.0))
     };
     generate_brick(physics, brick);
-
-    // include!(concat!("../", emitted_scene_path!()));
 }
