@@ -1,7 +1,7 @@
 #![feature(get_many_mut)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 
-use std::{fs::File, path::Path};
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use collision::physics::{grid::cell_at, object::Object, ConstraintBox, PhysicsEngine};
