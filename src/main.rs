@@ -293,7 +293,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 0.0 && direction.magnitude() < 70.0 {
-                        object.set_velocity(object.velocity() + direction.normalize(), 1.0);
+                        object.set_velocity(object.velocity() + direction.normalize());
                     }
                 }
             }
@@ -545,24 +545,26 @@ fn render_grid(
             .map_err(string_to_anyhow)
             .with_context(|| format!("highlight mouse cell {cell:?}"))?;
 
-        for &object_index in &physics.grid().cells()[(x, y)] {
-            let object = &physics.objects()[object_index];
-            render_object_outline(object, Color::YELLOW, canvas, details.as_circle).context("highlight object")?;
-        }
-
-        for adjacent_cell @ (x, y) in (x - 1..=x + 1).cartesian_product(y - 1..=y + 1) {
-            if adjacent_cell != cell && x < grid_size.x && y < grid_size.y {
-                canvas.set_draw_color(Color::MAGENTA);
-                let highlight_rect = Rect::new(
-                    (grid_position.x + x as f64 * cell_size) as i32,
-                    (grid_position.y + y as f64 * cell_size) as i32,
-                    cell_size as u32,
-                    cell_size as u32,
-                );
-                canvas
-                    .draw_rect(highlight_rect)
-                    .map_err(string_to_anyhow)
-                    .with_context(|| format!("highlight mouse cell {adjacent_cell:?}"))?;
+        for adjacent_cell @ (x, y) in (x.saturating_sub(1)..=x + 1).cartesian_product(y.saturating_sub(1)..=y + 1) {
+            if x < grid_size.x && y < grid_size.y {
+                for &object_index in &physics.grid().cells()[(x, y)] {
+                    let object = &physics.objects()[object_index];
+                    render_object_outline(object, Color::YELLOW, canvas, details.as_circle)
+                        .context("highlight object")?;
+                }
+                if adjacent_cell != cell {
+                    canvas.set_draw_color(Color::MAGENTA);
+                    let highlight_rect = Rect::new(
+                        (grid_position.x + x as f64 * cell_size) as i32,
+                        (grid_position.y + y as f64 * cell_size) as i32,
+                        cell_size as u32,
+                        cell_size as u32,
+                    );
+                    canvas
+                        .draw_rect(highlight_rect)
+                        .map_err(string_to_anyhow)
+                        .with_context(|| format!("highlight mouse cell {adjacent_cell:?}"))?;
+                }
             }
         }
     }

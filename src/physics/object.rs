@@ -29,7 +29,7 @@ impl Object {
         self.position - self.previous_position
     }
 
-    pub fn set_velocity(&mut self, velocity: Vector2<f64>, dt: f64) {
-        self.previous_position = self.position - velocity * dt;
+    pub fn set_velocity(&mut self, velocity: Vector2<f64>) {
+        self.previous_position = self.position - velocity;
     }
 }

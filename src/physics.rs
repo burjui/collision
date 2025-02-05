@@ -41,9 +41,9 @@ pub struct PhysicsEngine {
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
-    collision_damping_coefficient: f64,
+    restitution_coefficient: f64,
     planets_end: usize,
-    proque: ProQue,
+    _proque: ProQue, // TODO OpenCL all this
 }
 
 impl PhysicsEngine {
@@ -54,9 +54,9 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            collision_damping_coefficient: 1.0 - 0.00009,
+            restitution_coefficient: 1.0 - 0.00001,
             planets_end: 0,
-            proque: ProQue::builder()
+            _proque: ProQue::builder()
                 .src(
                     r#"
                     __kernel void add(__global uint* buffer, uint scalar) {
@@ -140,10 +140,11 @@ impl PhysicsEngine {
             for planet_index in 0..self.planets_end {
                 if planet_index != object_index {
                     let [object, planet] = self.objects.get_many_mut([object_index, planet_index]).unwrap();
-                    let direction = (planet.position - object.position).normalize();
-                    let distance = (planet.position - object.position).magnitude();
-                    let scale_factor = if object.is_planet { 1.0 } else { 2000.0 };
-                    object.acceleration += direction * planet.mass * object.mass * scale_factor / distance.powf(1.0);
+                    let to_planet = planet.position - object.position;
+                    let direction = to_planet.normalize();
+                    let gravitational_constant = 10000.0;
+                    object.acceleration +=
+                        direction * gravitational_constant * planet.mass / to_planet.magnitude_squared();
                 }
             }
         }
@@ -174,7 +175,7 @@ impl PhysicsEngine {
                         adjacent_cell,
                         &self.grid.cells,
                         &mut self.objects,
-                        self.collision_damping_coefficient,
+                        self.restitution_coefficient,
                     );
                 }
             }
@@ -186,12 +187,12 @@ impl PhysicsEngine {
         cell: (usize, usize),
         cells: &Array2<GridCell>,
         objects: &mut [Object],
-        collision_damping_coefficient: f64,
+        restitution_coefficient: f64,
     ) {
         for &object2_index in &cells[cell] {
             if object1_index != object2_index {
                 let [object1, object2] = objects.get_many_mut([object1_index, object2_index]).unwrap();
-                process_object_collision(object1, object2, collision_damping_coefficient);
+                process_object_collision(object1, object2, restitution_coefficient);
             }
         }
     }
@@ -201,7 +202,7 @@ impl PhysicsEngine {
             for id2 in id1 + 1..self.objects.len() {
                 if id1 != id2 {
                     let [object1, object2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds");
-                    process_object_collision(object1, object2, self.collision_damping_coefficient);
+                    process_object_collision(object1, object2, self.restitution_coefficient);
                 }
             }
         }
@@ -247,14 +248,13 @@ impl ConstraintBox {
     }
 }
 
-//TODO separate objects from grid and parallelize this
 fn update_object(object: &mut Object, dt: f64) {
     let displacement = object.position - object.previous_position;
     object.previous_position = object.position;
     object.position += displacement + object.acceleration * (dt * dt);
 }
 
-fn process_object_collision(object1: &mut Object, object2: &mut Object, collision_damping_coefficient: f64) {
+fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f64) {
     let axis_vector = object1.position - object2.position;
     let collision_distance = object1.radius + object2.radius;
     let distance = axis_vector.magnitude();
@@ -265,10 +265,10 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, collisio
         object1.position -= axis_vector_unit * ((object2.mass / total_mass) * abs_displacement);
         object2.position += axis_vector_unit * ((object1.mass / total_mass) * abs_displacement);
         if !object1.is_planet {
-            object1.set_velocity(object1.velocity() * collision_damping_coefficient, 1.0);
+            object1.set_velocity(object1.velocity() * restitution_coefficient);
         }
         if !object2.is_planet {
-            object2.set_velocity(object2.velocity() * collision_damping_coefficient, 1.0);
+            object2.set_velocity(object2.velocity() * restitution_coefficient);
         }
     }
 }

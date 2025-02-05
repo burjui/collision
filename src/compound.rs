@@ -37,7 +37,7 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
             let py = |position, index| {
                 position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
-            let px = |position, index| py(position, index);// + x_offset as u8 as f64;
+            let px = |position, index| py(position, index);
             let position = Vector2::new(px(brick.position.x, i), py(brick.position.y, j));
             let id = physics.add(Object {
                 radius: brick.particle_radius,
@@ -94,7 +94,7 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<usize> {
                     color: ball.color,
                     ..Object::new(position)
                 };
-                object.set_velocity(ball.velocity, 1.0);
+                object.set_velocity(ball.velocity);
                 let id = physics.add(object);
                 result.push(id);
             }
