@@ -5,6 +5,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use collision::physics::{grid::cell_at, object::Object, ConstraintBox, PhysicsEngine};
+use indoc::formatdoc;
 use itertools::Itertools;
 use nalgebra::Vector2;
 use sdl2::{
@@ -144,9 +145,24 @@ fn main() -> anyhow::Result<()> {
         )?;
 
         if let Some(fps) = fps_calculator.update(frame_count)? {
+            let total_kinetic_energy = physics
+                .objects()
+                .iter()
+                .map(|object| 0.5 * object.mass * object.velocity.magnitude_squared())
+                .sum::<f64>();
+            let total_momentum = physics
+                .objects()
+                .iter()
+                .map(|object| object.mass * object.velocity)
+                .sum::<Vector2<f64>>();
             min_fps = min_fps.min(fps);
-            let stats_string = format!(
-                "FPS: {fps} (min {min_fps})\ntime: {}\ntotal particles: {}\nsolver: {}",
+            let stats_string = formatdoc!(
+                "FPS: {fps} (min {min_fps})
+                 time: {}
+                 total particles: {}
+                 solver: {}
+                 total kinetic energy: {total_kinetic_energy}
+                 total momentum: {total_momentum:?}",
                 physics.time(),
                 physics.objects().len(),
                 physics.solver_kind
@@ -292,7 +308,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 0.0 && direction.magnitude() < 70.0 {
-                        object.set_velocity(object.velocity() + direction.normalize());
+                        object.velocity += direction.normalize() * 1000.0;
                     }
                 }
             }
@@ -373,9 +389,16 @@ fn render_object(
     font: &Font,
     texture_creator: &TextureCreator<WindowContext>,
 ) -> Result<()> {
-    let spectrum_position = object.velocity().magnitude().min(1.0);
-    let particle_color = object.color.unwrap_or_else(|| spectrum(spectrum_position));
-    render_object_outline(object, particle_color, canvas, details.as_circle)?;
+    let velocity_magnitude = object.velocity.magnitude();
+    let energy = 0.5 * velocity_magnitude * velocity_magnitude * object.mass;
+    {
+        let particle_color = object.color.unwrap_or_else(|| {
+            const SCALE_FACTOR: f64 = 0.0003;
+            let spectrum_position = (velocity_magnitude * SCALE_FACTOR).min(1.0);
+            spectrum(spectrum_position)
+        });
+        render_object_outline(object, particle_color, canvas, details.as_circle)?;
+    }
 
     if details.id && physics.objects()[object_index].is_planet {
         let (id_text_texture, id_text_rect) = render_text(
@@ -395,9 +418,7 @@ fn render_object(
             .context("copy object id text to the window surface")?;
     }
 
-    let velocity_magnitude = object.velocity().magnitude();
     if details.energy {
-        let energy = 0.5 * velocity_magnitude * velocity_magnitude * object.mass;
         const SCALE_FACTOR: f64 = 100.0;
         let factor = (energy * SCALE_FACTOR).min(1.0);
         canvas

@@ -94,7 +94,7 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<usize> {
                     color: ball.color,
                     ..Object::new(position)
                 };
-                object.set_velocity(ball.velocity);
+                object.velocity = ball.velocity;
                 let id = physics.add(object);
                 result.push(id);
             }

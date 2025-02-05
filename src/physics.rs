@@ -38,6 +38,7 @@ impl fmt::Display for SolverKind {
 pub struct PhysicsEngine {
     pub solver_kind: SolverKind,
     objects: Vec<Object>,
+    previous_accelerations: Vec<Vector2<f64>>,
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
@@ -51,10 +52,11 @@ impl PhysicsEngine {
         Ok(Self {
             solver_kind: SolverKind::Grid,
             objects: Vec::new(),
+            previous_accelerations: Vec::new(),
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            restitution_coefficient: 1.0 - 0.00001,
+            restitution_coefficient: 1.0,
             planets_end: 0,
             _proque: ProQue::builder()
                 .src(
@@ -79,6 +81,7 @@ impl PhysicsEngine {
         if object.is_planet {
             self.planets_end += 1;
         }
+        self.previous_accelerations.push(object.acceleration);
         object_index
     }
 
@@ -121,20 +124,21 @@ impl PhysicsEngine {
         self.time += dt;
         self.grid.update(&self.objects);
         let start = Instant::now();
-        self.apply_gravity();
-        println!("t(gravity): {:?}", start.elapsed());
-        let start = Instant::now();
         self.process_collisions();
         println!("t(collisions): {:?}", start.elapsed());
         self.apply_constraints();
+        let start = Instant::now();
+        self.apply_gravity();
+        println!("t(gravity): {:?}", start.elapsed());
         let start = Instant::now();
         self.update_objects(dt);
         println!("t(updates): {:?}", start.elapsed());
     }
 
     fn apply_gravity(&mut self) {
-        for object in &mut self.objects {
-            object.acceleration = Vector2::new(0.0, 0.0);
+        for object_index in 0..self.objects.len() {
+            self.objects[object_index].acceleration = Vector2::zeros();
+            self.previous_accelerations[object_index] = self.objects[object_index].acceleration;
         }
         for object_index in 0..self.objects.len() {
             for planet_index in 0..self.planets_end {
@@ -209,8 +213,12 @@ impl PhysicsEngine {
     }
 
     fn update_objects(&mut self, dt: f64) {
-        for object in &mut self.objects {
-            update_object(object, dt)
+        for object_index in 0..self.objects.len() {
+            velocity_verlet_update_object(
+                &mut self.objects[object_index],
+                self.previous_accelerations[object_index],
+                dt,
+            )
         }
     }
 
@@ -219,18 +227,22 @@ impl PhysicsEngine {
         for object in &mut self.objects {
             if object.position.x - object.radius < cb.topleft.x {
                 object.position.x = cb.topleft.x + object.radius;
+                object.velocity.x = 0.0;
             }
 
             if object.position.x + object.radius > cb.bottomright.x {
                 object.position.x = cb.bottomright.x - object.radius;
+                object.velocity.x = 0.0;
             }
 
             if object.position.y - object.radius < cb.topleft.y {
                 object.position.y = cb.topleft.y + object.radius;
+                object.velocity.y = 0.0;
             }
 
             if object.position.y + object.radius > cb.bottomright.y {
                 object.position.y = cb.bottomright.y - object.radius;
+                object.velocity.y = 0.0;
             }
         }
     }
@@ -248,27 +260,35 @@ impl ConstraintBox {
     }
 }
 
-fn update_object(object: &mut Object, dt: f64) {
-    let displacement = object.position - object.previous_position;
-    object.previous_position = object.position;
-    object.position += displacement + object.acceleration * (dt * dt);
+fn velocity_verlet_update_object(object: &mut Object, previous_acceleration: Vector2<f64>, dt: f64) {
+    object.position += object.velocity * dt + 0.5 * previous_acceleration * dt * dt;
+    object.velocity += 0.5 * (previous_acceleration + object.acceleration) * dt;
 }
 
 fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f64) {
-    let axis_vector = object1.position - object2.position;
     let collision_distance = object1.radius + object2.radius;
-    let distance = axis_vector.magnitude();
+    let from_2_to_1 = object1.position - object2.position;
+    let distance = (from_2_to_1).magnitude();
     if distance < collision_distance {
-        let axis_vector_unit = axis_vector.normalize();
         let total_mass = object1.mass + object2.mass;
-        let abs_displacement = 0.5 * (distance - collision_distance);
-        object1.position -= axis_vector_unit * ((object2.mass / total_mass) * abs_displacement);
-        object2.position += axis_vector_unit * ((object1.mass / total_mass) * abs_displacement);
+        let velocity_diff = object1.velocity - object2.velocity;
+        let divisor = total_mass * distance * distance;
+        object1.velocity =
+            object1.velocity - 2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) * from_2_to_1 / divisor;
+        object2.velocity =
+            object2.velocity - 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) * -from_2_to_1 / divisor;
+        let from_2_to_1_unit = from_2_to_1.normalize();
+        let intersection_depth = collision_distance - distance;
+        let distance_correction = 0.5 * intersection_depth;
+        let correction_base = from_2_to_1_unit * distance_correction / total_mass;
+        object1.position += object2.mass * correction_base;
+        object2.position -= object1.mass * correction_base;
+
         if !object1.is_planet {
-            object1.set_velocity(object1.velocity() * restitution_coefficient);
+            object1.velocity *= restitution_coefficient;
         }
         if !object2.is_planet {
-            object2.set_velocity(object2.velocity() * restitution_coefficient);
+            object2.velocity *= restitution_coefficient;
         }
     }
 }
