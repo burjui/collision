@@ -20,10 +20,10 @@ impl Grid {
         self.cell_size = 0.0;
 
         for &Object { position, radius, .. } in objects {
-            self.position.x = self.position.x.min(position.x);
-            self.position.y = self.position.y.min(position.y);
-            end.x = end.x.max(position.x);
-            end.y = end.y.max(position.y);
+            self.position.x = self.position.x.min(position.x - radius);
+            self.position.y = self.position.y.min(position.y - radius);
+            end.x = end.x.max(position.x + radius);
+            end.y = end.y.max(position.y + radius);
             self.cell_size = self.cell_size.max(radius * 2.0);
         }
 
