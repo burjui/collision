@@ -308,7 +308,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 0.0 && direction.magnitude() < 70.0 {
-                        object.velocity += direction.normalize() * 1000.0;
+                        object.velocity += direction.normalize() * 300.0;
                     }
                 }
             }
@@ -393,7 +393,7 @@ fn render_object(
     let energy = 0.5 * velocity_magnitude * velocity_magnitude * object.mass;
     {
         let particle_color = object.color.unwrap_or_else(|| {
-            const SCALE_FACTOR: f64 = 0.0003;
+            const SCALE_FACTOR: f64 = 0.002;
             let spectrum_position = (velocity_magnitude * SCALE_FACTOR).min(1.0);
             spectrum(spectrum_position)
         });

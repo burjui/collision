@@ -56,7 +56,7 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            restitution_coefficient: 1.0,
+            restitution_coefficient: 1.0-0.002,
             planets_end: 0,
             _proque: ProQue::builder()
                 .src(
@@ -279,10 +279,13 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
             object2.velocity - 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) * -from_2_to_1 / divisor;
         let from_2_to_1_unit = from_2_to_1.normalize();
         let intersection_depth = collision_distance - distance;
-        let distance_correction = 0.5 * intersection_depth;
-        let correction_base = from_2_to_1_unit * distance_correction / total_mass;
-        object1.position += object2.mass * correction_base;
-        object2.position -= object1.mass * correction_base;
+        let distance_correction = intersection_depth;
+        let momentum1 = object1.mass * object1.velocity.magnitude();
+        let momentum2 = object2.mass * object2.velocity.magnitude();
+        let total_momentum = momentum1 + momentum2;
+        let correction_base = from_2_to_1_unit * distance_correction / total_momentum;
+        object1.position += momentum2 * correction_base;
+        object2.position -= momentum1 * correction_base;
 
         if !object1.is_planet {
             object1.velocity *= restitution_coefficient;
