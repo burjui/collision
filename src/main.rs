@@ -30,9 +30,7 @@ mod fps;
 mod scene;
 
 fn main() -> anyhow::Result<()> {
-    env_logger::init();
     let config = Config::from_file(Path::new("config.toml")).context("load config")?;
-
     let sdl_context = sdl2::init().map_err(string_to_anyhow).context("init SDL2")?;
     let video_subsystem = sdl_context
         .video()
