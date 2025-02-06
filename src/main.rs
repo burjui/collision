@@ -13,14 +13,13 @@ use sdl2::{
     gfx::primitives::DrawRenderer,
     keyboard::{Keycode, Mod},
     mouse::MouseButton,
-    pixels::{Color, PixelFormatEnum},
+    pixels::Color,
     rect::Rect,
     render::{Texture, TextureCreator, WindowCanvas},
     ttf::Font,
     video::WindowContext,
     EventPump,
 };
-use video_rs::{encode::Settings, Encoder, Frame, Time};
 
 use crate::{config::Config, fps::FpsCalculator, scene::*};
 
@@ -30,20 +29,8 @@ mod fps;
 #[macro_use]
 mod scene;
 
-use clap::Parser;
-
-#[derive(Parser, Debug)]
-struct Args {
-    #[arg(short)]
-    video_output_path: Option<String>,
-}
-
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-
     env_logger::init();
-    video_rs::init().expect("init video-rs");
-
     let config = Config::from_file(Path::new("config.toml")).context("load config")?;
 
     let sdl_context = sdl2::init().map_err(string_to_anyhow).context("init SDL2")?;
@@ -98,21 +85,6 @@ fn main() -> anyhow::Result<()> {
 
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
-
-    let mut video_encoder = args
-        .video_output_path
-        .map(|video_output_path| {
-            Encoder::new(
-                Path::new(&video_output_path),
-                Settings::preset_h264_yuv420p(config.screen_width as usize, config.screen_height as usize, false),
-            )
-            .context("failed to create encoder")
-        })
-        .transpose()?;
-
-    let frame_duration: Time = Time::from_nth_of_a_second(60);
-    let mut last_frame_position = Time::zero();
-    let mut last_frame_timestamp = physics.time();
     let mut mouse_position = Vector2::new(0.0, 0.0);
 
     const DEFAULT_DT: f64 = 1.0 / 60.0 / 16.0;
@@ -184,41 +156,9 @@ fn main() -> anyhow::Result<()> {
         }
 
         canvas.present();
-
-        let frame_sim_duration = 0.1 / 60.0;
-        if let Some(video_encoder) = &mut video_encoder {
-            if physics.time() - last_frame_timestamp >= frame_sim_duration {
-                last_frame_timestamp += frame_sim_duration;
-                encode_frame(&canvas, &config, video_encoder, last_frame_position)?;
-                last_frame_position = last_frame_position.aligned_with(frame_duration).add();
-            }
-        }
-
         frame_count += 1;
     }
 
-    if let Some(video_encoder) = &mut video_encoder {
-        video_encoder.finish().expect("failed to finish encoder");
-    }
-
-    Ok(())
-}
-
-fn encode_frame(
-    canvas: &sdl2::render::Canvas<sdl2::video::Window>,
-    config: &Config,
-    encoder: &mut Encoder,
-    position: Time,
-) -> Result<(), anyhow::Error> {
-    let frame = canvas
-        .read_pixels(
-            Rect::new(0, 0, config.screen_width, config.screen_height),
-            PixelFormatEnum::RGB24,
-        )
-        .expect("read pixels");
-    let frame = Frame::from_shape_vec((config.screen_width as usize, config.screen_height as usize, 3), frame)
-        .context("frame conversion")?;
-    encoder.encode(&frame, position).expect("failed to encode frame");
     Ok(())
 }
 

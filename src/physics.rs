@@ -6,7 +6,6 @@ use itertools::Itertools;
 use nalgebra::Vector2;
 use ndarray::Array2;
 use object::Object;
-use ocl::ProQue;
 use smallvec::SmallVec;
 
 pub mod grid;
@@ -44,7 +43,6 @@ pub struct PhysicsEngine {
     constraints: ConstraintBox,
     restitution_coefficient: f64,
     planets_end: usize,
-    _proque: ProQue, // TODO OpenCL all this
 }
 
 impl PhysicsEngine {
@@ -56,18 +54,8 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            restitution_coefficient: 1.0-0.002,
+            restitution_coefficient: 1.0,
             planets_end: 0,
-            _proque: ProQue::builder()
-                .src(
-                    r#"
-                    __kernel void add(__global uint* buffer, uint scalar) {
-                        uint index = get_global_id(0);
-                        buffer[index] *= scalar;
-                    }
-                "#,
-                )
-                .build()?,
         })
     }
 
