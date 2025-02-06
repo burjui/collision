@@ -24,4 +24,8 @@ impl Object {
             is_planet: false,
         }
     }
+
+    pub fn momentum(&self) -> Vector2<f64> {
+        self.velocity * self.mass
+    }
 }

@@ -120,11 +120,7 @@ fn main() -> anyhow::Result<()> {
                 .iter()
                 .map(|object| 0.5 * object.mass * object.velocity.magnitude_squared())
                 .sum::<f64>();
-            let total_momentum = physics
-                .objects()
-                .iter()
-                .map(|object| object.mass * object.velocity)
-                .sum::<Vector2<f64>>();
+            let total_momentum = physics.objects_momentum();
             min_fps = min_fps.min(fps);
             let stats_string = formatdoc!(
                 "FPS: {fps} (min {min_fps})
@@ -246,7 +242,7 @@ fn process_events(
                     let click_position = Vector2::new(x as f64, y as f64);
                     let direction = object.position - click_position;
                     if direction.magnitude() > 0.0 && direction.magnitude() < 70.0 {
-                        object.velocity += direction.normalize() * 300.0;
+                        object.velocity += direction.normalize() * 600.0;
                     }
                 }
             }
@@ -331,7 +327,7 @@ fn render_object(
     let energy = 0.5 * velocity_magnitude * velocity_magnitude * object.mass;
     {
         let particle_color = object.color.unwrap_or_else(|| {
-            const SCALE_FACTOR: f64 = 0.002;
+            const SCALE_FACTOR: f64 = 0.0006;
             let spectrum_position = (velocity_magnitude * SCALE_FACTOR).min(1.0);
             spectrum(spectrum_position)
         });

@@ -1,4 +1,4 @@
-use core::fmt;
+use core::{f64, fmt};
 use std::time::Instant;
 
 use grid::{Grid, GridCell};
@@ -37,39 +37,34 @@ impl fmt::Display for SolverKind {
 pub struct PhysicsEngine {
     pub solver_kind: SolverKind,
     objects: Vec<Object>,
-    previous_accelerations: Vec<Vector2<f64>>,
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
     restitution_coefficient: f64,
-    planets_end: usize,
+    planets_count: usize,
 }
 
 impl PhysicsEngine {
     pub fn new(constraints: ConstraintBox) -> anyhow::Result<Self> {
         Ok(Self {
             solver_kind: SolverKind::Grid,
-            objects: Vec::new(),
-            previous_accelerations: Vec::new(),
+            objects: Vec::default(),
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            restitution_coefficient: 1.0,
-            planets_end: 0,
+            restitution_coefficient: 1.0 - 0.003,
+            planets_count: 0,
         })
     }
 
     pub fn add(&mut self, object: Object) -> usize {
         let object_index = self.objects.len();
         assert!(
-            !object.is_planet || object_index == self.planets_end,
+            !object.is_planet || object_index == self.planets_count,
             "planets must be added before any other objects"
         );
         self.objects.push(object);
-        if object.is_planet {
-            self.planets_end += 1;
-        }
-        self.previous_accelerations.push(object.acceleration);
+        self.planets_count += object.is_planet as usize;
         object_index
     }
 
@@ -101,6 +96,10 @@ impl PhysicsEngine {
         self.time
     }
 
+    pub fn objects_momentum(&self) -> Vector2<f64> {
+        self.objects.iter().map(Object::momentum).sum()
+    }
+
     fn update_substeps(&mut self, dt: f64, substeps: usize) {
         let dt_substep = dt / substeps as f64;
         for _ in 0..substeps {
@@ -110,14 +109,23 @@ impl PhysicsEngine {
 
     fn update(&mut self, dt: f64) {
         self.time += dt;
+
+        let start = Instant::now();
         self.grid.update(&self.objects);
+        println!("t(grid): {:?}", start.elapsed());
+
         let start = Instant::now();
         self.process_collisions();
         println!("t(collisions): {:?}", start.elapsed());
+
+        let start = Instant::now();
         self.apply_constraints();
+        println!("t(constraints): {:?}", start.elapsed());
+
         let start = Instant::now();
         self.apply_gravity();
         println!("t(gravity): {:?}", start.elapsed());
+
         let start = Instant::now();
         self.update_objects(dt);
         println!("t(updates): {:?}", start.elapsed());
@@ -125,21 +133,23 @@ impl PhysicsEngine {
 
     fn apply_gravity(&mut self) {
         for object_index in 0..self.objects.len() {
-            self.previous_accelerations[object_index] = self.objects[object_index].acceleration;
-            self.objects[object_index].acceleration = Vector2::default();
+            let gravity = self.gravity_accel(object_index, self.objects[object_index].position);
+            self.objects[object_index].acceleration += gravity;
         }
-        for object_index in 0..self.objects.len() {
-            for planet_index in 0..self.planets_end {
-                if planet_index != object_index {
-                    let [object, planet] = self.objects.get_many_mut([object_index, planet_index]).unwrap();
-                    let to_planet = planet.position - object.position;
-                    let direction = to_planet.normalize();
-                    let gravitational_constant = 10000.0;
-                    object.acceleration +=
-                        direction * gravitational_constant * planet.mass / to_planet.magnitude_squared();
-                }
+    }
+
+    fn gravity_accel(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
+        let mut gravity = Vector2::default();
+        for planet_index in 0..self.planets_count {
+            if planet_index != object_index {
+                let planet = &self.objects[planet_index];
+                let to_planet = planet.position - position;
+                let direction = to_planet.normalize();
+                let gravitational_constant = 10000.0;
+                gravity += direction * gravitational_constant * planet.mass / to_planet.magnitude_squared();
             }
         }
+        gravity
     }
 
     fn process_collisions(&mut self) {
@@ -202,35 +212,50 @@ impl PhysicsEngine {
 
     fn update_objects(&mut self, dt: f64) {
         for object_index in 0..self.objects.len() {
-            leapfrog_kdk_update_object(
-                &mut self.objects[object_index],
-                self.previous_accelerations[object_index],
-                dt,
-            )
+            self.leapfrog_yoshida_update_object(object_index, dt)
         }
     }
 
+    fn leapfrog_yoshida_update_object(&mut self, object_index: usize, dt: f64) {
+        let cbrt2 = 2.0f64.powf(1.0 / 3.0);
+        let w0 = -cbrt2 / (2.0 - cbrt2);
+        let w1 = 1.0 / (2.0 - cbrt2);
+        let c1 @ c4 = 0.5 * w1;
+        let c2 @ c3 = 0.5 * (w0 + w1);
+        let d1 @ d3 = w1;
+        let d2 = w0;
+        let Object {
+            position: x0,
+            velocity: v0,
+            ..
+        } = self.objects[object_index];
+        let x1 = x0 + c1 * v0 * dt;
+        let v1 = v0 + d1 * self.gravity_accel(object_index, x1) * dt;
+        let x2 = x0 + c2 * v1 * dt;
+        let v2 = v0 + d2 * self.gravity_accel(object_index, x2) * dt;
+        let x3 = x0 + c3 * v2 * dt;
+        let v3 = v0 + d3 * self.gravity_accel(object_index, x3) * dt;
+        self.objects[object_index].position = x0 + c4 * v3 * dt;
+        self.objects[object_index].velocity = v3;
+    }
+
     fn apply_constraints(&mut self) {
-        let cb = &self.constraints;
+        let cb = self.constraints;
         for object in &mut self.objects {
             if object.position.x - object.radius < cb.topleft.x {
                 object.position.x = cb.topleft.x + object.radius;
-                object.velocity.x = 0.0;
-            }
-
-            if object.position.x + object.radius > cb.bottomright.x {
+                object.velocity.x *= -1.0;
+            } else if object.position.x + object.radius > cb.bottomright.x {
                 object.position.x = cb.bottomright.x - object.radius;
-                object.velocity.x = 0.0;
+                object.velocity.x *= -1.0;
             }
 
             if object.position.y - object.radius < cb.topleft.y {
                 object.position.y = cb.topleft.y + object.radius;
-                object.velocity.y = 0.0;
-            }
-
-            if object.position.y + object.radius > cb.bottomright.y {
+                object.velocity.y *= -1.0;
+            } else if object.position.y + object.radius > cb.bottomright.y {
                 object.position.y = cb.bottomright.y - object.radius;
-                object.velocity.y = 0.0;
+                object.velocity.y *= -1.0;
             }
         }
     }
@@ -246,12 +271,6 @@ impl ConstraintBox {
     pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
         Self { topleft, bottomright }
     }
-}
-
-fn leapfrog_kdk_update_object(object: &mut Object, previous_acceleration: Vector2<f64>, dt: f64) {
-    let velocity_half_step = object.velocity + 0.5 * previous_acceleration * dt;
-    object.position += velocity_half_step * dt;
-    object.velocity = velocity_half_step + 0.5 * object.acceleration * dt
 }
 
 fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f64) {
