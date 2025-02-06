@@ -125,8 +125,8 @@ impl PhysicsEngine {
 
     fn apply_gravity(&mut self) {
         for object_index in 0..self.objects.len() {
-            self.objects[object_index].acceleration = Vector2::zeros();
             self.previous_accelerations[object_index] = self.objects[object_index].acceleration;
+            self.objects[object_index].acceleration = Vector2::default();
         }
         for object_index in 0..self.objects.len() {
             for planet_index in 0..self.planets_end {
