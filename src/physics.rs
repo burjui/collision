@@ -202,7 +202,7 @@ impl PhysicsEngine {
 
     fn update_objects(&mut self, dt: f64) {
         for object_index in 0..self.objects.len() {
-            velocity_verlet_update_object(
+            leapfrog_kdk_update_object(
                 &mut self.objects[object_index],
                 self.previous_accelerations[object_index],
                 dt,
@@ -248,9 +248,10 @@ impl ConstraintBox {
     }
 }
 
-fn velocity_verlet_update_object(object: &mut Object, previous_acceleration: Vector2<f64>, dt: f64) {
-    object.position += object.velocity * dt + 0.5 * previous_acceleration * dt * dt;
-    object.velocity += 0.5 * (previous_acceleration + object.acceleration) * dt;
+fn leapfrog_kdk_update_object(object: &mut Object, previous_acceleration: Vector2<f64>, dt: f64) {
+    let velocity_half_step = object.velocity + 0.5 * previous_acceleration * dt;
+    object.position += velocity_half_step * dt;
+    object.velocity = velocity_half_step + 0.5 * object.acceleration * dt
 }
 
 fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f64) {

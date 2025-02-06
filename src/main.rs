@@ -85,7 +85,7 @@ fn main() -> anyhow::Result<()> {
     let mut min_fps = u128::MAX;
     let mut mouse_position = Vector2::new(0.0, 0.0);
 
-    const DEFAULT_DT: f64 = 1.0 / 60.0 / 16.0;
+    const DEFAULT_DT: f64 = 1.0 / 60.0 / 32.0;
     'running: loop {
         match process_events(
             &mut event_pump,
