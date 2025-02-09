@@ -9,6 +9,7 @@ use object::Object;
 use smallvec::SmallVec;
 
 pub mod grid;
+mod leapfrog_yoshida;
 pub mod object;
 
 pub enum SolverKind {
@@ -160,25 +161,24 @@ impl PhysicsEngine {
     }
 
     fn process_collisions_on_grid(&mut self) {
-        let cells = (0..self.grid.size().x as isize - 1).cartesian_product(0..self.grid.size().y as isize - 1);
-        for (x, y) in cells {
-            let cell = (x as usize, y as usize);
-            for &object_index in &self.grid.cells[cell] {
-                let adjacent_cells = (x - 1..=x + 1)
-                    .cartesian_product(y - 1..=y + 1)
-                    .filter(|&(x, y)| {
-                        x >= 0 && x < self.grid.size().x as isize && y >= 0 && y < self.grid.size().y as isize
-                    })
-                    .collect::<SmallVec<[(isize, isize); 9]>>();
-                for (x, y) in adjacent_cells {
-                    let adjacent_cell = (x as usize, y as usize);
-                    Self::process_object_with_cell_collisions(
-                        object_index,
-                        adjacent_cell,
-                        &self.grid.cells,
-                        &mut self.objects,
-                        self.restitution_coefficient,
-                    );
+        let cells = (0..self.grid.size().x - 1).cartesian_product(0..self.grid.size().y);
+        for cell @ (x, y) in cells {
+            let cell = &self.grid.cells[cell];
+            if !cell.is_empty() {
+                let adjacent_cells = (x.saturating_sub(1)..=x + 1)
+                    .cartesian_product(y.saturating_sub(1)..=y + 1)
+                    .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y)
+                    .collect::<SmallVec<[_; 9]>>();
+                for &object_index in cell {
+                    for &adjacent_cell in &adjacent_cells {
+                        Self::process_object_with_cell_collisions(
+                            object_index,
+                            adjacent_cell,
+                            &self.grid.cells,
+                            &mut self.objects,
+                            self.restitution_coefficient,
+                        );
+                    }
                 }
             }
         }
@@ -217,25 +217,19 @@ impl PhysicsEngine {
     }
 
     fn leapfrog_yoshida_update_object(&mut self, object_index: usize, dt: f64) {
-        let cbrt2 = 2.0f64.powf(1.0 / 3.0);
-        let w0 = -cbrt2 / (2.0 - cbrt2);
-        let w1 = 1.0 / (2.0 - cbrt2);
-        let c1 @ c4 = 0.5 * w1;
-        let c2 @ c3 = 0.5 * (w0 + w1);
-        let d1 @ d3 = w1;
-        let d2 = w0;
+        use leapfrog_yoshida::*;
         let Object {
             position: x0,
             velocity: v0,
             ..
         } = self.objects[object_index];
-        let x1 = x0 + c1 * v0 * dt;
-        let v1 = v0 + d1 * self.gravity_accel(object_index, x1) * dt;
-        let x2 = x0 + c2 * v1 * dt;
-        let v2 = v0 + d2 * self.gravity_accel(object_index, x2) * dt;
-        let x3 = x0 + c3 * v2 * dt;
-        let v3 = v0 + d3 * self.gravity_accel(object_index, x3) * dt;
-        self.objects[object_index].position = x0 + c4 * v3 * dt;
+        let x1 = x0 + C1 * v0 * dt;
+        let v1 = v0 + D1 * self.gravity_accel(object_index, x1) * dt;
+        let x2 = x0 + C2 * v1 * dt;
+        let v2 = v0 + D2 * self.gravity_accel(object_index, x2) * dt;
+        let x3 = x0 + C3 * v2 * dt;
+        let v3 = v0 + D3 * self.gravity_accel(object_index, x3) * dt;
+        self.objects[object_index].position = x0 + C4 * v3 * dt;
         self.objects[object_index].velocity = v3;
     }
 
