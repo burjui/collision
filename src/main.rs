@@ -151,8 +151,6 @@ fn main() -> anyhow::Result<()> {
                 .context("render stats")?;
         }
 
-        canvas.present();
-
         if physics.time() - last_frame_time > FRAME_INTERVAL / 10.0 {
             last_frame_time = physics.time();
             let mut file =
@@ -169,6 +167,7 @@ fn main() -> anyhow::Result<()> {
             output_frame_count += 1;
         }
 
+        canvas.present();
         frame_count += 1;
     }
 
