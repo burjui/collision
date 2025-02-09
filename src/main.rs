@@ -1,7 +1,7 @@
 #![feature(get_many_mut)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 
-use std::path::Path;
+use std::{fs::File, io::BufWriter, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use collision::{
@@ -11,12 +11,13 @@ use collision::{
 use indoc::formatdoc;
 use itertools::Itertools;
 use nalgebra::Vector2;
+use png::{BitDepth, ColorType, Encoder};
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
     keyboard::{Keycode, Mod},
     mouse::MouseButton,
-    pixels::Color,
+    pixels::{Color, PixelFormatEnum},
     rect::Rect,
     render::{Texture, TextureCreator, WindowCanvas},
     ttf::Font,
@@ -82,8 +83,11 @@ fn main() -> anyhow::Result<()> {
     let mut advance_time = false;
     let mut min_fps = u128::MAX;
     let mut mouse_position = Vector2::new(0.0, 0.0);
+    let mut last_frame_time = 0.0;
+    let mut output_frame_count = 0;
 
-    const DEFAULT_DT: f64 = 1.0 / 60.0 / 32.0;
+    const FRAME_INTERVAL: f64 = 1.0 / 60.0;
+    const DEFAULT_DT: f64 = FRAME_INTERVAL / 32.0;
     'running: loop {
         match process_events(
             &mut event_pump,
@@ -148,6 +152,23 @@ fn main() -> anyhow::Result<()> {
         }
 
         canvas.present();
+
+        if physics.time() - last_frame_time > FRAME_INTERVAL / 10.0 {
+            last_frame_time = physics.time();
+            let mut file =
+                BufWriter::new(File::create(format!("output/{output_frame_count:04}.png")).context("create file")?);
+            let mut encoder = Encoder::new(&mut file, config.screen_width as u32, config.screen_height as u32);
+            encoder.set_color(ColorType::Rgb);
+            encoder.set_depth(BitDepth::Eight);
+            let mut writer = encoder.write_header().context("write header")?;
+            let data = canvas
+                .read_pixels(None, PixelFormatEnum::RGB24)
+                .map_err(string_to_anyhow)
+                .context("read pixels")?;
+            writer.write_image_data(&data).context("write image data")?;
+            output_frame_count += 1;
+        }
+
         frame_count += 1;
     }
 

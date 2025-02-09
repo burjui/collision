@@ -4,3 +4,5 @@
 /.vscode
 /*.mp4
 /flamegraph.svg
+/output
+/video

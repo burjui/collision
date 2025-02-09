@@ -16,6 +16,7 @@ ndarray = "0.16.1"
 smallvec = "1.13.2"
 nalgebra = "0.33.2"
 indoc = "2.0.5"
+png = "0.17.16"
 
 [profile.release]
 debug = true
