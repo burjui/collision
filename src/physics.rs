@@ -8,6 +8,8 @@ use ndarray::Array2;
 use object::Object;
 use smallvec::SmallVec;
 
+use crate::config::Config;
+
 pub mod grid;
 mod leapfrog_yoshida;
 pub mod object;
@@ -46,14 +48,18 @@ pub struct PhysicsEngine {
 }
 
 impl PhysicsEngine {
-    pub fn new(constraints: ConstraintBox) -> anyhow::Result<Self> {
+    pub fn new(config: &Config) -> anyhow::Result<Self> {
+        let constraints = ConstraintBox::new(
+            Vector2::new(0.0, 0.0),
+            Vector2::new(config.screen_width as f64, config.screen_height as f64),
+        );
         Ok(Self {
             solver_kind: SolverKind::Grid,
             objects: Vec::default(),
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            restitution_coefficient: 1.0 - 0.003,
+            restitution_coefficient: config.restitution_coefficient,
             planets_count: 0,
         })
     }

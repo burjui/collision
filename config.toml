@@ -1,2 +1,3 @@
 screen_width = 1600
 screen_height = 800
+restitution_coefficient = 1.0

@@ -8,6 +8,7 @@ use serde_derive::Deserialize;
 pub struct Config {
     pub screen_width: u32,
     pub screen_height: u32,
+    pub restitution_coefficient: f64,
 }
 
 impl Config {

@@ -4,7 +4,10 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use collision::physics::{grid::cell_at, object::Object, ConstraintBox, PhysicsEngine};
+use collision::{
+    config::Config,
+    physics::{grid::cell_at, object::Object, PhysicsEngine},
+};
 use indoc::formatdoc;
 use itertools::Itertools;
 use nalgebra::Vector2;
@@ -21,9 +24,8 @@ use sdl2::{
     EventPump,
 };
 
-use crate::{config::Config, fps::FpsCalculator, scene::*};
+use crate::{fps::FpsCalculator, scene::*};
 
-mod config;
 mod fps;
 
 #[macro_use]
@@ -74,11 +76,7 @@ fn main() -> anyhow::Result<()> {
     //     feenableexcept(FE_INVALID);
     // }
 
-    let constraints = ConstraintBox::new(
-        Vector2::new(0.0, 0.0),
-        Vector2::new(config.screen_width as f64, config.screen_height as f64),
-    );
-    let mut physics = PhysicsEngine::new(constraints)?;
+    let mut physics = PhysicsEngine::new(&config)?;
     create_scene(&mut physics);
 
     let mut advance_time = false;
