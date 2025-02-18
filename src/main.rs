@@ -1,6 +1,3 @@
-#![feature(get_many_mut)]
-#![feature(anonymous_lifetime_in_impl_trait)]
-
 use std::{fs::File, io::BufWriter, path::Path};
 
 use anyhow::{anyhow, Context, Result};
@@ -15,7 +12,7 @@ use png::{BitDepth, ColorType, Encoder};
 use sdl2::{
     event::Event,
     gfx::primitives::DrawRenderer,
-    keyboard::{Keycode, Mod},
+    keyboard::Keycode,
     mouse::MouseButton,
     pixels::{Color, PixelFormatEnum},
     rect::Rect,
@@ -60,6 +57,7 @@ fn main() -> anyhow::Result<()> {
     let mut frame_count = 0usize;
     let mut fps_calculator = FpsCalculator::new();
     let mut render_settings = RenderSettings {
+        render_physics: true,
         with_grid: false,
         details: RenderDetails {
             as_circle: true,
@@ -87,7 +85,7 @@ fn main() -> anyhow::Result<()> {
     let mut output_frame_count = 0;
 
     const FRAME_INTERVAL: f64 = 1.0 / 60.0;
-    const DEFAULT_DT: f64 = FRAME_INTERVAL / 32.0;
+    const DEFAULT_DT: f64 = FRAME_INTERVAL / 64.0;
     'running: loop {
         match process_events(
             &mut event_pump,
@@ -101,20 +99,22 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            physics.advance(DEFAULT_DT, 2);
+            physics.advance(DEFAULT_DT, 8);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
 
-        render_physics(
-            &physics,
-            config.screen_width,
-            &mut canvas,
-            &font,
-            &render_settings,
-            mouse_position,
-        )?;
+        if render_settings.render_physics {
+            render_physics(
+                &physics,
+                config.screen_width,
+                &mut canvas,
+                &font,
+                &render_settings,
+                mouse_position,
+            )?;
+        }
 
         if let Some(fps) = fps_calculator.update(frame_count)? {
             let total_kinetic_energy = physics
@@ -153,17 +153,9 @@ fn main() -> anyhow::Result<()> {
 
         if physics.time() - last_frame_time > FRAME_INTERVAL / 10.0 {
             last_frame_time = physics.time();
-            let mut file =
-                BufWriter::new(File::create(format!("output/{output_frame_count:04}.png")).context("create file")?);
-            let mut encoder = Encoder::new(&mut file, config.screen_width as u32, config.screen_height as u32);
-            encoder.set_color(ColorType::Rgb);
-            encoder.set_depth(BitDepth::Eight);
-            let mut writer = encoder.write_header().context("write header")?;
-            let data = canvas
-                .read_pixels(None, PixelFormatEnum::RGB24)
-                .map_err(string_to_anyhow)
-                .context("read pixels")?;
-            writer.write_image_data(&data).context("write image data")?;
+            let path = format!("output/{output_frame_count:04}.png");
+            let path = Path::new(&path);
+            save_frame_to_png(path, &config, &canvas)?;
             output_frame_count += 1;
         }
 
@@ -171,6 +163,24 @@ fn main() -> anyhow::Result<()> {
         frame_count += 1;
     }
 
+    Ok(())
+}
+
+fn save_frame_to_png(
+    path: &Path,
+    config: &Config,
+    canvas: &sdl2::render::Canvas<sdl2::video::Window>,
+) -> Result<(), anyhow::Error> {
+    let mut file = BufWriter::new(File::create(path).context("create file")?);
+    let mut encoder = Encoder::new(&mut file, config.screen_width as u32, config.screen_height as u32);
+    encoder.set_color(ColorType::Rgb);
+    encoder.set_depth(BitDepth::Eight);
+    let mut writer = encoder.write_header().context("write header")?;
+    let data = canvas
+        .read_pixels(None, PixelFormatEnum::RGB24)
+        .map_err(string_to_anyhow)
+        .context("read pixels")?;
+    writer.write_image_data(&data).context("write image data")?;
     Ok(())
 }
 
@@ -208,15 +218,7 @@ fn process_events(
             keydown!(Keycode::G) => render_settings.with_grid = !render_settings.with_grid,
             keydown!(Keycode::Space) => *advance_time = !*advance_time,
 
-            keydown!(Keycode::D, Mod::LSHIFTMOD | Mod::RSHIFTMOD) => {
-                render_settings.details = RenderDetails {
-                    as_circle: false,
-                    id: false,
-                    energy: false,
-                    momentum: false,
-                    velocity: false,
-                };
-            }
+            keydown!(Keycode::R) => render_settings.render_physics = !render_settings.render_physics,
 
             keydown!(Keycode::D) => {
                 render_settings.details = RenderDetails {
@@ -284,6 +286,7 @@ struct RenderDetails {
 }
 
 struct RenderSettings {
+    render_physics: bool,
     with_grid: bool,
     details: RenderDetails,
 }
