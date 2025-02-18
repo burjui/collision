@@ -39,6 +39,7 @@ impl fmt::Display for SolverKind {
 
 pub struct PhysicsEngine {
     pub solver_kind: SolverKind,
+    pub enable_constraint_bouncing: bool,
     objects: Vec<Object>,
     grid: Grid,
     time: f64,
@@ -55,6 +56,7 @@ impl PhysicsEngine {
         );
         Ok(Self {
             solver_kind: SolverKind::Grid,
+            enable_constraint_bouncing: false,
             objects: Vec::default(),
             grid: Grid::default(),
             time: 0.0,
@@ -244,18 +246,26 @@ impl PhysicsEngine {
         for object in &mut self.objects {
             if object.position.x - object.radius < cb.topleft.x {
                 object.position.x = cb.topleft.x + object.radius;
-                object.velocity.x *= -1.0;
+                if self.enable_constraint_bouncing {
+                    object.velocity.x *= -1.0;
+                }
             } else if object.position.x + object.radius > cb.bottomright.x {
                 object.position.x = cb.bottomright.x - object.radius;
-                object.velocity.x *= -1.0;
+                if self.enable_constraint_bouncing {
+                    object.velocity.x *= -1.0;
+                }
             }
 
             if object.position.y - object.radius < cb.topleft.y {
                 object.position.y = cb.topleft.y + object.radius;
-                object.velocity.y *= -1.0;
+                if self.enable_constraint_bouncing {
+                    object.velocity.y *= -1.0;
+                }
             } else if object.position.y + object.radius > cb.bottomright.y {
                 object.position.y = cb.bottomright.y - object.radius;
-                object.velocity.y *= -1.0;
+                if self.enable_constraint_bouncing {
+                    object.velocity.y *= -1.0;
+                }
             }
         }
     }
