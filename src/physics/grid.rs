@@ -1,10 +1,9 @@
 use nalgebra::Vector2;
-use ndarray::Array2;
 
 use super::object::Object;
-use crate::fixed_vec::FixedVec;
+use crate::{array2::Array2, fixed_vec::FixedVec};
 
-pub type GridCell = FixedVec<usize, 4>; //SmallVec<[usize; 2]>;
+pub type GridCell = FixedVec<usize, 4>;
 
 pub struct Grid {
     position: Vector2<f64>,

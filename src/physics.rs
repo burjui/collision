@@ -4,10 +4,9 @@ use std::time::Instant;
 use grid::{Grid, GridCell};
 use itertools::Itertools;
 use nalgebra::Vector2;
-use ndarray::Array2;
 use object::Object;
 
-use crate::{config::Config, fixed_vec::FixedVec};
+use crate::{array2::Array2, config::Config, fixed_vec::FixedVec};
 
 pub mod grid;
 mod leapfrog_yoshida;
