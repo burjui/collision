@@ -6,9 +6,8 @@ use itertools::Itertools;
 use nalgebra::Vector2;
 use ndarray::Array2;
 use object::Object;
-use smallvec::SmallVec;
 
-use crate::config::Config;
+use crate::{config::Config, fixed_vec::FixedVec};
 
 pub mod grid;
 mod leapfrog_yoshida;
@@ -120,24 +119,24 @@ impl PhysicsEngine {
         self.time += dt;
 
         let start = Instant::now();
+        self.apply_gravity();
+        println!("gravity: {:?}", start.elapsed());
+
+        let start = Instant::now();
         self.grid.update(&self.objects);
-        println!("t(grid): {:?}", start.elapsed());
+        println!("grid: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.process_collisions();
-        println!("t(collisions): {:?}", start.elapsed());
-
-        let start = Instant::now();
-        self.apply_constraints();
-        println!("t(constraints): {:?}", start.elapsed());
-
-        let start = Instant::now();
-        self.apply_gravity();
-        println!("t(gravity): {:?}", start.elapsed());
+        println!("collisions: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.update_objects(dt);
-        println!("t(updates): {:?}", start.elapsed());
+        println!("updates: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        self.apply_constraints();
+        println!("constraints: {:?}", start.elapsed());
     }
 
     fn apply_gravity(&mut self) {
@@ -176,9 +175,9 @@ impl PhysicsEngine {
                 let adjacent_cells = (x.saturating_sub(1)..=x + 1)
                     .cartesian_product(y.saturating_sub(1)..=y + 1)
                     .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y)
-                    .collect::<SmallVec<[_; 9]>>();
-                for &object_index in cell {
-                    for &adjacent_cell in &adjacent_cells {
+                    .collect::<FixedVec<_, 9>>();
+                for &object_index in cell.as_slice() {
+                    for &adjacent_cell in adjacent_cells.as_slice() {
                         Self::process_object_with_cell_collisions(
                             object_index,
                             adjacent_cell,
@@ -199,7 +198,7 @@ impl PhysicsEngine {
         objects: &mut [Object],
         restitution_coefficient: f64,
     ) {
-        for &object2_index in &cells[cell] {
+        for &object2_index in cells[cell].as_slice() {
             if object1_index != object2_index {
                 let [object1, object2] = objects.get_many_mut([object1_index, object2_index]).unwrap();
                 process_object_collision(object1, object2, restitution_coefficient);
@@ -291,10 +290,8 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
         let total_mass = object1.mass + object2.mass;
         let velocity_diff = object1.velocity - object2.velocity;
         let divisor = total_mass * distance * distance;
-        object1.velocity =
-            object1.velocity - 2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) * from_2_to_1 / divisor;
-        object2.velocity =
-            object2.velocity - 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) * -from_2_to_1 / divisor;
+        object1.velocity -= 2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) * from_2_to_1 / divisor;
+        object2.velocity -= 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) * -from_2_to_1 / divisor;
         let from_2_to_1_unit = from_2_to_1.normalize();
         let intersection_depth = collision_distance - distance;
         let distance_correction = intersection_depth;

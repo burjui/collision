@@ -13,10 +13,10 @@ num-traits = "0.2.19"
 itertools = "0.14.0"
 anyhow = "1.0.95"
 ndarray = "0.16.1"
-smallvec = "1.13.2"
 nalgebra = "0.33.2"
 indoc = "2.0.5"
 png = "0.17.16"
+libc = "0.2.169"
 
 [profile.release]
 debug = true

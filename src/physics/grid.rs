@@ -1,10 +1,10 @@
 use nalgebra::Vector2;
 use ndarray::Array2;
-use smallvec::SmallVec;
 
 use super::object::Object;
+use crate::fixed_vec::FixedVec;
 
-pub type GridCell = SmallVec<[usize; 32]>;
+pub type GridCell = FixedVec<usize, 4>; //SmallVec<[usize; 2]>;
 
 pub struct Grid {
     position: Vector2<f64>,
@@ -27,16 +27,13 @@ impl Grid {
             self.cell_size = self.cell_size.max(radius * 2.0);
         }
 
-        self.cells = Array2::from_elem((0, 0), SmallVec::new());
-        if self.position.x <= end.x && self.position.y <= end.y {
-            self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize + 1;
-            self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
-            self.cells = Array2::from_elem((self.size.x, self.size.y), SmallVec::new());
+        self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize + 1;
+        self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
+        self.cells = Array2::default((self.size.x, self.size.y));
 
-            for (index, &Object { position, .. }) in objects.iter().enumerate() {
-                let cell = cell_at(position, self.position, self.cell_size);
-                self.cells[cell].push(index);
-            }
+        for (index, &Object { position, .. }) in objects.iter().enumerate() {
+            let cell = cell_at(position, self.position, self.cell_size);
+            self.cells[cell].push(index);
         }
     }
 
@@ -63,14 +60,14 @@ impl Default for Grid {
             position: Vector2::new(0.0, 0.0),
             size: Vector2::new(0, 0),
             cell_size: 0.0,
-            cells: Array2::from_elem((0, 0), SmallVec::new()),
+            cells: Array2::default((0, 0)),
         }
     }
 }
 
 pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> (usize, usize) {
     (
-        ((position.x - cells_start.x) / cell_size).floor() as usize,
-        ((position.y - cells_start.y) / cell_size).floor() as usize,
+        ((position.x - cells_start.x) / cell_size) as usize,
+        ((position.y - cells_start.y) / cell_size) as usize,
     )
 }

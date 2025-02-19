@@ -68,13 +68,6 @@ fn main() -> anyhow::Result<()> {
         },
     };
 
-    // Interferes with ffmpeg, disable for now
-    // #[cfg(unix)]
-    // unsafe {
-    //     // Catch NaNs as SIGFPE
-    //     feenableexcept(FE_INVALID);
-    // }
-
     let mut physics = PhysicsEngine::new(&config)?;
     create_scene(&mut physics);
 
@@ -85,7 +78,7 @@ fn main() -> anyhow::Result<()> {
     let mut output_frame_count = 0;
 
     const FRAME_INTERVAL: f64 = 1.0 / 60.0;
-    const DEFAULT_DT: f64 = FRAME_INTERVAL / 64.0;
+    const DEFAULT_DT: f64 = FRAME_INTERVAL / 128.0;
     'running: loop {
         match process_events(
             &mut event_pump,
@@ -99,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if advance_time {
-            physics.advance(DEFAULT_DT, 8);
+            physics.advance(DEFAULT_DT, 2);
         }
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
@@ -172,7 +165,7 @@ fn save_frame_to_png(
     canvas: &sdl2::render::Canvas<sdl2::video::Window>,
 ) -> Result<(), anyhow::Error> {
     let mut file = BufWriter::new(File::create(path).context("create file")?);
-    let mut encoder = Encoder::new(&mut file, config.screen_width as u32, config.screen_height as u32);
+    let mut encoder = Encoder::new(&mut file, config.screen_width, config.screen_height);
     encoder.set_color(ColorType::Rgb);
     encoder.set_depth(BitDepth::Eight);
     let mut writer = encoder.write_header().context("write header")?;
@@ -499,7 +492,7 @@ fn render_grid(
 
         for adjacent_cell @ (x, y) in (x.saturating_sub(1)..=x + 1).cartesian_product(y.saturating_sub(1)..=y + 1) {
             if x < grid_size.x && y < grid_size.y {
-                for &object_index in &physics.grid().cells()[(x, y)] {
+                for &object_index in physics.grid().cells()[(x, y)].as_slice() {
                     let object = &physics.objects()[object_index];
                     render_object_outline(object, Color::YELLOW, canvas, details.as_circle)
                         .context("highlight object")?;
