@@ -1,7 +1,5 @@
-use nalgebra::Vector2;
-
 use super::object::Object;
-use crate::{array2::Array2, fixed_vec::FixedVec};
+use crate::{array2::Array2, fixed_vec::FixedVec, vector2::Vector2};
 
 pub type GridCell = FixedVec<usize, 4>;
 

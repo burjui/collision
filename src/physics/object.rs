@@ -1,5 +1,6 @@
-use nalgebra::Vector2;
 use sdl2::pixels::Color;
+
+use crate::vector2::Vector2;
 
 #[derive(Copy, Clone)]
 pub struct Object {

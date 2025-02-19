@@ -1,8 +1,8 @@
 use collision::{
     compound::{generate_brick, Brick},
     physics::{object::Object, PhysicsEngine},
+    vector2::Vector2,
 };
-use nalgebra::Vector2;
 use sdl2::pixels::Color;
 
 pub fn create_scene(physics: &mut PhysicsEngine) {

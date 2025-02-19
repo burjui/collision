@@ -4,10 +4,10 @@ use anyhow::{anyhow, Context, Result};
 use collision::{
     config::Config,
     physics::{grid::cell_at, object::Object, PhysicsEngine},
+    vector2::Vector2,
 };
 use indoc::formatdoc;
 use itertools::Itertools;
-use nalgebra::Vector2;
 use png::{BitDepth, ColorType, Encoder};
 use sdl2::{
     event::Event,

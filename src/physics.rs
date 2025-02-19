@@ -3,10 +3,9 @@ use std::time::Instant;
 
 use grid::{Grid, GridCell};
 use itertools::Itertools;
-use nalgebra::Vector2;
 use object::Object;
 
-use crate::{array2::Array2, config::Config, fixed_vec::FixedVec};
+use crate::{array2::Array2, config::Config, fixed_vec::FixedVec, vector2::Vector2};
 
 pub mod grid;
 mod leapfrog_yoshida;
@@ -229,13 +228,13 @@ impl PhysicsEngine {
             velocity: v0,
             ..
         } = self.objects[object_index];
-        let x1 = x0 + C1 * v0 * dt;
-        let v1 = v0 + D1 * self.gravity_accel(object_index, x1) * dt;
-        let x2 = x0 + C2 * v1 * dt;
-        let v2 = v0 + D2 * self.gravity_accel(object_index, x2) * dt;
-        let x3 = x0 + C3 * v2 * dt;
-        let v3 = v0 + D3 * self.gravity_accel(object_index, x3) * dt;
-        self.objects[object_index].position = x0 + C4 * v3 * dt;
+        let x1 = x0 + v0 * C1 * dt;
+        let v1 = v0 + self.gravity_accel(object_index, x1) * D1 * dt;
+        let x2 = x0 + v1 * C2 * dt;
+        let v2 = v0 + self.gravity_accel(object_index, x2) * D2 * dt;
+        let x3 = x0 + v2 * C3 * dt;
+        let v3 = v0 + self.gravity_accel(object_index, x3) * D3 * dt;
+        self.objects[object_index].position = x0 + v3 * C4 * dt;
         self.objects[object_index].velocity = v3;
     }
 
@@ -289,8 +288,8 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
         let total_mass = object1.mass + object2.mass;
         let velocity_diff = object1.velocity - object2.velocity;
         let divisor = total_mass * distance * distance;
-        object1.velocity -= 2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) * from_2_to_1 / divisor;
-        object2.velocity -= 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) * -from_2_to_1 / divisor;
+        object1.velocity -= from_2_to_1 * 2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) / divisor;
+        object2.velocity -= -from_2_to_1 * 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) / divisor;
         let from_2_to_1_unit = from_2_to_1.normalize();
         let intersection_depth = collision_distance - distance;
         let distance_correction = intersection_depth;
@@ -298,8 +297,8 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
         let momentum2 = object2.mass * object2.velocity.magnitude();
         let total_momentum = momentum1 + momentum2;
         let correction_base = from_2_to_1_unit * distance_correction / total_momentum;
-        object1.position += momentum2 * correction_base;
-        object2.position -= momentum1 * correction_base;
+        object1.position += correction_base * momentum2;
+        object2.position -= correction_base * momentum1;
 
         if !object1.is_planet {
             object1.velocity *= restitution_coefficient;

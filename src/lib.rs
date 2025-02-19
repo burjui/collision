@@ -9,3 +9,4 @@ pub mod compound;
 pub mod config;
 pub mod fixed_vec;
 pub mod physics;
+pub mod vector2;

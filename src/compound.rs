@@ -1,7 +1,9 @@
-use nalgebra::Vector2;
 use sdl2::pixels::Color;
 
-use crate::physics::{object::Object, PhysicsEngine};
+use crate::{
+    physics::{object::Object, PhysicsEngine},
+    vector2::Vector2,
+};
 
 const DEFAULT_PARTICLE_RADIUS: f64 = 2.0;
 const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
