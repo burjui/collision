@@ -35,7 +35,7 @@ impl<T> Vector2<T> {
     where
         T: Float + Div<Output = T>,
     {
-        let one_over_magnitude = T::one() / self.magnitude();
+        let one_over_magnitude = T::one() / self.magnitude().max(T::epsilon());
         Vector2::new(self.x * one_over_magnitude, self.y * one_over_magnitude)
     }
 

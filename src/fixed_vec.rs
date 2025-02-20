@@ -7,7 +7,7 @@ pub struct FixedVec<T, const N: usize> {
 impl<T, const N: usize> FixedVec<T, N> {
     #[inline(always)]
     pub fn push(&mut self, value: T) {
-        assert!(self.len < N);
+        assert!(self.len < N, "vector is full ({N})");
         self.inner[self.len] = value;
         self.len += 1;
     }

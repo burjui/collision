@@ -68,6 +68,13 @@ fn main() -> anyhow::Result<()> {
         },
     };
 
+    extern "C" {
+        fn feenableexcept(excepts: i32) -> i32;
+    }
+    unsafe {
+        feenableexcept(1);
+    }
+
     let mut physics = PhysicsEngine::new(&config)?;
     create_scene(&mut physics);
 
