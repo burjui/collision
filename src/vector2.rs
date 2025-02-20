@@ -33,10 +33,10 @@ impl<T> Vector2<T> {
 
     pub fn normalize(&self) -> Vector2<T>
     where
-        T: Float,
+        T: Float + Div<Output = T>,
     {
-        let magnitude = self.magnitude();
-        Vector2::new(self.x / magnitude, self.y / magnitude)
+        let one_over_magnitude = T::one() / self.magnitude();
+        Vector2::new(self.x * one_over_magnitude, self.y * one_over_magnitude)
     }
 
     pub fn dot(&self, other: &Vector2<T>) -> T

@@ -152,7 +152,7 @@ impl PhysicsEngine {
                 let to_planet = planet.position - position;
                 let direction = to_planet.normalize();
                 let gravitational_constant = 10000.0;
-                gravity += direction * gravitational_constant * planet.mass / to_planet.magnitude_squared();
+                gravity += direction * (gravitational_constant * planet.mass / to_planet.magnitude_squared());
             }
         }
         gravity
@@ -227,13 +227,13 @@ impl PhysicsEngine {
             velocity: v0,
             ..
         } = self.objects[object_index];
-        let x1 = x0 + v0 * C1 * dt;
-        let v1 = v0 + self.gravity_accel(object_index, x1) * D1 * dt;
-        let x2 = x0 + v1 * C2 * dt;
-        let v2 = v0 + self.gravity_accel(object_index, x2) * D2 * dt;
-        let x3 = x0 + v2 * C3 * dt;
-        let v3 = v0 + self.gravity_accel(object_index, x3) * D3 * dt;
-        self.objects[object_index].position = x0 + v3 * C4 * dt;
+        let x1 = x0 + v0 * (C1 * dt);
+        let v1 = v0 + self.gravity_accel(object_index, x1) * (D1 * dt);
+        let x2 = x0 + v1 * (C2 * dt);
+        let v2 = v0 + self.gravity_accel(object_index, x2) * (D2 * dt);
+        let x3 = x0 + v2 * (C3 * dt);
+        let v3 = v0 + self.gravity_accel(object_index, x3) * (D3 * dt);
+        self.objects[object_index].position = x0 + v3 * (C4 * dt);
         self.objects[object_index].velocity = v3;
     }
 
