@@ -282,20 +282,20 @@ impl ConstraintBox {
 fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f64) {
     let collision_distance = object1.radius + object2.radius;
     let from_2_to_1 = object1.position - object2.position;
-    let distance = (from_2_to_1).magnitude();
-    if distance < collision_distance {
+    if from_2_to_1.magnitude_squared() < collision_distance * collision_distance {
         let total_mass = object1.mass + object2.mass;
         let velocity_diff = object1.velocity - object2.velocity;
+        let distance = from_2_to_1.magnitude();
         let divisor = total_mass * distance * distance;
-        object1.velocity -= from_2_to_1 * 2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) / divisor;
-        object2.velocity -= -from_2_to_1 * 2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) / divisor;
+        object1.velocity -= from_2_to_1 * (2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) / divisor);
+        object2.velocity -= -from_2_to_1 * (2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) / divisor);
         let from_2_to_1_unit = from_2_to_1.normalize();
         let intersection_depth = collision_distance - distance;
         let distance_correction = intersection_depth;
         let momentum1 = object1.mass * object1.velocity.magnitude();
         let momentum2 = object2.mass * object2.velocity.magnitude();
         let total_momentum = momentum1 + momentum2;
-        let correction_base = from_2_to_1_unit * distance_correction / total_momentum;
+        let correction_base = from_2_to_1_unit * (distance_correction / total_momentum);
         object1.position += correction_base * momentum2;
         object2.position -= correction_base * momentum1;
 
