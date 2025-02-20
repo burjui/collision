@@ -5,7 +5,7 @@ use grid::{Grid, GridCell};
 use itertools::Itertools;
 use object::Object;
 
-use crate::{array2::Array2, config::Config, fixed_vec::FixedVec, vector2::Vector2};
+use crate::{array2::Array2, config::Config, vector2::Vector2};
 
 pub mod grid;
 mod leapfrog_yoshida;
@@ -170,12 +170,11 @@ impl PhysicsEngine {
         for cell @ (x, y) in cells {
             let cell = &self.grid.cells[cell];
             if !cell.is_empty() {
-                let adjacent_cells = (x.saturating_sub(1)..=x + 1)
-                    .cartesian_product(y.saturating_sub(1)..=y + 1)
-                    .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y)
-                    .collect::<FixedVec<_, 9>>();
                 for &object_index in cell.as_slice() {
-                    for &adjacent_cell in adjacent_cells.as_slice() {
+                    let adjacent_cells = (x.saturating_sub(1)..=x + 1)
+                        .cartesian_product(y.saturating_sub(1)..=y + 1)
+                        .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y);
+                    for adjacent_cell in adjacent_cells {
                         Self::process_object_with_cell_collisions(
                             object_index,
                             adjacent_cell,
