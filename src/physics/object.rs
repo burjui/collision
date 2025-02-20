@@ -1,4 +1,4 @@
-use sdl2::pixels::Color;
+use vello::peniko::Color;
 
 use crate::vector2::Vector2;
 

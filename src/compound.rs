@@ -1,4 +1,4 @@
-use sdl2::pixels::Color;
+use vello::peniko::Color;
 
 use crate::{
     physics::{object::Object, PhysicsEngine},
