@@ -118,23 +118,23 @@ impl PhysicsEngine {
 
         let start = Instant::now();
         self.apply_gravity();
-        println!("gravity: {:?}", start.elapsed());
+        log::info!("gravity: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.grid.update(&self.objects);
-        println!("grid: {:?}", start.elapsed());
+        log::info!("grid: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.process_collisions();
-        println!("collisions: {:?}", start.elapsed());
+        log::info!("collisions: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.update_objects(dt);
-        println!("updates: {:?}", start.elapsed());
+        log::info!("updates: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.apply_constraints();
-        println!("constraints: {:?}", start.elapsed());
+        log::info!("constraints: {:?}", start.elapsed());
     }
 
     fn apply_gravity(&mut self) {
@@ -145,14 +145,15 @@ impl PhysicsEngine {
     }
 
     fn gravity_accel(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
-        let mut gravity = Vector2::default();
+        let mut gravity = Vector2::new(0.0, 10000.0);
         for planet_index in 0..self.planets_count {
             if planet_index != object_index {
                 let planet = &self.objects[planet_index];
                 let to_planet = planet.position - position;
                 let direction = to_planet.normalize();
                 let gravitational_constant = 10000.0;
-                gravity += direction * (gravitational_constant * planet.mass / to_planet.magnitude_squared());
+                gravity += direction
+                    * (gravitational_constant * planet.mass / to_planet.magnitude_squared().max(f64::EPSILON));
             }
         }
         gravity

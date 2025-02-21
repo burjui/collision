@@ -2,13 +2,12 @@ use std::{num::NonZero, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{Context, Ok};
 use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
+use demo::create_demo;
 use env_logger::TimestampPrecision;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use scene::create_scene;
 use vello::{
-    kurbo::{Affine, Circle, Point},
+    kurbo::{Affine, Circle},
     peniko::{color::palette::css, Color, Fill},
-    util::{RenderContext, RenderSurface},
+    util::{DeviceHandle, RenderContext, RenderSurface},
     wgpu::{Maintain, PresentMode},
     AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
 };
@@ -21,7 +20,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-mod scene;
+mod demo;
 
 pub fn main() -> anyhow::Result<()> {
     extern "C" {
@@ -42,7 +41,7 @@ pub fn main() -> anyhow::Result<()> {
     let render_state = None::<RenderState<'_>>;
 
     let mut physics = PhysicsEngine::new(&config)?;
-    create_scene(&mut physics);
+    create_demo(&mut physics);
 
     let mut app = VelloApp {
         config,
@@ -53,7 +52,7 @@ pub fn main() -> anyhow::Result<()> {
         scene: Scene::new(),
         frame_count: 0,
         fps_calculator: FpsCalculator::new(),
-        fps: None,
+        last_fps: None,
         min_fps: usize::MAX,
         physics,
         advance_time: false,
@@ -83,7 +82,7 @@ struct VelloApp<'s> {
     scene: Scene,
     frame_count: usize,
     fps_calculator: FpsCalculator,
-    fps: Option<usize>,
+    last_fps: Option<usize>,
     min_fps: usize,
     physics: PhysicsEngine,
     advance_time: bool,
@@ -167,15 +166,24 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 };
             }
             WindowEvent::RedrawRequested => {
-                self.scene.reset();
-                self.render_physics();
-                self.frame_count += 1;
+                if let Some(RenderState { surface, .. }) = &self.state {
+                    self.scene.reset();
+                    render_physics(&self.physics, &mut self.scene);
+                    render_mouse_position(&mut self.scene, self.mouse_position);
+                    render_scene(
+                        &self.scene,
+                        surface,
+                        &mut self.renderers[surface.dev_id].as_mut().expect("failed to get renderer"),
+                        &self.context.devices[surface.dev_id],
+                    );
+                    self.frame_count += 1;
 
-                self.fps = self.fps_calculator.update(self.frame_count).or(self.fps);
-                if let Some(fps) = self.fps {
-                    self.min_fps = self.min_fps.min(fps);
-                    log::info!("FPS: {fps} (min {})", self.min_fps);
-                    log::info!("Sim time: {}", self.physics.time());
+                    self.last_fps = self.fps_calculator.update(self.frame_count).or(self.last_fps);
+                    if let Some(fps) = self.last_fps {
+                        self.min_fps = self.min_fps.min(fps);
+                        eprintln!("FPS: {fps} (min {})", self.min_fps);
+                        log::info!("Sim time: {}", self.physics.time());
+                    }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -207,46 +215,50 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 }
 
-impl VelloApp<'_> {
-    fn render_physics(&mut self) {
-        let Some(RenderState { surface, .. }) = &self.state else {
-            return;
-        };
+fn render_mouse_position(scene: &mut Scene, mouse_position: Vector2<f64>) {
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        css::GREEN,
+        None,
+        &Circle::new((mouse_position.x, mouse_position.y), 10.0),
+    );
+}
 
-        for object in self.physics.objects() {
-            self.scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                Color::new([0.9529, 0.5451, 0.6588, 1.0]),
-                None,
-                &Circle::new((object.position.x, object.position.y), object.radius),
-            );
-        }
+fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer, device_handle: &DeviceHandle) {
+    let width = surface.config.width;
+    let height = surface.config.height;
+    let surface_texture = surface
+        .surface
+        .get_current_texture()
+        .expect("failed to get surface texture");
+    let render_params = RenderParams {
+        base_color: css::BLACK,
+        width,
+        height,
+        antialiasing_method: AaConfig::Area,
+    };
+    renderer
+        .render_to_surface(
+            &device_handle.device,
+            &device_handle.queue,
+            scene,
+            &surface_texture,
+            &render_params,
+        )
+        .expect("failed to render to surface");
+    surface_texture.present();
+    device_handle.device.poll(Maintain::Poll);
+}
 
-        let width = surface.config.width;
-        let height = surface.config.height;
-        let device_handle = &self.context.devices[surface.dev_id];
-        let surface_texture = surface
-            .surface
-            .get_current_texture()
-            .expect("failed to get surface texture");
-        let render_params = RenderParams {
-            base_color: css::BLACK,
-            width,
-            height,
-            antialiasing_method: AaConfig::Area,
-        };
-        let renderer = self.renderers[surface.dev_id].as_mut().unwrap();
-        renderer
-            .render_to_surface(
-                &device_handle.device,
-                &device_handle.queue,
-                &self.scene,
-                &surface_texture,
-                &render_params,
-            )
-            .expect("failed to render to surface");
-        surface_texture.present();
-        device_handle.device.poll(Maintain::Poll);
+fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
+    for object in physics.objects() {
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::new([0.9529, 0.5451, 0.6588, 1.0]),
+            None,
+            &Circle::new((object.position.x, object.position.y), object.radius),
+        );
     }
 }

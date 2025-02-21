@@ -4,7 +4,7 @@ use collision::{
     vector2::Vector2,
 };
 
-pub fn create_scene(physics: &mut PhysicsEngine) {
+pub fn create_demo(physics: &mut PhysicsEngine) {
     // physics.add(Object {
     //     velocity: Vector2::new(-700.0, 0.0),
     //     radius: 3.0,
