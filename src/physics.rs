@@ -5,7 +5,7 @@ use grid::{Grid, GridCell};
 use itertools::Itertools;
 use object::Object;
 
-use crate::{array2::Array2, config::Config, vector2::Vector2};
+use crate::{app_config::AppConfig, array2::Array2, vector2::Vector2};
 
 pub mod grid;
 mod leapfrog_yoshida;
@@ -46,10 +46,10 @@ pub struct PhysicsEngine {
 }
 
 impl PhysicsEngine {
-    pub fn new(config: &Config) -> anyhow::Result<Self> {
+    pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
-            Vector2::new(config.screen_width as f64, config.screen_height as f64),
+            Vector2::new(config.width as f64, config.height as f64),
         );
         Ok(Self {
             solver_kind: SolverKind::Grid,

@@ -24,13 +24,15 @@ impl Grid {
             self.cell_size = self.cell_size.max(radius * 2.0);
         }
 
-        self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize + 1;
-        self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
-        self.cells = Array2::default((self.size.x, self.size.y));
+        if self.cell_size > 0.0 {
+            self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize + 1;
+            self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
+            self.cells = Array2::default((self.size.x, self.size.y));
 
-        for (index, &Object { position, .. }) in objects.iter().enumerate() {
-            let cell = cell_at(position, self.position, self.cell_size);
-            self.cells[cell].push(index);
+            for (index, &Object { position, .. }) in objects.iter().enumerate() {
+                let cell = cell_at(position, self.position, self.cell_size);
+                self.cells[cell].push(index);
+            }
         }
     }
 

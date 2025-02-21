@@ -5,26 +5,26 @@ use num_traits::Zero;
 use serde_derive::Deserialize;
 
 #[derive(Deserialize)]
-pub struct Config {
-    pub screen_width: u32,
-    pub screen_height: u32,
+pub struct AppConfig {
+    pub width: u32,
+    pub height: u32,
     pub restitution_coefficient: f64,
 }
 
-impl Config {
-    pub fn from_file(config_path: &Path) -> anyhow::Result<Config> {
+impl AppConfig {
+    pub fn from_file(config_path: &Path) -> anyhow::Result<AppConfig> {
         let mut config_file =
             File::open(config_path).context(format!("open config \"{}\"", config_path.to_string_lossy()))?;
         let mut config_string = String::new();
         config_file.read_to_string(&mut config_string).context("read config")?;
-        let config: Config = toml::from_str(&config_string).context("parse config")?;
+        let config: AppConfig = toml::from_str(&config_string).context("parse config")?;
         config.validate().context("validate config")?;
         Ok(config)
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        check(&self.screen_width, "screen_width", Positive)?;
-        check(&self.screen_height, "screen_height", Positive)?;
+        check(&self.width, "screen_width", Positive)?;
+        check(&self.height, "screen_height", Positive)?;
         Ok(())
     }
 }
