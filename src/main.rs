@@ -178,6 +178,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     log::info!("Sim time: {}", self.physics.time());
                 }
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_position = Vector2::new(position.x as f64, position.y as f64);
+            }
             _ => {}
         }
     }
@@ -216,40 +219,9 @@ impl VelloApp<'_> {
                 Affine::IDENTITY,
                 Color::new([0.9529, 0.5451, 0.6588, 1.0]),
                 None,
-                &Circle::new(Point::new(object.position.x, object.position.y), object.radius),
+                &Circle::new((object.position.x, object.position.y), object.radius),
             );
         }
-
-        // const WIDTH: usize = 200;
-        // const HEIGHT: usize = 200;
-        // const N_CHUNKS: usize = 20;
-
-        // let chunk_size = WIDTH / N_CHUNKS;
-        // let mut subscenes = Vec::with_capacity(N_CHUNKS);
-        // (0..N_CHUNKS)
-        //     .into_par_iter()
-        //     .map(|chunk_index| {
-        //         let mut scene = Scene::new();
-        //         for i in chunk_index * chunk_size..(chunk_index + 1) * chunk_size {
-        //             for j in 0..HEIGHT {
-        //                 let radius = 4.0;
-        //                 let x = i as f64 * radius * 2.0;
-        //                 let y = j as f64 * radius * 2.0;
-        //                 scene.fill(
-        //                     Fill::NonZero,
-        //                     Affine::IDENTITY,
-        //                     Color::new([0.9529, 0.5451, 0.6588, 1.]),
-        //                     None,
-        //                     &Circle::new((x, y), radius),
-        //                 );
-        //             }
-        //         }
-        //         scene
-        //     })
-        //     .collect_into_vec(&mut subscenes);
-        // for scene in subscenes {
-        //     self.scene.append(&scene, None);
-        // }
 
         let width = surface.config.width;
         let height = surface.config.height;
