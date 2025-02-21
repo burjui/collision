@@ -1,9 +1,15 @@
 use std::{num::NonZero, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{Context, Ok};
-use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
+use collision::{
+    app_config::AppConfig,
+    fps::FpsCalculator,
+    physics::{object, PhysicsEngine},
+    vector2::Vector2,
+};
 use demo::create_demo;
 use env_logger::TimestampPrecision;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use vello::{
     kurbo::{Affine, Circle},
     peniko::{color::palette::css, Color, Fill},
@@ -252,13 +258,25 @@ fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer,
 }
 
 fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
-    for object in physics.objects() {
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            Color::new([0.9529, 0.5451, 0.6588, 1.0]),
-            None,
-            &Circle::new((object.position.x, object.position.y), object.radius),
-        );
+    let scenes = physics
+        .objects()
+        .par_iter()
+        .chunks(physics.objects().len() / 16)
+        .map(|chunk| {
+            let mut scene = Scene::new();
+            for object in chunk {
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    Color::new([0.9529, 0.5451, 0.6588, 1.0]),
+                    None,
+                    &Circle::new((object.position.x, object.position.y), object.radius),
+                );
+            }
+            scene
+        })
+        .collect::<Vec<_>>();
+    for subscene in scenes {
+        scene.append(&subscene, None);
     }
 }
