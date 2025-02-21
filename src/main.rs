@@ -4,8 +4,9 @@ use anyhow::{Context, Ok};
 use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
 use env_logger::TimestampPrecision;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use scene::create_scene;
 use vello::{
-    kurbo::{Affine, Circle},
+    kurbo::{Affine, Circle, Point},
     peniko::{color::palette::css, Color, Fill},
     util::{RenderContext, RenderSurface},
     wgpu::{Maintain, PresentMode},
@@ -19,6 +20,8 @@ use winit::{
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
+
+mod scene;
 
 pub fn main() -> anyhow::Result<()> {
     extern "C" {
@@ -37,7 +40,10 @@ pub fn main() -> anyhow::Result<()> {
     let render_context = RenderContext::new();
     let renderers: Vec<Option<Renderer>> = vec![];
     let render_state = None::<RenderState<'_>>;
-    let physics = PhysicsEngine::new(&config)?;
+
+    let mut physics = PhysicsEngine::new(&config)?;
+    create_scene(&mut physics);
+
     let mut app = VelloApp {
         config,
         context: render_context,
@@ -162,7 +168,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::RedrawRequested => {
                 self.scene.reset();
-                self.render_scene();
+                self.render_physics();
                 self.frame_count += 1;
 
                 self.fps = self.fps_calculator.update(self.frame_count).or(self.fps);
@@ -199,41 +205,51 @@ impl ApplicationHandler<()> for VelloApp<'_> {
 }
 
 impl VelloApp<'_> {
-    fn render_scene(&mut self) {
+    fn render_physics(&mut self) {
         let Some(RenderState { surface, .. }) = &self.state else {
             return;
         };
 
-        const WIDTH: usize = 200;
-        const HEIGHT: usize = 200;
-        const N_CHUNKS: usize = 20;
-
-        let chunk_size = WIDTH / N_CHUNKS;
-        let mut subscenes = Vec::with_capacity(N_CHUNKS);
-        (0..N_CHUNKS)
-            .into_par_iter()
-            .map(|chunk_index| {
-                let mut scene = Scene::new();
-                for i in chunk_index * chunk_size..(chunk_index + 1) * chunk_size {
-                    for j in 0..HEIGHT {
-                        let radius = 4.0;
-                        let x = i as f64 * radius * 2.0;
-                        let y = j as f64 * radius * 2.0;
-                        scene.fill(
-                            Fill::NonZero,
-                            Affine::IDENTITY,
-                            Color::new([0.9529, 0.5451, 0.6588, 1.]),
-                            None,
-                            &Circle::new((x, y), radius),
-                        );
-                    }
-                }
-                scene
-            })
-            .collect_into_vec(&mut subscenes);
-        for scene in subscenes {
-            self.scene.append(&scene, None);
+        for object in self.physics.objects() {
+            self.scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::new([0.9529, 0.5451, 0.6588, 1.0]),
+                None,
+                &Circle::new(Point::new(object.position.x, object.position.y), object.radius),
+            );
         }
+
+        // const WIDTH: usize = 200;
+        // const HEIGHT: usize = 200;
+        // const N_CHUNKS: usize = 20;
+
+        // let chunk_size = WIDTH / N_CHUNKS;
+        // let mut subscenes = Vec::with_capacity(N_CHUNKS);
+        // (0..N_CHUNKS)
+        //     .into_par_iter()
+        //     .map(|chunk_index| {
+        //         let mut scene = Scene::new();
+        //         for i in chunk_index * chunk_size..(chunk_index + 1) * chunk_size {
+        //             for j in 0..HEIGHT {
+        //                 let radius = 4.0;
+        //                 let x = i as f64 * radius * 2.0;
+        //                 let y = j as f64 * radius * 2.0;
+        //                 scene.fill(
+        //                     Fill::NonZero,
+        //                     Affine::IDENTITY,
+        //                     Color::new([0.9529, 0.5451, 0.6588, 1.]),
+        //                     None,
+        //                     &Circle::new((x, y), radius),
+        //                 );
+        //             }
+        //         }
+        //         scene
+        //     })
+        //     .collect_into_vec(&mut subscenes);
+        // for scene in subscenes {
+        //     self.scene.append(&scene, None);
+        // }
 
         let width = surface.config.width;
         let height = surface.config.height;

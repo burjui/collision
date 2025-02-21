@@ -3,7 +3,6 @@ use collision::{
     physics::{object::Object, PhysicsEngine},
     vector2::Vector2,
 };
-use sdl2::pixels::Color;
 
 pub fn create_scene(physics: &mut PhysicsEngine) {
     // physics.add(Object {
