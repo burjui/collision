@@ -1,12 +1,7 @@
 use std::{num::NonZero, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{Context, Ok};
-use collision::{
-    app_config::AppConfig,
-    fps::FpsCalculator,
-    physics::{object, PhysicsEngine},
-    vector2::Vector2,
-};
+use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
 use demo::create_demo;
 use env_logger::TimestampPrecision;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -29,12 +24,7 @@ use winit::{
 mod demo;
 
 pub fn main() -> anyhow::Result<()> {
-    extern "C" {
-        fn feenableexcept(excepts: i32) -> i32;
-    }
-    unsafe {
-        feenableexcept(1);
-    }
+    enable_floating_point_exceptions();
 
     env_logger::builder()
         .format_timestamp(Some(TimestampPrecision::Millis))
@@ -68,6 +58,15 @@ pub fn main() -> anyhow::Result<()> {
     };
     event_loop.run_app(&mut app).expect("run to completion");
     Ok(())
+}
+
+fn enable_floating_point_exceptions() {
+    unsafe extern "C" {
+        fn feenableexcept(excepts: i32) -> i32;
+    }
+    unsafe {
+        feenableexcept(1);
+    }
 }
 
 struct RenderState<'s> {
@@ -201,7 +200,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         const FRAME_INTERVAL: f64 = 1.0 / 60.0;
-        const DEFAULT_DT: f64 = FRAME_INTERVAL / 128.0;
+        const DEFAULT_DT: f64 = FRAME_INTERVAL / 64.0;
 
         if self.advance_time {
             self.physics.advance(DEFAULT_DT, 2);

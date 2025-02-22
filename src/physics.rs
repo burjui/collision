@@ -117,10 +117,6 @@ impl PhysicsEngine {
         self.time += dt;
 
         let start = Instant::now();
-        self.apply_gravity();
-        log::info!("gravity: {:?}", start.elapsed());
-
-        let start = Instant::now();
         self.grid.update(&self.objects);
         log::info!("grid: {:?}", start.elapsed());
 
@@ -129,34 +125,12 @@ impl PhysicsEngine {
         log::info!("collisions: {:?}", start.elapsed());
 
         let start = Instant::now();
-        self.update_objects(dt);
-        log::info!("updates: {:?}", start.elapsed());
-
-        let start = Instant::now();
         self.apply_constraints();
         log::info!("constraints: {:?}", start.elapsed());
-    }
 
-    fn apply_gravity(&mut self) {
-        for object_index in 0..self.objects.len() {
-            let gravity = self.gravity_accel(object_index, self.objects[object_index].position);
-            self.objects[object_index].acceleration += gravity;
-        }
-    }
-
-    fn gravity_accel(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
-        let mut gravity = Vector2::new(0.0, 10000.0);
-        for planet_index in 0..self.planets_count {
-            if planet_index != object_index {
-                let planet = &self.objects[planet_index];
-                let to_planet = planet.position - position;
-                let direction = to_planet.normalize();
-                let gravitational_constant = 10000.0;
-                gravity += direction
-                    * (gravitational_constant * planet.mass / to_planet.magnitude_squared().max(f64::EPSILON));
-            }
-        }
-        gravity
+        let start = Instant::now();
+        self.update_objects(dt);
+        log::info!("updates: {:?}", start.elapsed());
     }
 
     fn process_collisions(&mut self) {
@@ -198,7 +172,7 @@ impl PhysicsEngine {
     ) {
         for &object2_index in cells[cell].as_slice() {
             if object1_index != object2_index {
-                let [object1, object2] = objects.get_many_mut([object1_index, object2_index]).unwrap();
+                let [object1, object2] = objects.get_disjoint_mut([object1_index, object2_index]).unwrap();
                 process_object_collision(object1, object2, restitution_coefficient);
             }
         }
@@ -208,7 +182,7 @@ impl PhysicsEngine {
         for id1 in 0..self.objects.len() {
             for id2 in id1 + 1..self.objects.len() {
                 if id1 != id2 {
-                    let [object1, object2] = self.objects.get_many_mut([id1, id2]).expect("out of bounds");
+                    let [object1, object2] = self.objects.get_disjoint_mut([id1, id2]).expect("out of bounds");
                     process_object_collision(object1, object2, self.restitution_coefficient);
                 }
             }
@@ -229,13 +203,28 @@ impl PhysicsEngine {
             ..
         } = self.objects[object_index];
         let x1 = x0 + v0 * (C1 * dt);
-        let v1 = v0 + self.gravity_accel(object_index, x1) * (D1 * dt);
+        let v1 = v0 + self.gravity_acceleration(object_index, x1) * (D1 * dt);
         let x2 = x0 + v1 * (C2 * dt);
-        let v2 = v0 + self.gravity_accel(object_index, x2) * (D2 * dt);
+        let v2 = v0 + self.gravity_acceleration(object_index, x2) * (D2 * dt);
         let x3 = x0 + v2 * (C3 * dt);
-        let v3 = v0 + self.gravity_accel(object_index, x3) * (D3 * dt);
+        let v3 = v0 + self.gravity_acceleration(object_index, x3) * (D3 * dt);
         self.objects[object_index].position = x0 + v3 * (C4 * dt);
         self.objects[object_index].velocity = v3;
+    }
+
+    fn gravity_acceleration(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
+        let mut gravity = Vector2::new(0.0, 10000.0);
+        for planet_index in 0..self.planets_count {
+            if planet_index != object_index {
+                let planet = &self.objects[planet_index];
+                let to_planet = planet.position - position;
+                let direction = to_planet.normalize();
+                let gravitational_constant = 10000.0;
+                gravity += direction
+                    * (gravitational_constant * planet.mass / to_planet.magnitude_squared().max(f64::EPSILON));
+            }
+        }
+        gravity
     }
 
     fn apply_constraints(&mut self) {

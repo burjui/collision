@@ -2,15 +2,15 @@
 name = "collision"
 version = "0.1.0"
 authors = ["Artem Borisovskiy <bytefu@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-serde = "1.0.217"
-serde_derive = "1.0.217"
+serde = "1.0.218"
+serde_derive = "1.0.218"
 toml = "0.8.20"
 num-traits = "0.2.19"
 itertools = "0.14.0"
-anyhow = "1.0.95"
+anyhow = "1.0.96"
 indoc = "2.0.5"
 png = "0.17.16"
 libc = "0.2.169"
@@ -18,7 +18,7 @@ rayon = "1.10.0"
 vello = "0.4.0"
 winit = "0.30.9"
 pollster = "0.4.0"
-log = "0.4.25"
+log = "0.4.26"
 env_logger = "0.11.6"
 
 [profile.release]
