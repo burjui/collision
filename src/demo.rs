@@ -34,7 +34,7 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
 
     let brick = Brick {
         particle_radius: 2.0,
-        particle_spacing: 0.0,
+        particle_spacing: 0.01,
         particle_mass: 0.01,
         ..Brick::new(Vector2::new(400.0, 300.0), Vector2::new(600.0, 300.0))
     };
