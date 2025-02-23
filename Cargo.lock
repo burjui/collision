@@ -205,6 +205,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f68f53c83ab957f72c32642f3868eec03eb974d1fb82e453128456482613d36"
 
 [[package]]
+name = "blackbody"
+version = "0.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f049f125706993b5e229d5ece10df62ffe115d109e5520efa585638e08d01d"
+
+[[package]]
 name = "block"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -327,6 +333,7 @@ name = "collision"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blackbody",
  "env_logger",
  "indoc",
  "itertools",

@@ -267,7 +267,13 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
                 scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
-                    Color::new([0.9529, 0.5451, 0.6588, 1.0]),
+                    object.color.unwrap_or_else(|| {
+                        const SCALE_FACTOR: f32 = 0.001;
+                        let parameter = object.velocity.magnitude();
+                        let spectrum_position = (parameter as f32 * SCALE_FACTOR).min(1.0);
+                        let rgb = blackbody::temperature_to_rgb(500.0 + 10000.0 * spectrum_position);
+                        Color::new([rgb[0], rgb[1], rgb[2], 1.0]) * 0.3 + spectrum(spectrum_position) * 0.7
+                    }),
                     None,
                     &Circle::new((object.position.x, object.position.y), object.radius),
                 );
@@ -278,4 +284,8 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
     for subscene in scenes {
         scene.append(&subscene, None);
     }
+}
+
+fn spectrum(position: f32) -> Color {
+    Color::new([1.0 - position, (1.0 - (position - 0.5).abs() * 2.0), position, 1.0])
 }

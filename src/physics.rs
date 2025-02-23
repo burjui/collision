@@ -117,6 +117,10 @@ impl PhysicsEngine {
         self.time += dt;
 
         let start = Instant::now();
+        self.update_objects(dt);
+        log::info!("updates: {:?}", start.elapsed());
+
+        let start = Instant::now();
         self.grid.update(&self.objects);
         log::info!("grid: {:?}", start.elapsed());
 
@@ -127,10 +131,6 @@ impl PhysicsEngine {
         let start = Instant::now();
         self.apply_constraints();
         log::info!("constraints: {:?}", start.elapsed());
-
-        let start = Instant::now();
-        self.update_objects(dt);
-        log::info!("updates: {:?}", start.elapsed());
     }
 
     fn process_collisions(&mut self) {
@@ -213,7 +213,7 @@ impl PhysicsEngine {
     }
 
     fn gravity_acceleration(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
-        let mut gravity = Vector2::new(0.0, 10000.0);
+        let mut gravity = Vector2::default();
         for planet_index in 0..self.planets_count {
             if planet_index != object_index {
                 let planet = &self.objects[planet_index];

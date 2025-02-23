@@ -6,23 +6,23 @@ use collision::{
 use vello::peniko::color::palette::css;
 
 pub fn create_demo(physics: &mut PhysicsEngine) {
-    // physics.add(Object {
-    //     velocity: Vector2::new(-700.0, 0.0),
-    //     radius: 3.0,
-    //     mass: 10000.0,
-    //     color: Some(css::MAGENTA),
-    //     is_planet: true,
-    //     ..Object::new(Vector2::new(700.0, 500.0))
-    // });
+    physics.add(Object {
+        velocity: Vector2::new(-700.0, 0.0),
+        radius: 3.0,
+        mass: 10000.0,
+        color: Some(css::MAGENTA),
+        is_planet: true,
+        ..Object::new(Vector2::new(700.0, 500.0))
+    });
 
-    // physics.add(Object {
-    //     velocity: Vector2::new(700.0, 0.0),
-    //     radius: 3.0,
-    //     mass: 10000.0,
-    //     color: Some(css::YELLOW),
-    //     is_planet: true,
-    //     ..Object::new(Vector2::new(700.0, 600.0))
-    // });
+    physics.add(Object {
+        velocity: Vector2::new(700.0, 0.0),
+        radius: 3.0,
+        mass: 10000.0,
+        color: Some(css::YELLOW),
+        is_planet: true,
+        ..Object::new(Vector2::new(700.0, 600.0))
+    });
 
     // physics.add(Object {
     //     radius: 10.0,
