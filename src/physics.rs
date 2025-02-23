@@ -118,19 +118,19 @@ impl PhysicsEngine {
 
         let start = Instant::now();
         self.update_objects(dt);
-        log::info!("updates: {:?}", start.elapsed());
+        eprintln!("updates: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.grid.update(&self.objects);
-        log::info!("grid: {:?}", start.elapsed());
+        eprintln!("grid: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.process_collisions();
-        log::info!("collisions: {:?}", start.elapsed());
+        eprintln!("collisions: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.apply_constraints();
-        log::info!("constraints: {:?}", start.elapsed());
+        eprintln!("constraints: {:?}", start.elapsed());
     }
 
     fn process_collisions(&mut self) {

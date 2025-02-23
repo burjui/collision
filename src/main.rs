@@ -1,12 +1,11 @@
 #![feature(more_float_constants)]
 
 use core::f32;
-use std::{num::NonZero, path::Path, sync::Arc, time::Instant};
+use std::{num::NonZero, path::Path, sync::Arc};
 
 use anyhow::{Context, Ok};
 use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
 use demo::create_demo;
-use env_logger::TimestampPrecision;
 use itertools::Itertools;
 use vello::{
     kurbo::{Affine, Circle},
@@ -28,10 +27,6 @@ mod demo;
 
 pub fn main() -> anyhow::Result<()> {
     enable_floating_point_exceptions();
-
-    env_logger::builder()
-        .format_timestamp(Some(TimestampPrecision::Millis))
-        .init();
 
     let config = AppConfig::from_file(Path::new("config.toml")).context("load config")?;
     let event_loop = EventLoop::new()?;
@@ -127,7 +122,6 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             self.renderers.resize_with(self.context.devices.len(), || None);
             let id = render_state.surface.dev_id;
             self.renderers[id].get_or_insert_with(|| {
-                let start = Instant::now();
                 let renderer = Renderer::new(
                     &self.context.devices[id].device,
                     RendererOptions {
@@ -142,7 +136,6 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     anyhow::format_err!("{e}")
                 })
                 .expect("Failed to create renderer");
-                log::info!("Creating renderer {id} took {:?}", start.elapsed());
                 renderer
             });
             Some(render_state)
@@ -190,7 +183,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     if let Some(fps) = self.last_fps {
                         self.min_fps = self.min_fps.min(fps);
                         eprintln!("FPS: {fps} (min {})", self.min_fps);
-                        log::info!("Sim time: {}", self.physics.time());
+                        eprintln!("Sim time: {}", self.physics.time());
                     }
                 }
             }
@@ -215,7 +208,6 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
-        log::info!("Suspending");
         // When we suspend, we need to remove the `wgpu` Surface
         if let Some(render_state) = self.state.take() {
             self.cached_window = Some(render_state.window);
