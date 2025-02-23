@@ -1,10 +1,13 @@
+#![feature(more_float_constants)]
+
+use core::f32;
 use std::{num::NonZero, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{Context, Ok};
 use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
 use demo::create_demo;
 use env_logger::TimestampPrecision;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use itertools::Itertools;
 use vello::{
     kurbo::{Affine, Circle},
     peniko::{color::palette::css, Color, Fill},
@@ -200,7 +203,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         const FRAME_INTERVAL: f64 = 1.0 / 60.0;
-        const DEFAULT_DT: f64 = FRAME_INTERVAL / 64.0;
+        const DEFAULT_DT: f64 = FRAME_INTERVAL / 128.0;
 
         if self.advance_time {
             self.physics.advance(DEFAULT_DT, 2);
@@ -257,33 +260,35 @@ fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer,
 }
 
 fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
-    let scenes = physics
-        .objects()
-        .par_iter()
-        .chunks(physics.objects().len() / 16)
-        .map(|chunk| {
-            let mut scene = Scene::new();
-            for object in chunk {
-                scene.fill(
-                    Fill::NonZero,
-                    Affine::IDENTITY,
-                    object.color.unwrap_or_else(|| {
-                        const SCALE_FACTOR: f32 = 0.001;
-                        let parameter = object.velocity.magnitude();
-                        let spectrum_position = (parameter as f32 * SCALE_FACTOR).min(1.0);
-                        let rgb = blackbody::temperature_to_rgb(500.0 + 10000.0 * spectrum_position);
-                        Color::new([rgb[0], rgb[1], rgb[2], 1.0]) * 0.3 + spectrum(spectrum_position) * 0.7
-                    }),
-                    None,
-                    &Circle::new((object.position.x, object.position.y), object.radius),
-                );
-            }
-            scene
-        })
-        .collect::<Vec<_>>();
-    for subscene in scenes {
-        scene.append(&subscene, None);
-    }
+    std::thread::scope(|scope| {
+        let handles = physics
+            .objects()
+            .chunks(physics.objects().len() / 20)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    let mut scene = Scene::new();
+                    for object in chunk {
+                        scene.fill(
+                            Fill::NonZero,
+                            Affine::IDENTITY,
+                            object.color.unwrap_or_else(|| {
+                                const SCALE_FACTOR: f64 = 0.0004;
+                                let parameter = (object.velocity.magnitude() * SCALE_FACTOR).powf(0.6);
+                                let spectrum_position = (parameter as f32).clamp(0.0, 1.0);
+                                spectrum(spectrum_position)
+                            }),
+                            None,
+                            &Circle::new((object.position.x, object.position.y), object.radius),
+                        );
+                    }
+                    scene
+                })
+            })
+            .collect_vec();
+        for handle in handles {
+            scene.append(&handle.join().unwrap(), None);
+        }
+    });
 }
 
 fn spectrum(position: f32) -> Color {

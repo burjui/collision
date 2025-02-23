@@ -12,15 +12,12 @@ num-traits = "0.2.19"
 itertools = "0.14.0"
 anyhow = "1.0.96"
 indoc = "2.0.5"
-png = "0.17.16"
-libc = "0.2.169"
-rayon = "1.10.0"
+libc = "0.2.170"
 vello = "0.4.0"
 winit = "0.30.9"
 pollster = "0.4.0"
 log = "0.4.26"
 env_logger = "0.11.6"
-blackbody = "0.0.0"
 
 [profile.release]
 debug = true
