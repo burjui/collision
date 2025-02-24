@@ -1,25 +1,25 @@
-pub const C1: f64 = 0.6756035959798289;
-pub const C2: f64 = -0.17560359597982877;
-pub const C3: f64 = -0.17560359597982877;
-pub const C4: f64 = 0.6756035959798289;
-pub const D1: f64 = 1.3512071919596578;
-pub const D2: f64 = -1.7024143839193153;
-pub const D3: f64 = 1.3512071919596578;
+pub const C1: f32 = 0.6756036;
+pub const C2: f32 = -0.17560363;
+pub const C3: f32 = -0.17560363;
+pub const C4: f32 = 0.6756036;
+pub const D1: f32 = 1.3512073;
+pub const D2: f32 = -1.7024145;
+pub const D3: f32 = 1.3512073;
 
 #[allow(unused)]
 pub struct YoshidaCoefficients {
-    pub c1: f64,
-    pub c2: f64,
-    pub c3: f64,
-    pub c4: f64,
-    pub d1: f64,
-    pub d2: f64,
-    pub d3: f64,
+    pub c1: f32,
+    pub c2: f32,
+    pub c3: f32,
+    pub c4: f32,
+    pub d1: f32,
+    pub d2: f32,
+    pub d3: f32,
 }
 
 impl Default for YoshidaCoefficients {
     fn default() -> Self {
-        let cbrt2 = 2.0f64.powf(1.0 / 3.0);
+        let cbrt2 = 2.0f32.cbrt();
         let w0 = -cbrt2 / (2.0 - cbrt2);
         let w1 = 1.0 / (2.0 - cbrt2);
         let c1 @ c4 = 0.5 * w1;

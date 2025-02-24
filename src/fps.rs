@@ -10,13 +10,6 @@ pub struct FpsCalculator {
 }
 
 impl FpsCalculator {
-    pub fn new() -> Self {
-        Self {
-            last_measure_time: Instant::now(),
-            frame_count_queue: VecDeque::new(),
-        }
-    }
-
     pub fn update(&mut self, frame_count: usize) -> Option<usize> {
         const FRAMES_MEASURE_PERIOD_MILLIS: usize = 100;
         const {
@@ -52,5 +45,14 @@ impl FpsCalculator {
         }
 
         None
+    }
+}
+
+impl Default for FpsCalculator {
+    fn default() -> Self {
+        Self {
+            last_measure_time: Instant::now(),
+            frame_count_queue: VecDeque::new(),
+        }
     }
 }

@@ -4,17 +4,17 @@ use crate::vector2::Vector2;
 
 #[derive(Copy, Clone)]
 pub struct Object {
-    pub position: Vector2<f64>,
-    pub velocity: Vector2<f64>,
-    pub acceleration: Vector2<f64>,
-    pub radius: f64,
-    pub mass: f64,
+    pub position: Vector2<f32>,
+    pub velocity: Vector2<f32>,
+    pub acceleration: Vector2<f32>,
+    pub radius: f32,
+    pub mass: f32,
     pub color: Option<Color>,
     pub is_planet: bool,
 }
 
 impl Object {
-    pub fn new(position: Vector2<f64>) -> Self {
+    pub fn new(position: Vector2<f32>) -> Self {
         Self {
             position,
             velocity: Vector2::new(0.0, 0.0),
@@ -26,7 +26,7 @@ impl Object {
         }
     }
 
-    pub fn momentum(&self) -> Vector2<f64> {
+    pub fn momentum(&self) -> Vector2<f32> {
         self.velocity * self.mass
     }
 }

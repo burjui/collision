@@ -5,20 +5,20 @@ use crate::{
     vector2::Vector2,
 };
 
-const DEFAULT_PARTICLE_RADIUS: f64 = 2.0;
-const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
-const DEFAULT_PARTICLE_MASS: f64 = 1.0;
+const DEFAULT_PARTICLE_RADIUS: f32 = 2.0;
+const DEFAULT_PARTICLE_SPACING: f32 = 2.0;
+const DEFAULT_PARTICLE_MASS: f32 = 1.0;
 
 pub struct Brick {
-    pub position: Vector2<f64>,
-    pub size: Vector2<f64>,
-    pub particle_radius: f64,
-    pub particle_spacing: f64,
-    pub particle_mass: f64,
+    pub position: Vector2<f32>,
+    pub size: Vector2<f32>,
+    pub particle_radius: f32,
+    pub particle_spacing: f32,
+    pub particle_mass: f32,
 }
 
 impl Brick {
-    pub fn new(position: Vector2<f64>, size: Vector2<f64>) -> Self {
+    pub fn new(position: Vector2<f32>, size: Vector2<f32>) -> Self {
         Self {
             position,
             size,
@@ -37,7 +37,7 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
     for i in 0..dims.x {
         for j in 0..dims.y {
             let py = |position, index| {
-                position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
+                position + (index + 1) as f32 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let px = |position, index| py(position, index);
             let position = Vector2::new(px(brick.position.x, i), py(brick.position.y, j));
@@ -54,18 +54,18 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
 }
 
 pub struct Ball {
-    pub position: Vector2<f64>,
-    pub radius: f64,
-    pub acceleration: Vector2<f64>,
-    pub velocity: Vector2<f64>,
-    pub particle_radius: f64,
-    pub particle_spacing: f64,
-    pub particle_mass: f64,
+    pub position: Vector2<f32>,
+    pub radius: f32,
+    pub acceleration: Vector2<f32>,
+    pub velocity: Vector2<f32>,
+    pub particle_radius: f32,
+    pub particle_spacing: f32,
+    pub particle_mass: f32,
     pub color: Option<Color>,
 }
 
 impl Ball {
-    pub fn new(position: Vector2<f64>, radius: f64) -> Self {
+    pub fn new(position: Vector2<f32>, radius: f32) -> Self {
         Self {
             position,
             radius,
@@ -84,8 +84,8 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<usize> {
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
         for j in 0..num_particles {
-            let x = -ball.radius + (i as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
-            let y = -ball.radius + (j as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let x = -ball.radius + (i as f32) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let y = -ball.radius + (j as f32) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;

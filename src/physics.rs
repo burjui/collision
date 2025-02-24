@@ -1,4 +1,4 @@
-use core::{f64, fmt};
+use core::{f32, fmt};
 use std::time::Instant;
 
 use grid::{Grid, GridCell};
@@ -39,9 +39,9 @@ pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     objects: Vec<Object>,
     grid: Grid,
-    time: f64,
+    time: f32,
     constraints: ConstraintBox,
-    restitution_coefficient: f64,
+    restitution_coefficient: f32,
     planets_count: usize,
 }
 
@@ -49,7 +49,7 @@ impl PhysicsEngine {
     pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
-            Vector2::new(config.width as f64, config.height as f64),
+            Vector2::new(config.width as f32, config.height as f32),
         );
         Ok(Self {
             solver_kind: SolverKind::Grid,
@@ -90,7 +90,7 @@ impl PhysicsEngine {
         &mut self.objects
     }
 
-    pub fn advance(&mut self, dt: f64, substeps: usize) {
+    pub fn advance(&mut self, dt: f32, substeps: usize) {
         self.update_substeps(dt, substeps);
     }
 
@@ -98,22 +98,22 @@ impl PhysicsEngine {
         &self.constraints
     }
 
-    pub fn time(&self) -> f64 {
+    pub fn time(&self) -> f32 {
         self.time
     }
 
-    pub fn objects_momentum(&self) -> Vector2<f64> {
+    pub fn objects_momentum(&self) -> Vector2<f32> {
         self.objects.iter().map(Object::momentum).sum()
     }
 
-    fn update_substeps(&mut self, dt: f64, substeps: usize) {
-        let dt_substep = dt / substeps as f64;
+    fn update_substeps(&mut self, dt: f32, substeps: usize) {
+        let dt_substep = dt / substeps as f32;
         for _ in 0..substeps {
             self.update(dt_substep)
         }
     }
 
-    fn update(&mut self, dt: f64) {
+    fn update(&mut self, dt: f32) {
         self.time += dt;
 
         let start = Instant::now();
@@ -168,7 +168,7 @@ impl PhysicsEngine {
         cell: (usize, usize),
         cells: &Array2<GridCell>,
         objects: &mut [Object],
-        restitution_coefficient: f64,
+        restitution_coefficient: f32,
     ) {
         for &object2_index in cells[cell].as_slice() {
             if object1_index != object2_index {
@@ -189,13 +189,13 @@ impl PhysicsEngine {
         }
     }
 
-    fn update_objects(&mut self, dt: f64) {
+    fn update_objects(&mut self, dt: f32) {
         for object_index in 0..self.objects.len() {
             self.leapfrog_yoshida_update_object(object_index, dt)
         }
     }
 
-    fn leapfrog_yoshida_update_object(&mut self, object_index: usize, dt: f64) {
+    fn leapfrog_yoshida_update_object(&mut self, object_index: usize, dt: f32) {
         use leapfrog_yoshida::*;
         let Object {
             position: x0,
@@ -212,7 +212,7 @@ impl PhysicsEngine {
         self.objects[object_index].velocity = v3;
     }
 
-    fn gravity_acceleration(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
+    fn gravity_acceleration(&self, object_index: usize, position: Vector2<f32>) -> Vector2<f32> {
         let mut gravity = Vector2::default();
         for planet_index in 0..self.planets_count {
             if planet_index != object_index {
@@ -221,7 +221,7 @@ impl PhysicsEngine {
                 let direction = to_planet.normalize();
                 let gravitational_constant = 10000.0;
                 gravity += direction
-                    * (gravitational_constant * planet.mass / to_planet.magnitude_squared().max(f64::EPSILON));
+                    * (gravitational_constant * planet.mass / to_planet.magnitude_squared().max(f32::EPSILON));
             }
         }
         gravity
@@ -259,24 +259,24 @@ impl PhysicsEngine {
 
 #[derive(Clone, Copy)]
 pub struct ConstraintBox {
-    pub topleft: Vector2<f64>,
-    pub bottomright: Vector2<f64>,
+    pub topleft: Vector2<f32>,
+    pub bottomright: Vector2<f32>,
 }
 
 impl ConstraintBox {
-    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
+    pub fn new(topleft: Vector2<f32>, bottomright: Vector2<f32>) -> Self {
         Self { topleft, bottomright }
     }
 }
 
-fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f64) {
+fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f32) {
     let collision_distance = object1.radius + object2.radius;
     let from_2_to_1 = object1.position - object2.position;
     if from_2_to_1.magnitude_squared() < collision_distance * collision_distance {
         let total_mass = object1.mass + object2.mass;
         let velocity_diff = object1.velocity - object2.velocity;
         let distance = from_2_to_1.magnitude();
-        let divisor = (total_mass * distance * distance).max(f64::EPSILON);
+        let divisor = (total_mass * distance * distance).max(f32::EPSILON);
         object1.velocity -= from_2_to_1 * (2.0 * object2.mass * velocity_diff.dot(&from_2_to_1) / divisor);
         object2.velocity -= -from_2_to_1 * (2.0 * object1.mass * (-velocity_diff).dot(&(-from_2_to_1)) / divisor);
         let from_2_to_1_unit = from_2_to_1.normalize();
@@ -285,7 +285,7 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
         let momentum1 = object1.mass * object1.velocity.magnitude();
         let momentum2 = object2.mass * object2.velocity.magnitude();
         let total_momentum = momentum1 + momentum2;
-        let correction_base = from_2_to_1_unit * (distance_correction / total_momentum.max(f64::EPSILON));
+        let correction_base = from_2_to_1_unit * (distance_correction / total_momentum.max(f32::EPSILON));
         object1.position += correction_base * momentum2;
         object2.position -= correction_base * momentum1;
 

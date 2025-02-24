@@ -45,14 +45,12 @@ pub fn main() -> anyhow::Result<()> {
         cached_window: None,
         scene: Scene::new(),
         frame_count: 0,
-        fps_calculator: FpsCalculator::new(),
+        fps_calculator: Default::default(),
         last_fps: None,
         min_fps: usize::MAX,
         physics,
         advance_time: false,
         mouse_position: Vector2::new(0.0, 0.0),
-        last_frame_time: 0.0,
-        output_frame_count: 0,
     };
     event_loop.run_app(&mut app).expect("run to completion");
     Ok(())
@@ -89,9 +87,7 @@ struct VelloApp<'s> {
     min_fps: usize,
     physics: PhysicsEngine,
     advance_time: bool,
-    mouse_position: Vector2<f64>,
-    last_frame_time: f64,
-    output_frame_count: usize,
+    mouse_position: Vector2<f32>,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -122,7 +118,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             self.renderers.resize_with(self.context.devices.len(), || None);
             let id = render_state.surface.dev_id;
             self.renderers[id].get_or_insert_with(|| {
-                let renderer = Renderer::new(
+                Renderer::new(
                     &self.context.devices[id].device,
                     RendererOptions {
                         surface_format: Some(render_state.surface.format),
@@ -135,8 +131,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     // Pretty-print any renderer creation error using Display formatting before unwrapping.
                     anyhow::format_err!("{e}")
                 })
-                .expect("Failed to create renderer");
-                renderer
+                .expect("Failed to create renderer")
             });
             Some(render_state)
         };
@@ -171,12 +166,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     self.scene.reset();
                     render_physics(&self.physics, &mut self.scene);
                     render_mouse_position(&mut self.scene, self.mouse_position);
-                    render_scene(
-                        &self.scene,
-                        surface,
-                        &mut self.renderers[surface.dev_id].as_mut().expect("failed to get renderer"),
-                        &self.context.devices[surface.dev_id],
-                    );
+                    let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
+                    let device_handle = &self.context.devices[surface.dev_id];
+                    render_scene(&self.scene, surface, renderer, device_handle);
                     self.frame_count += 1;
 
                     self.last_fps = self.fps_calculator.update(self.frame_count).or(self.last_fps);
@@ -188,15 +180,15 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_position = Vector2::new(position.x as f64, position.y as f64);
+                self.mouse_position = Vector2::new(position.x as f32, position.y as f32);
             }
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        const FRAME_INTERVAL: f64 = 1.0 / 60.0;
-        const DEFAULT_DT: f64 = FRAME_INTERVAL / 128.0;
+        const FRAME_INTERVAL: f32 = 1.0 / 60.0;
+        const DEFAULT_DT: f32 = FRAME_INTERVAL / 128.0;
 
         if self.advance_time {
             self.physics.advance(DEFAULT_DT, 2);
@@ -215,7 +207,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 }
 
-fn render_mouse_position(scene: &mut Scene, mouse_position: Vector2<f64>) {
+fn render_mouse_position(scene: &mut Scene, mouse_position: Vector2<f32>) {
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
@@ -264,13 +256,13 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
                             Fill::NonZero,
                             Affine::IDENTITY,
                             object.color.unwrap_or_else(|| {
-                                const SCALE_FACTOR: f64 = 0.0004;
+                                const SCALE_FACTOR: f32 = 0.0004;
                                 let parameter = (object.velocity.magnitude() * SCALE_FACTOR).powf(0.6);
-                                let spectrum_position = (parameter as f32).clamp(0.0, 1.0);
+                                let spectrum_position = parameter.clamp(0.0, 1.0);
                                 spectrum(spectrum_position)
                             }),
                             None,
-                            &Circle::new((object.position.x, object.position.y), object.radius),
+                            &Circle::new((object.position.x, object.position.y), object.radius as f64),
                         );
                     }
                     scene

@@ -8,7 +8,7 @@ use serde_derive::Deserialize;
 pub struct AppConfig {
     pub width: u32,
     pub height: u32,
-    pub restitution_coefficient: f64,
+    pub restitution_coefficient: f32,
 }
 
 impl AppConfig {

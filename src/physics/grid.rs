@@ -4,16 +4,16 @@ use crate::{array2::Array2, fixed_vec::FixedVec, vector2::Vector2};
 pub type GridCell = FixedVec<usize, 8>;
 
 pub struct Grid {
-    position: Vector2<f64>,
+    position: Vector2<f32>,
     size: Vector2<usize>,
-    cell_size: f64,
+    cell_size: f32,
     pub(super) cells: Array2<GridCell>,
 }
 
 impl Grid {
     pub fn update(&mut self, objects: &[Object]) {
-        let mut end = Vector2::new(f64::MIN, f64::MIN);
-        self.position = Vector2::new(f64::MAX, f64::MAX);
+        let mut end = Vector2::new(f32::MIN, f32::MIN);
+        self.position = Vector2::new(f32::MAX, f32::MAX);
         self.cell_size = 0.0;
 
         for &Object { position, radius, .. } in objects {
@@ -36,7 +36,7 @@ impl Grid {
         }
     }
 
-    pub fn position(&self) -> Vector2<f64> {
+    pub fn position(&self) -> Vector2<f32> {
         self.position
     }
 
@@ -44,7 +44,7 @@ impl Grid {
         self.size
     }
 
-    pub fn cell_size(&self) -> f64 {
+    pub fn cell_size(&self) -> f32 {
         self.cell_size
     }
 
@@ -64,7 +64,7 @@ impl Default for Grid {
     }
 }
 
-pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> (usize, usize) {
+pub fn cell_at(position: Vector2<f32>, cells_start: Vector2<f32>, cell_size: f32) -> (usize, usize) {
     (
         ((position.x - cells_start.x) / cell_size) as usize,
         ((position.y - cells_start.y) / cell_size) as usize,
