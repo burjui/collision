@@ -1,4 +1,4 @@
-use std::{path::Path, ptr::null};
+use std::{ffi::c_void, path::Path, ptr::null};
 
 use anyhow::{anyhow, Context as _, Ok};
 use opencl3::{
@@ -6,10 +6,10 @@ use opencl3::{
     context::Context,
     device::{Device, CL_DEVICE_TYPE_GPU},
     kernel::ExecuteKernel,
-    memory::{Buffer, CL_MEM_READ_WRITE},
+    memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE},
     platform::get_platforms,
     program::Program,
-    types::CL_TRUE,
+    types::{cl_mem_flags, CL_TRUE},
 };
 
 pub struct Gpu {
@@ -60,9 +60,16 @@ impl Gpu {
         Program::create_and_build_from_binary(&self.context, &[binary], "").map_err(|e| anyhow!("{e}"))
     }
 
-    pub fn create_buffer<T>(&self, length: usize) -> anyhow::Result<Buffer<T>> {
-        unsafe { Buffer::create(&self.context, CL_MEM_READ_WRITE, length, null::<T>() as *mut _) }
-            .context("Failed to create buffer")
+    pub fn create_buffer_readwrite<T>(&self, length: usize) -> anyhow::Result<Buffer<T>> {
+        self.create_buffer(CL_MEM_READ_WRITE, length, null::<T>() as *mut _)
+    }
+
+    pub fn create_buffer_readonly<T>(&self, length: usize) -> anyhow::Result<Buffer<T>> {
+        self.create_buffer(CL_MEM_READ_ONLY, length, null::<T>() as *mut _)
+    }
+
+    fn create_buffer<T>(&self, flags: cl_mem_flags, length: usize, host_ptr: *mut c_void) -> anyhow::Result<Buffer<T>> {
+        unsafe { Buffer::create(&self.context, flags, length, host_ptr as *mut _) }.context("Failed to create buffer")
     }
 
     pub fn write_buffer<T>(&self, buffer: &mut Buffer<T>, data: &[T]) -> anyhow::Result<()> {

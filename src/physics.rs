@@ -200,13 +200,12 @@ impl PhysicsEngine {
     fn leapfrog_yoshida_update_objects_gpu(&mut self, dt: f32) {
         if self.yoshida_position_buffer.is_none() {
             self.yoshida_position_buffer
-                .replace(self.gpu.create_buffer(self.objects.len() * 2).unwrap());
+                .replace(self.gpu.create_buffer_readwrite(self.objects.len() * 2).unwrap());
             self.yoshida_velocity_buffer
-                .replace(self.gpu.create_buffer(self.objects.len() * 2).unwrap());
+                .replace(self.gpu.create_buffer_readwrite(self.objects.len() * 2).unwrap());
             self.yoshida_planet_mass_buffer
-                .replace(self.gpu.create_buffer(self.planets_count * 2).unwrap());
+                .replace(self.gpu.create_buffer_readonly(self.planets_count).unwrap());
         }
-
         let mut positions = self
             .objects
             .iter()
