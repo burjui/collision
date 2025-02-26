@@ -17,5 +17,10 @@ vello = "0.4.0"
 winit = "0.30.9"
 pollster = "0.4.0"
 
+[dependencies.opencl3]
+version = "0.11"
+features = ["CL_VERSION_2_1", "CL_VERSION_2_2", "CL_VERSION_3_0"]
+
+
 [profile.release]
 debug = true

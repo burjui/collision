@@ -29,4 +29,14 @@ impl Object {
     pub fn momentum(&self) -> Vector2<f32> {
         self.velocity * self.mass
     }
+
+    pub fn update(&mut self, update: ObjectUpdate) {
+        self.position = update.position;
+        self.velocity = update.velocity;
+    }
+}
+
+pub struct ObjectUpdate {
+    pub position: Vector2<f32>,
+    pub velocity: Vector2<f32>,
 }

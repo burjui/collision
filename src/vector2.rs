@@ -17,6 +17,16 @@ impl<T> Vector2<T> {
         Self { x, y }
     }
 
+    pub fn from_slice(slice: &[T]) -> Self
+    where
+        T: Copy,
+    {
+        Self {
+            x: slice[0],
+            y: slice[1],
+        }
+    }
+
     pub fn magnitude(&self) -> T
     where
         T: Float,

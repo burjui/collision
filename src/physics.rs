@@ -1,48 +1,36 @@
 use core::{f32, fmt};
 use std::time::Instant;
 
+use anyhow::Context as _;
 use grid::{Grid, GridCell};
 use itertools::Itertools;
-use object::Object;
+use object::{Object, ObjectUpdate};
+use opencl3::{
+    kernel::{ExecuteKernel, Kernel},
+    memory::Buffer,
+};
 
-use crate::{app_config::AppConfig, array2::Array2, vector2::Vector2};
+use crate::{app_config::AppConfig, array2::Array2, gpu::Gpu, vector2::Vector2};
 
 pub mod grid;
 mod leapfrog_yoshida;
 pub mod object;
 
-pub enum SolverKind {
-    Bruteforce,
-    Grid,
-}
-
-impl SolverKind {
-    pub fn next(&self) -> Self {
-        match self {
-            SolverKind::Bruteforce => SolverKind::Grid,
-            SolverKind::Grid => SolverKind::Bruteforce,
-        }
-    }
-}
-
-impl fmt::Display for SolverKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SolverKind::Bruteforce => write!(f, "bruteforce"),
-            SolverKind::Grid => write!(f, "grid"),
-        }
-    }
-}
-
 pub struct PhysicsEngine {
     pub solver_kind: SolverKind,
     pub enable_constraint_bouncing: bool,
+    pub enable_gpu: bool,
     objects: Vec<Object>,
     grid: Grid,
     time: f32,
     constraints: ConstraintBox,
     restitution_coefficient: f32,
     planets_count: usize,
+    gpu: Gpu,
+    yoshida_kernel: Kernel,
+    yoshida_position_buffer: Option<Buffer<f32>>,
+    yoshida_velocity_buffer: Option<Buffer<f32>>,
+    yoshida_planet_mass_buffer: Option<Buffer<f32>>,
 }
 
 impl PhysicsEngine {
@@ -51,15 +39,24 @@ impl PhysicsEngine {
             Vector2::new(0.0, 0.0),
             Vector2::new(config.width as f32, config.height as f32),
         );
+        let gpu = Gpu::default()?;
+        let yoshida_program = gpu.build_program("src/yoshida.cl")?;
+        let yoshida_kernel = Kernel::create(&yoshida_program, "yoshida").context("Failed to create kernel")?;
         Ok(Self {
             solver_kind: SolverKind::Grid,
             enable_constraint_bouncing: false,
+            enable_gpu: true,
             objects: Vec::default(),
             grid: Grid::default(),
             time: 0.0,
             constraints,
             restitution_coefficient: config.restitution_coefficient,
             planets_count: 0,
+            gpu,
+            yoshida_kernel,
+            yoshida_position_buffer: None,
+            yoshida_velocity_buffer: None,
+            yoshida_planet_mass_buffer: None,
         })
     }
 
@@ -190,12 +187,73 @@ impl PhysicsEngine {
     }
 
     fn update_objects(&mut self, dt: f32) {
-        for object_index in 0..self.objects.len() {
-            self.leapfrog_yoshida_update_object(object_index, dt)
+        if self.enable_gpu {
+            self.leapfrog_yoshida_update_objects_gpu(dt);
+        } else {
+            for object_index in 0..self.objects.len() {
+                let update = self.leapfrog_yoshida_update_object(object_index, dt);
+                self.objects[object_index].update(update);
+            }
         }
     }
 
-    fn leapfrog_yoshida_update_object(&mut self, object_index: usize, dt: f32) {
+    fn leapfrog_yoshida_update_objects_gpu(&mut self, dt: f32) {
+        if self.yoshida_position_buffer.is_none() {
+            self.yoshida_position_buffer
+                .replace(self.gpu.create_buffer(self.objects.len() * 2).unwrap());
+            self.yoshida_velocity_buffer
+                .replace(self.gpu.create_buffer(self.objects.len() * 2).unwrap());
+            self.yoshida_planet_mass_buffer
+                .replace(self.gpu.create_buffer(self.planets_count * 2).unwrap());
+        }
+
+        let mut positions = self
+            .objects
+            .iter()
+            .flat_map(|Object { position, .. }| [position.x, position.y])
+            .collect_vec();
+        let mut velocities = self
+            .objects
+            .iter()
+            .flat_map(|Object { velocity, .. }| [velocity.x, velocity.y])
+            .collect_vec();
+        let planet_masses = self.objects[0..self.planets_count]
+            .iter()
+            .map(|Object { mass, .. }| mass)
+            .copied()
+            .collect_vec();
+        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
+        let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
+        self.gpu.write_buffer(position_buffer, &positions).unwrap();
+        self.gpu.write_buffer(velocity_buffer, &velocities).unwrap();
+        self.gpu.write_buffer(planet_mass_buffer, &planet_masses).unwrap();
+        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel);
+        kernel.set_global_work_size(self.objects.len());
+        unsafe {
+            kernel.set_arg(position_buffer);
+            kernel.set_arg(velocity_buffer);
+            kernel.set_arg(planet_mass_buffer);
+            kernel.set_arg(&self.planets_count);
+            kernel.set_arg(&dt);
+        }
+        self.gpu
+            .execute_kernel(&mut kernel)
+            .context("Failed to execute kernel")
+            .unwrap();
+        self.gpu.read_buffer(position_buffer, &mut positions).unwrap();
+        self.gpu.read_buffer(velocity_buffer, &mut velocities).unwrap();
+        self.objects
+            .iter_mut()
+            .zip(positions.chunks(2).map(Vector2::from_slice))
+            .zip(velocities.chunks(2).map(Vector2::from_slice))
+            .for_each(|((object, position), velocity)| {
+                object.position = position;
+                object.velocity = velocity;
+            });
+    }
+
+    fn leapfrog_yoshida_update_object(&self, object_index: usize, dt: f32) -> ObjectUpdate {
         use leapfrog_yoshida::*;
         let Object {
             position: x0,
@@ -203,13 +261,18 @@ impl PhysicsEngine {
             ..
         } = self.objects[object_index];
         let x1 = x0 + v0 * (C1 * dt);
-        let v1 = v0 + self.gravity_acceleration(object_index, x1) * (D1 * dt);
+        let a1 = self.gravity_acceleration(object_index, x1);
+        let v1 = v0 + a1 * (D1 * dt);
         let x2 = x0 + v1 * (C2 * dt);
-        let v2 = v0 + self.gravity_acceleration(object_index, x2) * (D2 * dt);
+        let a2 = self.gravity_acceleration(object_index, x2);
+        let v2 = v0 + a2 * (D2 * dt);
         let x3 = x0 + v2 * (C3 * dt);
-        let v3 = v0 + self.gravity_acceleration(object_index, x3) * (D3 * dt);
-        self.objects[object_index].position = x0 + v3 * (C4 * dt);
-        self.objects[object_index].velocity = v3;
+        let a3 = self.gravity_acceleration(object_index, x3);
+        let v3 = v0 + a3 * (D3 * dt);
+        ObjectUpdate {
+            position: x0 + v3 * (C4 * dt),
+            velocity: v3,
+        }
     }
 
     fn gravity_acceleration(&self, object_index: usize, position: Vector2<f32>) -> Vector2<f32> {
@@ -253,6 +316,29 @@ impl PhysicsEngine {
                     object.velocity.y *= -1.0;
                 }
             }
+        }
+    }
+}
+
+pub enum SolverKind {
+    Bruteforce,
+    Grid,
+}
+
+impl SolverKind {
+    pub fn next(&self) -> Self {
+        match self {
+            SolverKind::Bruteforce => SolverKind::Grid,
+            SolverKind::Grid => SolverKind::Bruteforce,
+        }
+    }
+}
+
+impl fmt::Display for SolverKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SolverKind::Bruteforce => write!(f, "bruteforce"),
+            SolverKind::Grid => write!(f, "grid"),
         }
     }
 }
