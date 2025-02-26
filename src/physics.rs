@@ -34,6 +34,8 @@ pub struct PhysicsEngine {
 }
 
 impl PhysicsEngine {
+    const GRAVITATIONAL_CONSTANT: f32 = 10000.0;
+
     pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
@@ -234,6 +236,7 @@ impl PhysicsEngine {
             kernel.set_arg(velocity_buffer);
             kernel.set_arg(planet_mass_buffer);
             kernel.set_arg(&self.planets_count);
+            kernel.set_arg(&Self::GRAVITATIONAL_CONSTANT);
             kernel.set_arg(&dt);
         }
         self.gpu
@@ -281,9 +284,8 @@ impl PhysicsEngine {
                 let planet = &self.objects[planet_index];
                 let to_planet = planet.position - position;
                 let direction = to_planet.normalize();
-                let gravitational_constant = 10000.0;
                 gravity += direction
-                    * (gravitational_constant * planet.mass / to_planet.magnitude_squared().max(f32::EPSILON));
+                    * (Self::GRAVITATIONAL_CONSTANT * planet.mass / to_planet.magnitude_squared().max(f32::EPSILON));
             }
         }
         gravity
