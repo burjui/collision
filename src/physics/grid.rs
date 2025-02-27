@@ -1,7 +1,7 @@
 use super::object::Object;
 use crate::{array2::Array2, fixed_vec::FixedVec, vector2::Vector2};
 
-pub type GridCell = FixedVec<usize, 8>;
+pub type GridCell = FixedVec<usize, 8 >;
 
 pub struct Grid {
     position: Vector2<f32>,
