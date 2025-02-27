@@ -1,4 +1,7 @@
-use vello::peniko::Color;
+use vello::peniko::{
+    color::{ColorSpace, Hsl, Srgb},
+    Color,
+};
 
 use crate::{
     physics::{object::Object, PhysicsEngine},
@@ -34,20 +37,26 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
     let mut x_offset = false;
+    let particle_count = dims.x * dims.y;
+    let mut hue_index = 0;
     for i in 0..dims.x {
         for j in 0..dims.y {
-            let py = |position, index| {
+            let p = |position, index| {
                 position + (index + 1) as f32 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
-            let px = |position, index| py(position, index);
-            let position = Vector2::new(px(brick.position.x, i), py(brick.position.y, j));
+            let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
+            let hue = 360.0 * hue_index as f32 / particle_count as f32;
+            let hsl = [hue, 100.0, 50.0];
+            let rgb = Hsl::convert::<Srgb>(hsl);
             let id = physics.add(Object {
                 radius: brick.particle_radius,
                 mass: brick.particle_mass,
+                color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),
                 ..Object::new(position)
             });
             result.push(id);
             x_offset = !x_offset;
+            hue_index += 1;
         }
     }
     result

@@ -92,7 +92,10 @@ impl PhysicsEngine {
     }
 
     pub fn advance(&mut self, dt: f32, substeps: usize) {
+        let start = Instant::now();
         self.update_substeps(dt, substeps);
+        println!("total time: {:?}", start.elapsed());
+        println!("-----------");
     }
 
     pub fn constraints(&self) -> &ConstraintBox {
@@ -120,19 +123,19 @@ impl PhysicsEngine {
 
         let start = Instant::now();
         self.update_objects(dt);
-        eprintln!("updates: {:?}", start.elapsed());
+        println!("updates: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.grid.update(&self.objects);
-        eprintln!("grid: {:?}", start.elapsed());
+        println!("grid: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.process_collisions();
-        eprintln!("collisions: {:?}", start.elapsed());
+        println!("collisions: {:?}", start.elapsed());
 
         let start = Instant::now();
         self.apply_constraints();
-        eprintln!("constraints: {:?}", start.elapsed());
+        println!("constraints: {:?}", start.elapsed());
     }
 
     fn process_collisions(&mut self) {
