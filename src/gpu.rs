@@ -116,7 +116,7 @@ impl Gpu {
     pub fn enqueue_write_buffer<T>(&self, buffer: &mut GpuDeviceBuffer<T>, data: &[T]) -> anyhow::Result<Event> {
         unsafe {
             self.queue
-                .enqueue_write_buffer(&mut buffer.buffer, CL_TRUE, 0, &data, &[])
+                .enqueue_write_buffer(&mut buffer.buffer, CL_TRUE, 0, data, &[])
                 .context("Failed to write device buffer")
         }
     }

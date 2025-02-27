@@ -286,6 +286,7 @@ dependencies = [
  "num-traits",
  "opencl3",
  "pollster",
+ "radsort",
  "serde",
  "serde_derive",
  "toml",
@@ -1383,6 +1384,12 @@ checksum = "0e4dccaaaf89514f546c693ddc140f729f958c247918a13380cccc6078391acc"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "radsort"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "019b4b213425016d7d84a153c4c73afb0946fbb4840e4eece7ba8848b9d6da22"
 
 [[package]]
 name = "range-alloc"

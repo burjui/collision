@@ -2,14 +2,13 @@ use core::{f32, fmt};
 use std::time::Instant;
 
 use anyhow::Context as _;
-use grid::{Grid, GridCell};
+use grid::{CellRecord, Grid};
 use itertools::Itertools;
 use object::{Object, ObjectUpdate};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
     app_config::AppConfig,
-    array2::Array2,
     gpu::{Gpu, GpuBufferAccess, GpuHostBuffer},
     vector2::Vector2,
 };
@@ -146,23 +145,21 @@ impl PhysicsEngine {
     }
 
     fn process_collisions_on_grid(&mut self) {
-        let cells = (0..self.grid.size().x - 1).cartesian_product(0..self.grid.size().y);
-        for cell @ (x, y) in cells {
-            let cell = &self.grid.cells[cell];
-            if !cell.is_empty() {
-                for &object_index in cell.as_slice() {
-                    let adjacent_cells = (x.saturating_sub(1)..=x + 1)
-                        .cartesian_product(y.saturating_sub(1)..=y + 1)
-                        .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y);
-                    for adjacent_cell in adjacent_cells {
-                        Self::process_object_with_cell_collisions(
-                            object_index,
-                            adjacent_cell,
-                            &self.grid.cells,
-                            &mut self.objects,
-                            self.restitution_coefficient,
-                        );
-                    }
+        for range in self.grid.cell_iter() {
+            let cell_records = &self.grid.cell_records[range];
+            let (x, y) = cell_records[0].cell_coords;
+            for &CellRecord { object_index, .. } in cell_records {
+                let adjacent_cells = (x.saturating_sub(1)..=x + 1)
+                    .cartesian_product(y.saturating_sub(1)..=y + 1)
+                    .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y);
+                for adjacent_cell in adjacent_cells {
+                    Self::process_object_with_cell_collisions(
+                        object_index,
+                        adjacent_cell,
+                        &self.grid,
+                        &mut self.objects,
+                        self.restitution_coefficient,
+                    );
                 }
             }
         }
@@ -171,14 +168,21 @@ impl PhysicsEngine {
     fn process_object_with_cell_collisions(
         object1_index: usize,
         cell: (usize, usize),
-        cells: &Array2<GridCell>,
+        grid: &Grid,
         objects: &mut [Object],
         restitution_coefficient: f32,
     ) {
-        for &object2_index in cells[cell].as_slice() {
-            if object1_index != object2_index {
-                let [object1, object2] = objects.get_disjoint_mut([object1_index, object2_index]).unwrap();
-                process_object_collision(object1, object2, restitution_coefficient);
+        if let Some((start, end)) = grid.cells_map[cell] {
+            // println!("cell: ({}, {})", start, end);
+            for &CellRecord {
+                object_index: object2_index,
+                ..
+            } in &grid.cell_records[start..end]
+            {
+                if object1_index != object2_index {
+                    let [object1, object2] = objects.get_disjoint_mut([object1_index, object2_index]).unwrap();
+                    process_object_collision(object1, object2, restitution_coefficient);
+                }
             }
         }
     }
@@ -247,17 +251,17 @@ impl PhysicsEngine {
             .yoshida_position_buffer
             .take()
             .map(GpuHostBuffer::take_data)
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
         let mut velocities = self
             .yoshida_velocity_buffer
             .take()
             .map(GpuHostBuffer::take_data)
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
         let mut planet_masses = self
             .yoshida_planet_mass_buffer
             .take()
             .map(GpuHostBuffer::take_data)
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
         positions.resize(self.objects.len() * 2, 0.0);
         velocities.resize(self.objects.len() * 2, 0.0);
         planet_masses.resize(self.planets_count, 0.0);

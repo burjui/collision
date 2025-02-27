@@ -1,15 +1,23 @@
 pub struct Array2<T> {
-    data: Box<[T]>,
+    data: Vec<T>,
     size: (usize, usize),
 }
 
 impl<T: Default + Copy> Array2<T> {
     pub fn default(size: (usize, usize)) -> Self {
-        let capacity = size.0 * size.1;
-        let mut data = Vec::with_capacity(capacity);
-        data.resize(capacity, T::default());
-        let data = data.into_boxed_slice();
+        let length = size.0 * size.1;
+        let mut data = Vec::with_capacity(length);
+        data.resize(length, T::default());
         Self { data, size }
+    }
+
+    pub fn size(&self) -> (usize, usize) {
+        self.size
+    }
+
+    pub fn resize(&mut self, size: (usize, usize)) {
+        self.data.resize(size.0 * size.1, T::default());
+        self.size = size;
     }
 }
 
