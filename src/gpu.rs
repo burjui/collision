@@ -189,3 +189,9 @@ impl<T> GpuHostBuffer<T> {
 pub struct GpuDeviceBuffer<T> {
     buffer: Buffer<T>,
 }
+
+impl<T> GpuDeviceBuffer<T> {
+    pub fn buffer(&self) -> &Buffer<T> {
+        &self.buffer
+    }
+}
