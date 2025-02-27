@@ -21,6 +21,7 @@ pub struct Brick {
 }
 
 impl Brick {
+    #[must_use]
     pub fn new(position: Vector2<f32>, size: Vector2<f32>) -> Self {
         Self {
             position,
@@ -32,7 +33,7 @@ impl Brick {
     }
 }
 
-pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
+pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> {
     let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -70,6 +71,7 @@ pub struct Ball {
 }
 
 impl Ball {
+    #[must_use]
     pub fn new(position: Vector2<f32>, radius: f32) -> Self {
         Self {
             position,
@@ -84,7 +86,7 @@ impl Ball {
     }
 }
 
-pub fn generate_ball(physics: &mut PhysicsEngine, ball: Ball) -> Vec<usize> {
+pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {

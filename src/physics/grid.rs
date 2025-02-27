@@ -69,18 +69,22 @@ impl Grid {
         }
     }
 
+    #[must_use]
     pub fn position(&self) -> Vector2<f32> {
         self.position
     }
 
+    #[must_use]
     pub fn size(&self) -> Vector2<usize> {
         self.size
     }
 
+    #[must_use]
     pub fn cell_size(&self) -> f32 {
         self.cell_size
     }
 
+    #[must_use]
     pub fn cell_iter(&self) -> CellIter<'_> {
         CellIter::new(&self.cell_records)
     }
@@ -132,6 +136,7 @@ impl Default for Grid {
     }
 }
 
+#[must_use]
 pub fn cell_at(position: Vector2<f32>, cells_start: Vector2<f32>, cell_size: f32) -> (usize, usize) {
     (
         ((position.x - cells_start.x) / cell_size) as usize,

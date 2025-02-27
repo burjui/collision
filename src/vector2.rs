@@ -41,6 +41,7 @@ impl<T> Vector2<T> {
         self.x * self.x + self.y * self.y
     }
 
+    #[must_use]
     pub fn normalize(&self) -> Vector2<T>
     where
         T: Float + Div<Output = T>,

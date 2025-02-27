@@ -22,7 +22,7 @@ impl FpsCalculator {
             self.last_measure_time = now;
         }
 
-        if let Some((measure_start, start_frame_count)) = self.frame_count_queue.front().cloned() {
+        if let Some((measure_start, start_frame_count)) = self.frame_count_queue.front().copied() {
             const STATS_AVERAGING_PERIOD_MILLIS: usize = 300;
             const {
                 assert!(STATS_AVERAGING_PERIOD_MILLIS > 0);
@@ -30,7 +30,7 @@ impl FpsCalculator {
 
             let period_millis = (now - measure_start).as_millis();
             if period_millis > STATS_AVERAGING_PERIOD_MILLIS as u128 {
-                while let Some((measure_start, _)) = self.frame_count_queue.front().cloned() {
+                while let Some((measure_start, _)) = self.frame_count_queue.front().copied() {
                     if (now - measure_start).as_millis() > STATS_AVERAGING_PERIOD_MILLIS as u128 {
                         self.frame_count_queue.pop_front();
                     } else {

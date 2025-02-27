@@ -70,10 +70,11 @@ impl PhysicsEngine {
             "planets must be added before any other objects"
         );
         self.objects.push(object);
-        self.planets_count += object.is_planet as usize;
+        self.planets_count += usize::from(object.is_planet);
         object_index
     }
 
+    #[must_use]
     pub fn grid(&self) -> &Grid {
         &self.grid
     }
@@ -82,6 +83,7 @@ impl PhysicsEngine {
         &mut self.grid
     }
 
+    #[must_use]
     pub fn objects(&self) -> &[Object] {
         &self.objects
     }
@@ -97,10 +99,12 @@ impl PhysicsEngine {
         println!("-----------");
     }
 
+    #[must_use]
     pub fn constraints(&self) -> &ConstraintBox {
         &self.constraints
     }
 
+    #[must_use]
     pub fn time(&self) -> f32 {
         self.time
     }
@@ -113,7 +117,7 @@ impl PhysicsEngine {
         println!("particles: {}", self.objects.len());
         let dt_substep = dt / substeps as f32;
         for _ in 0..substeps {
-            self.update(dt_substep)
+            self.update(dt_substep);
         }
     }
 
@@ -327,7 +331,7 @@ impl PhysicsEngine {
     }
 
     fn update_object_leapfrog_yoshida(&self, object_index: usize, dt: f32) -> ObjectUpdate {
-        use leapfrog_yoshida::*;
+        use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
         let Object {
             position: x0,
             velocity: v0,
@@ -398,6 +402,7 @@ pub enum SolverKind {
 }
 
 impl SolverKind {
+    #[must_use]
     pub fn next(&self) -> Self {
         match self {
             SolverKind::Bruteforce => SolverKind::Grid,
@@ -422,6 +427,7 @@ pub struct ConstraintBox {
 }
 
 impl ConstraintBox {
+    #[must_use]
     pub fn new(topleft: Vector2<f32>, bottomright: Vector2<f32>) -> Self {
         Self { topleft, bottomright }
     }

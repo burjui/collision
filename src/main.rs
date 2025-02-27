@@ -50,7 +50,7 @@ pub fn main() -> anyhow::Result<()> {
         cached_window: None,
         scene: Scene::new(),
         frame_count: 0,
-        fps_calculator: Default::default(),
+        fps_calculator: FpsCalculator::default(),
         last_fps: None,
         min_fps: usize::MAX,
         physics,
@@ -119,7 +119,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
         // We need to block here, in case a Suspended event appeared
         let surface = pollster::block_on(surface_future).expect("Error creating surface");
         self.state = {
-            let render_state = RenderState { window, surface };
+            let render_state = RenderState { surface, window };
             self.renderers.resize_with(self.context.devices.len(), || None);
             let id = render_state.surface.dev_id;
             self.renderers[id].get_or_insert_with(|| {
@@ -171,7 +171,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 if let Some(RenderState { surface, window }) = &mut self.state {
                     self.context.resize_surface(surface, size.width, size.height);
                     window.request_redraw();
-                };
+                }
             }
             WindowEvent::RedrawRequested => {
                 if let Some(RenderState { surface, .. }) = &self.state {
@@ -274,7 +274,7 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
                                 spectrum(spectrum_position)
                             }),
                             None,
-                            &Circle::new((object.position.x, object.position.y), object.radius as f64),
+                            &Circle::new((object.position.x, object.position.y), object.radius.into()),
                         );
                     }
                     scene

@@ -147,6 +147,7 @@ impl Gpu {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum GpuBufferAccess {
     ReadOnly,
     WriteOnly,
@@ -154,6 +155,7 @@ pub enum GpuBufferAccess {
 }
 
 impl GpuBufferAccess {
+    #[must_use]
     pub fn cl_mem_flags(&self) -> cl_mem_flags {
         match self {
             GpuBufferAccess::ReadOnly => CL_MEM_READ_ONLY,
@@ -169,6 +171,7 @@ pub struct GpuHostBuffer<T> {
 }
 
 impl<T> GpuHostBuffer<T> {
+    #[must_use]
     pub fn data(&self) -> &Vec<T> {
         &self.data
     }
@@ -177,10 +180,12 @@ impl<T> GpuHostBuffer<T> {
         &mut self.data
     }
 
+    #[must_use]
     pub fn buffer(&self) -> &Buffer<T> {
         &self.buffer
     }
 
+    #[must_use]
     pub fn take_data(self) -> Vec<T> {
         self.data
     }
@@ -191,6 +196,7 @@ pub struct GpuDeviceBuffer<T> {
 }
 
 impl<T> GpuDeviceBuffer<T> {
+    #[must_use]
     pub fn buffer(&self) -> &Buffer<T> {
         &self.buffer
     }

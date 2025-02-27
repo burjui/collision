@@ -4,6 +4,7 @@ pub struct Array2<T> {
 }
 
 impl<T: Default + Copy> Array2<T> {
+    #[must_use]
     pub fn default(size: (usize, usize)) -> Self {
         let length = size.0 * size.1;
         let mut data = Vec::with_capacity(length);
@@ -11,6 +12,7 @@ impl<T: Default + Copy> Array2<T> {
         Self { data, size }
     }
 
+    #[must_use]
     pub fn size(&self) -> (usize, usize) {
         self.size
     }

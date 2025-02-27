@@ -1,7 +1,6 @@
-use std::{fmt::Display, fs::File, io::Read, path::Path};
+use std::{fs::File, io::Read, path::Path};
 
 use anyhow::{anyhow, Context};
-use num_traits::Zero;
 use serde_derive::Deserialize;
 
 #[derive(Deserialize)]
@@ -23,68 +22,25 @@ impl AppConfig {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        check(&self.width, "screen_width", Positive)?;
-        check(&self.height, "screen_height", Positive)?;
+        validate_positive(self.width, "screen_width")?;
+        validate_positive(self.height, "screen_height")?;
+        validate_restitution_coefficient(self.restitution_coefficient, "restitution_coefficient")?;
         Ok(())
     }
 }
 
-fn check<T, R: Rule<T>>(value: &T, name: &'static str, rule: R) -> anyhow::Result<()> {
-    if rule.condition(value) {
+fn validate_positive(value: u32, name: &'static str) -> anyhow::Result<()> {
+    if value > 0 {
         Ok(())
     } else {
-        Err(anyhow!("{}", rule.error_message(value, name)))
-    }
-}
-struct Positive;
-
-trait Rule<T> {
-    fn condition(&self, value: &T) -> bool;
-    fn error_message(&self, value: &T, name: &'static str) -> String;
-}
-
-impl<T: Zero + PartialOrd + Display> Rule<T> for Positive {
-    fn condition(&self, value: &T) -> bool {
-        value > &Zero::zero()
-    }
-
-    fn error_message(&self, value: &T, name: &'static str) -> String {
-        format!("{} ({}) must be positive", name, value)
+        Err(anyhow!("{} must be positive", name))
     }
 }
 
-#[allow(unused)]
-mod unused {
-    use std::{fmt::Display, ops::RangeInclusive};
-
-    use super::Rule;
-
-    struct GreatOrEqual<T>(T);
-    struct IsInRange<T>(RangeInclusive<T>);
-
-    impl<T: PartialOrd + Display> Rule<T> for GreatOrEqual<T> {
-        fn condition(&self, value: &T) -> bool {
-            value >= &self.0
-        }
-
-        fn error_message(&self, value: &T, name: &'static str) -> String {
-            format!("{} ({}) must be greater than {}", name, value, &self.0)
-        }
-    }
-
-    impl<T: PartialOrd + Display> Rule<T> for IsInRange<T> {
-        fn condition(&self, value: &T) -> bool {
-            self.0.contains(value)
-        }
-
-        fn error_message(&self, value: &T, name: &'static str) -> String {
-            format!(
-                "{} ({}) is out of range [{}; {}]",
-                name,
-                value,
-                self.0.start(),
-                self.0.end()
-            )
-        }
+fn validate_restitution_coefficient(value: f32, name: &'static str) -> anyhow::Result<()> {
+    if (0.0..=1.0).contains(&value) {
+        Ok(())
+    } else {
+        Err(anyhow!("{} must be in range [0.0, 1.0]", name))
     }
 }

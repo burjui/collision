@@ -14,6 +14,7 @@ pub struct Object {
 }
 
 impl Object {
+    #[must_use]
     pub fn new(position: Vector2<f32>) -> Self {
         Self {
             position,
@@ -26,6 +27,7 @@ impl Object {
         }
     }
 
+    #[must_use]
     pub fn momentum(&self) -> Vector2<f32> {
         self.velocity * self.mass
     }
@@ -36,6 +38,7 @@ impl Object {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct ObjectUpdate {
     pub position: Vector2<f32>,
     pub velocity: Vector2<f32>,

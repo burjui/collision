@@ -40,7 +40,7 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
         particle_mass: 0.01,
         ..Brick::new(Vector2::new(400.0, 300.0), Vector2::new(600.0, 300.0))
     };
-    generate_brick(physics, brick);
+    generate_brick(physics, &brick);
 
     // physics.add(Object {
     //     velocity: Vector2::new(0.0, 10.0),
