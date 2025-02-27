@@ -193,62 +193,93 @@ impl PhysicsEngine {
 
     fn update_objects(&mut self, dt: f32) {
         if self.enable_gpu {
-            self.leapfrog_yoshida_update_objects_gpu(dt);
+            self.update_objects_leapfrog_yoshida_gpu(dt);
         } else {
             for object_index in 0..self.objects.len() {
-                let update = self.leapfrog_yoshida_update_object(object_index, dt);
+                let update = self.update_object_leapfrog_yoshida(object_index, dt);
                 self.objects[object_index].update(update);
             }
         }
     }
 
-    fn leapfrog_yoshida_update_objects_gpu(&mut self, dt: f32) {
-        if self
-            .yoshida_position_buffer
+    fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f32) {
+        if self.yoshida_gpu_buffers_are_outdated() {
+            self.allocate_yoshida_gpu_buffers();
+        }
+        self.update_yoshida_gpu_buffers();
+        self.execute_yoshida_gpu_kernel(dt);
+        self.update_objects_from_gpu_buffers();
+    }
+
+    fn execute_yoshida_gpu_kernel(&mut self, dt: f32) {
+        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
+        let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
+        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel);
+        kernel.set_global_work_size(self.objects.len());
+        unsafe {
+            kernel.set_arg(position_buffer.buffer());
+            kernel.set_arg(velocity_buffer.buffer());
+            kernel.set_arg(planet_mass_buffer.buffer());
+            kernel.set_arg(&self.planets_count);
+            kernel.set_arg(&Self::GRAVITATIONAL_CONSTANT);
+            kernel.set_arg(&dt);
+        }
+        self.gpu
+            .enqueue_execute_kernel(&mut kernel)
+            .context("Failed to execute kernel")
+            .unwrap();
+        self.gpu.enqueue_read_host_buffer(position_buffer).unwrap();
+        self.gpu.enqueue_read_host_buffer(velocity_buffer).unwrap();
+        self.gpu.submit_queue().unwrap();
+    }
+
+    fn yoshida_gpu_buffers_are_outdated(&mut self) -> bool {
+        self.yoshida_position_buffer
             .as_ref()
             .is_none_or(|b| b.data().len() != self.objects.len() * 2)
-        {
-            let mut positions = self
-                .yoshida_position_buffer
-                .take()
-                .map(GpuHostBuffer::take_data)
-                .unwrap_or_else(Vec::new);
-            let mut velocities = self
-                .yoshida_velocity_buffer
-                .take()
-                .map(GpuHostBuffer::take_data)
-                .unwrap_or_else(Vec::new);
-            let mut planet_masses = self
-                .yoshida_planet_mass_buffer
-                .take()
-                .map(GpuHostBuffer::take_data)
-                .unwrap_or_else(Vec::new);
-            positions.clear();
-            velocities.clear();
-            planet_masses.clear();
-            positions.resize(self.objects.len() * 2, 0.0);
-            velocities.resize(self.objects.len() * 2, 0.0);
-            planet_masses.resize(self.planets_count, 0.0);
+    }
+    fn allocate_yoshida_gpu_buffers(&mut self) {
+        let mut positions = self
+            .yoshida_position_buffer
+            .take()
+            .map(GpuHostBuffer::take_data)
+            .unwrap_or_else(Vec::new);
+        let mut velocities = self
+            .yoshida_velocity_buffer
+            .take()
+            .map(GpuHostBuffer::take_data)
+            .unwrap_or_else(Vec::new);
+        let mut planet_masses = self
+            .yoshida_planet_mass_buffer
+            .take()
+            .map(GpuHostBuffer::take_data)
+            .unwrap_or_else(Vec::new);
+        positions.resize(self.objects.len() * 2, 0.0);
+        velocities.resize(self.objects.len() * 2, 0.0);
+        planet_masses.resize(self.planets_count, 0.0);
 
-            let position_buffer = self
-                .gpu
-                .create_host_buffer(positions, GpuBufferAccess::ReadWrite)
-                .context("Failed to create position buffer")
-                .unwrap();
-            let velocity_buffer = self
-                .gpu
-                .create_host_buffer(velocities, GpuBufferAccess::ReadWrite)
-                .context("Failed to create velocity buffer")
-                .unwrap();
-            let planet_mass_buffer = self
-                .gpu
-                .create_host_buffer(planet_masses, GpuBufferAccess::ReadOnly)
-                .context("Failed to create planet mass buffer")
-                .unwrap();
-            self.yoshida_position_buffer.replace(position_buffer);
-            self.yoshida_velocity_buffer.replace(velocity_buffer);
-            self.yoshida_planet_mass_buffer.replace(planet_mass_buffer);
-        }
+        let position_buffer = self
+            .gpu
+            .create_host_buffer(positions, GpuBufferAccess::ReadWrite)
+            .context("Failed to create position buffer")
+            .unwrap();
+        let velocity_buffer = self
+            .gpu
+            .create_host_buffer(velocities, GpuBufferAccess::ReadWrite)
+            .context("Failed to create velocity buffer")
+            .unwrap();
+        let planet_mass_buffer = self
+            .gpu
+            .create_host_buffer(planet_masses, GpuBufferAccess::ReadOnly)
+            .context("Failed to create planet mass buffer")
+            .unwrap();
+        self.yoshida_position_buffer.replace(position_buffer);
+        self.yoshida_velocity_buffer.replace(velocity_buffer);
+        self.yoshida_planet_mass_buffer.replace(planet_mass_buffer);
+    }
+
+    fn update_yoshida_gpu_buffers(&mut self) {
         let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
         let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
         let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
@@ -273,40 +304,22 @@ impl PhysicsEngine {
                 .iter()
                 .map(|&Object { mass, .. }| mass),
         );
-        // self.gpu.enqueue_write_buffer(position_buffer, &positions).unwrap();
-        // self.gpu.enqueue_write_buffer(velocity_buffer, &velocities).unwrap();
-        // self.gpu
-        //     .enqueue_write_buffer(planet_mass_buffer, &planet_masses)
-        //     .unwrap();
+    }
 
-        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel);
-        kernel.set_global_work_size(self.objects.len());
-        unsafe {
-            kernel.set_arg(position_buffer.buffer());
-            kernel.set_arg(velocity_buffer.buffer());
-            kernel.set_arg(planet_mass_buffer.buffer());
-            kernel.set_arg(&self.planets_count);
-            kernel.set_arg(&Self::GRAVITATIONAL_CONSTANT);
-            kernel.set_arg(&dt);
-        }
-        self.gpu
-            .enqueue_execute_kernel(&mut kernel)
-            .context("Failed to execute kernel")
-            .unwrap();
-        self.gpu.enqueue_read_host_buffer(position_buffer).unwrap();
-        self.gpu.enqueue_read_host_buffer(velocity_buffer).unwrap();
-        self.gpu.submit_queue().unwrap();
+    fn update_objects_from_gpu_buffers(&mut self) {
+        let positions = self.yoshida_position_buffer.as_ref().unwrap().data();
+        let velocities = self.yoshida_velocity_buffer.as_ref().unwrap().data();
         self.objects
             .iter_mut()
-            .zip(position_buffer.data().chunks(2).map(Vector2::from_slice))
-            .zip(velocity_buffer.data().chunks(2).map(Vector2::from_slice))
+            .zip(positions.chunks(2).map(Vector2::from_slice))
+            .zip(velocities.chunks(2).map(Vector2::from_slice))
             .for_each(|((object, position), velocity)| {
                 object.position = position;
                 object.velocity = velocity;
             });
     }
 
-    fn leapfrog_yoshida_update_object(&self, object_index: usize, dt: f32) -> ObjectUpdate {
+    fn update_object_leapfrog_yoshida(&self, object_index: usize, dt: f32) -> ObjectUpdate {
         use leapfrog_yoshida::*;
         let Object {
             position: x0,
