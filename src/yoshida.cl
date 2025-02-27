@@ -9,7 +9,7 @@
 float2 gravity_acceleration(size_t object_index, const float2 position,
                             global const float2 *positions,
                             global const float2 *velocities,
-                            global const float *planet_masses,
+                            constant float *planet_masses,
                             const size_t planets_count,
                             const float gravitational_constant) {
   float2 gravity = (float2)(0.0, 0.0);
@@ -33,8 +33,7 @@ float2 gravity_acceleration(size_t object_index, const float2 position,
 }
 
 kernel void yoshida(global float2 *positions, global float2 *velocities,
-                    global const float *planet_masses,
-                    const size_t planets_count,
+                    constant float *planet_masses, const size_t planets_count,
                     const float gravitational_constant, const float dt) {
   const int object_index = get_global_id(0);
   const float2 x0 = positions[object_index];
