@@ -8,3 +8,4 @@
 /video
 /config.toml
 /perf.data*
+/profile.json.gz
