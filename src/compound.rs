@@ -36,16 +36,14 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
     let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
-    let mut x_offset = false;
-    let particle_count = dims.x * dims.y;
-    let mut hue_index = 0;
     for i in 0..dims.x {
         for j in 0..dims.y {
             let p = |position, index| {
                 position + (index + 1) as f32 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
-            let hue = 360.0 * hue_index as f32 / particle_count as f32;
+            let selection_factor = (position.x - brick.position.x) / brick.size.x;
+            let hue = 360.0 * selection_factor;
             let hsl = [hue, 100.0, 50.0];
             let rgb = Hsl::convert::<Srgb>(hsl);
             let id = physics.add(Object {
@@ -55,8 +53,6 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: Brick) -> Vec<usize> {
                 ..Object::new(position)
             });
             result.push(id);
-            x_offset = !x_offset;
-            hue_index += 1;
         }
     }
     result
