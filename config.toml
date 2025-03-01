@@ -1,0 +1,4 @@
+width = 1600
+height = 800
+restitution_coefficient = 0.9995
+gravity = [0.0, 0.0]

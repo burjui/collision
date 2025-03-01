@@ -6,6 +6,5 @@
 /flamegraph.svg
 /output
 /video
-/config.toml
 /perf.data*
 /profile.json.gz

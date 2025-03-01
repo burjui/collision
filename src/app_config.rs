@@ -8,6 +8,7 @@ pub struct AppConfig {
     pub width: u32,
     pub height: u32,
     pub restitution_coefficient: f32,
+    pub gravity: (f32, f32),
 }
 
 impl AppConfig {

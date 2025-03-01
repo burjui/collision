@@ -172,6 +172,12 @@ impl Sum for Vector2<f32> {
     }
 }
 
+impl From<(f32, f32)> for Vector2<f32> {
+    fn from(tuple: (f32, f32)) -> Self {
+        Self { x: tuple.0, y: tuple.1 }
+    }
+}
+
 impl fmt::Debug for Vector2<f32> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.x, self.y)

@@ -21,6 +21,10 @@ impl<T: Default + Copy> Array2<T> {
         self.data.resize(size.0 * size.1, T::default());
         self.size = size;
     }
+
+    pub fn fill(&mut self, value: T) {
+        self.data.fill(value);
+    }
 }
 
 impl<T> std::ops::Index<(usize, usize)> for Array2<T> {

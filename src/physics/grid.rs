@@ -14,7 +14,7 @@ pub struct Grid {
     size: Vector2<usize>,
     cell_size: f32,
     pub(super) cell_records: Vec<CellRecord>,
-    pub(super) cells_map: Array2<Option<(usize, usize)>>,
+    pub(super) coords_to_cells: Array2<Option<(usize, usize)>>,
 }
 
 impl Grid {
@@ -57,13 +57,14 @@ impl Grid {
                 (cell_coords.1 * self.size.x) | cell_coords.0
             });
 
-            if self.cells_map.size() != (self.size.x, self.size.y) {
-                self.cells_map.resize((self.size.x, self.size.y));
+            if self.coords_to_cells.size() != (self.size.x, self.size.y) {
+                self.coords_to_cells.resize((self.size.x, self.size.y));
             }
             if !self.cell_records.is_empty() {
+                self.coords_to_cells.fill(None);
                 for range in CellIter::new(&self.cell_records) {
                     let cell_coords = self.cell_records[range.start].cell_coords;
-                    self.cells_map[cell_coords] = Some((range.start, range.end));
+                    self.coords_to_cells[cell_coords] = Some((range.start, range.end));
                 }
             }
         }
@@ -131,7 +132,7 @@ impl Default for Grid {
             size: Vector2::new(0, 0),
             cell_size: 0.0,
             cell_records: Vec::new(),
-            cells_map: Array2::default((0, 0)),
+            coords_to_cells: Array2::default((0, 0)),
         }
     }
 }

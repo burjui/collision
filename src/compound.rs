@@ -15,6 +15,7 @@ const DEFAULT_PARTICLE_MASS: f32 = 1.0;
 pub struct Brick {
     pub position: Vector2<f32>,
     pub size: Vector2<f32>,
+    pub velocity: Vector2<f32>,
     pub particle_radius: f32,
     pub particle_spacing: f32,
     pub particle_mass: f32,
@@ -26,6 +27,7 @@ impl Brick {
         Self {
             position,
             size,
+            velocity: Vector2::new(0.0, 0.0),
             particle_radius: DEFAULT_PARTICLE_RADIUS,
             particle_spacing: DEFAULT_PARTICLE_SPACING,
             particle_mass: DEFAULT_PARTICLE_MASS,
@@ -48,6 +50,7 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
             let hsl = [hue, 100.0, 50.0];
             let rgb = Hsl::convert::<Srgb>(hsl);
             let id = physics.add(Object {
+                velocity: brick.velocity,
                 radius: brick.particle_radius,
                 mass: brick.particle_mass,
                 color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),

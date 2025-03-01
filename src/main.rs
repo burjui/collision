@@ -215,7 +215,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         const FRAME_INTERVAL: f32 = 1.0 / 60.0;
-        const DEFAULT_DT: f32 = FRAME_INTERVAL / 128.0;
+        const DEFAULT_DT: f32 = FRAME_INTERVAL / 16.0;
 
         if self.advance_time {
             self.physics.advance(DEFAULT_DT, 2);

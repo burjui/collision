@@ -1,5 +1,5 @@
 use core::{f32, fmt};
-use std::time::Instant;
+use std::{cmp::Ordering, time::Instant};
 
 use anyhow::Context as _;
 use grid::{CellRecord, Grid};
@@ -51,7 +51,7 @@ impl PhysicsEngine {
             Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
         Ok(Self {
             solver_kind: SolverKind::Grid,
-            enable_constraint_bouncing: false,
+            enable_constraint_bouncing: true,
             enable_gpu: true,
             objects: Vec::default(),
             grid: Grid::default(),
@@ -59,7 +59,7 @@ impl PhysicsEngine {
             constraints,
             restitution_coefficient: config.restitution_coefficient,
             planets_count: 0,
-            global_gravity: Vector2::new(0.0, 1000.0),
+            global_gravity: Vector2::from(config.gravity),
             gpu,
             yoshida_kernel,
             yoshida_kernel_no_planets,
@@ -121,7 +121,20 @@ impl PhysicsEngine {
 
     fn update_substeps(&mut self, dt: f32, substeps: usize) {
         println!("particles: {}", self.objects.len());
-        let dt_substep = dt / substeps as f32;
+        let max_velocity_squared = self
+            .objects
+            .iter()
+            .map(|o| TotalCmpF32(o.velocity.magnitude_squared()))
+            .max()
+            .map(|c| c.0)
+            .unwrap_or(0.0);
+        self.grid.update(&self.objects);
+        let slowdown_factor = if self.grid.cell_size() > 0.0 && max_velocity_squared > 0.0 {
+            (self.grid.cell_size() / max_velocity_squared.sqrt() * 1000.0 / substeps as f32).min(1.0)
+        } else {
+            1.0
+        };
+        let dt_substep = dt * slowdown_factor / substeps as f32;
         for _ in 0..substeps {
             self.update(dt_substep);
         }
@@ -159,9 +172,8 @@ impl PhysicsEngine {
             let cell_records = &self.grid.cell_records[range];
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
-                let adjacent_cells = (x.saturating_sub(1)..=x + 1)
-                    .cartesian_product(y.saturating_sub(1)..=y + 1)
-                    .filter(|&(x, y)| x < self.grid.size().x && y < self.grid.size().y);
+                let adjacent_cells = (x.saturating_sub(1)..=(x + 1).min(self.grid.size().x - 1))
+                    .cartesian_product(y.saturating_sub(1)..=(y + 1).min(self.grid.size().y - 1));
                 for adjacent_cell in adjacent_cells {
                     Self::process_object_with_cell_collisions(
                         object_index,
@@ -182,8 +194,7 @@ impl PhysicsEngine {
         objects: &mut [Object],
         restitution_coefficient: f32,
     ) {
-        if let Some((start, end)) = grid.cells_map[cell] {
-            // println!("cell: ({}, {})", start, end);
+        if let Some((start, end)) = grid.coords_to_cells[cell] {
             for &CellRecord {
                 object_index: object2_index,
                 ..
@@ -473,7 +484,7 @@ impl ConstraintBox {
 fn process_object_collision(object1: &mut Object, object2: &mut Object, restitution_coefficient: f32) {
     let collision_distance = object1.radius + object2.radius;
     let from_2_to_1 = object1.position - object2.position;
-    if from_2_to_1.magnitude_squared() < collision_distance * collision_distance {
+    if from_2_to_1.magnitude_squared() <= collision_distance * collision_distance {
         let total_mass = object1.mass + object2.mass;
         let velocity_diff = object1.velocity - object2.velocity;
         let distance = from_2_to_1.magnitude();
@@ -496,5 +507,27 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
         if !object2.is_planet {
             object2.velocity *= restitution_coefficient;
         }
+    }
+}
+
+struct TotalCmpF32(f32);
+
+impl Eq for TotalCmpF32 {}
+
+impl PartialEq for TotalCmpF32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Ord for TotalCmpF32 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for TotalCmpF32 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
