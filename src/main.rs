@@ -22,7 +22,7 @@ use vello::{
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
-    event::{ElementState, WindowEvent},
+    event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
@@ -193,6 +193,21 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Vector2::new(position.x as f32, position.y as f32);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if state == ElementState::Pressed {
+                    match button {
+                        MouseButton::Left => {
+                            for object in self.physics.objects_mut() {
+                                let from_mouse_to_object = object.position - self.mouse_position;
+                                if (from_mouse_to_object).magnitude() < 100.0 {
+                                    object.velocity += from_mouse_to_object.normalize() * 2000.0;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             _ => {}
         }

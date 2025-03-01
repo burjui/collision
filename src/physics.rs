@@ -27,8 +27,10 @@ pub struct PhysicsEngine {
     constraints: ConstraintBox,
     restitution_coefficient: f32,
     planets_count: usize,
+    global_gravity: Vector2<f32>,
     gpu: Gpu,
     yoshida_kernel: Kernel,
+    yoshida_kernel_no_planets: Kernel,
     yoshida_position_buffer: Option<GpuHostBuffer<f32>>,
     yoshida_velocity_buffer: Option<GpuHostBuffer<f32>>,
     yoshida_planet_mass_buffer: Option<GpuHostBuffer<f32>>,
@@ -45,6 +47,8 @@ impl PhysicsEngine {
         let gpu = Gpu::default(10)?;
         let yoshida_program = gpu.build_program("src/yoshida.cl")?;
         let yoshida_kernel = Kernel::create(&yoshida_program, "yoshida").context("Failed to create kernel")?;
+        let yoshida_kernel_no_planets =
+            Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
         Ok(Self {
             solver_kind: SolverKind::Grid,
             enable_constraint_bouncing: false,
@@ -55,8 +59,10 @@ impl PhysicsEngine {
             constraints,
             restitution_coefficient: config.restitution_coefficient,
             planets_count: 0,
+            global_gravity: Vector2::new(0.0, 1000.0),
             gpu,
             yoshida_kernel,
+            yoshida_kernel_no_planets,
             yoshida_position_buffer: None,
             yoshida_velocity_buffer: None,
             yoshida_planet_mass_buffer: None,
@@ -218,7 +224,11 @@ impl PhysicsEngine {
             self.allocate_yoshida_gpu_buffers();
         }
         self.update_yoshida_gpu_buffers();
-        self.execute_yoshida_gpu_kernel(dt);
+        if self.planets_count > 0 {
+            self.execute_yoshida_gpu_kernel(dt);
+        } else {
+            self.execute_yoshida_no_planets_gpu_kernel(dt);
+        }
         self.update_objects_from_gpu_buffers();
     }
 
@@ -231,10 +241,31 @@ impl PhysicsEngine {
         unsafe {
             kernel.set_arg(position_buffer.buffer());
             kernel.set_arg(velocity_buffer.buffer());
+            kernel.set_arg(&dt);
+            kernel.set_arg(&self.global_gravity);
             kernel.set_arg(planet_mass_buffer.buffer());
             kernel.set_arg(&self.planets_count);
             kernel.set_arg(&Self::GRAVITATIONAL_CONSTANT);
+        }
+        self.gpu
+            .enqueue_execute_kernel(&mut kernel)
+            .context("Failed to execute kernel")
+            .unwrap();
+        self.gpu.enqueue_read_host_buffer(position_buffer).unwrap();
+        self.gpu.enqueue_read_host_buffer(velocity_buffer).unwrap();
+        self.gpu.submit_queue().unwrap();
+    }
+
+    fn execute_yoshida_no_planets_gpu_kernel(&mut self, dt: f32) {
+        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
+        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel_no_planets);
+        kernel.set_global_work_size(self.objects.len());
+        unsafe {
+            kernel.set_arg(position_buffer.buffer());
+            kernel.set_arg(velocity_buffer.buffer());
             kernel.set_arg(&dt);
+            kernel.set_arg(&self.global_gravity);
         }
         self.gpu
             .enqueue_execute_kernel(&mut kernel)
@@ -261,14 +292,8 @@ impl PhysicsEngine {
             .take()
             .map(GpuHostBuffer::take_data)
             .unwrap_or_default();
-        let mut planet_masses = self
-            .yoshida_planet_mass_buffer
-            .take()
-            .map(GpuHostBuffer::take_data)
-            .unwrap_or_default();
         positions.resize(self.objects.len() * 2, 0.0);
         velocities.resize(self.objects.len() * 2, 0.0);
-        planet_masses.resize(self.planets_count, 0.0);
 
         let position_buffer = self
             .gpu
@@ -280,20 +305,28 @@ impl PhysicsEngine {
             .create_host_buffer(velocities, GpuBufferAccess::ReadWrite)
             .context("Failed to create velocity buffer")
             .unwrap();
-        let planet_mass_buffer = self
-            .gpu
-            .create_host_buffer(planet_masses, GpuBufferAccess::ReadOnly)
-            .context("Failed to create planet mass buffer")
-            .unwrap();
         self.yoshida_position_buffer.replace(position_buffer);
         self.yoshida_velocity_buffer.replace(velocity_buffer);
-        self.yoshida_planet_mass_buffer.replace(planet_mass_buffer);
+
+        if self.planets_count > 0 {
+            let mut planet_masses = self
+                .yoshida_planet_mass_buffer
+                .take()
+                .map(GpuHostBuffer::take_data)
+                .unwrap_or_default();
+            planet_masses.resize(self.planets_count, 0.0);
+            self.yoshida_planet_mass_buffer.replace(
+                self.gpu
+                    .create_host_buffer(planet_masses, GpuBufferAccess::ReadOnly)
+                    .context("Failed to create planet mass buffer")
+                    .unwrap(),
+            );
+        }
     }
 
     fn update_yoshida_gpu_buffers(&mut self) {
         let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
         let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
         let positions_len = position_buffer.data().len();
         position_buffer.data_mut().splice(
             0..positions_len,
@@ -308,13 +341,17 @@ impl PhysicsEngine {
                 .iter()
                 .flat_map(|Object { velocity, .. }| [velocity.x, velocity.y]),
         );
-        let planet_masses_len = planet_mass_buffer.data().len();
-        planet_mass_buffer.data_mut().splice(
-            0..planet_masses_len,
-            self.objects[0..self.planets_count]
-                .iter()
-                .map(|&Object { mass, .. }| mass),
-        );
+
+        if self.planets_count > 0 {
+            let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
+            let planet_masses_len = planet_mass_buffer.data().len();
+            planet_mass_buffer.data_mut().splice(
+                0..planet_masses_len,
+                self.objects[0..self.planets_count]
+                    .iter()
+                    .map(|&Object { mass, .. }| mass),
+            );
+        }
     }
 
     fn update_objects_from_gpu_buffers(&mut self) {
