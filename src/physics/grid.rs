@@ -1,13 +1,9 @@
 use std::ops::Range;
 
+use rdst::{RadixKey, RadixSort};
+
 use super::object::Object;
 use crate::{array2::Array2, vector2::Vector2};
-
-#[derive(Copy, Clone)]
-pub struct CellRecord {
-    pub object_index: usize,
-    pub cell_coords: (usize, usize),
-}
 
 pub struct Grid {
     position: Vector2<f32>,
@@ -41,6 +37,7 @@ impl Grid {
                     CellRecord {
                         object_index: 0,
                         cell_coords: (0, 0),
+                        radix_key: 0,
                     },
                 );
             }
@@ -50,12 +47,10 @@ impl Grid {
                 self.cell_records[object_index] = CellRecord {
                     object_index,
                     cell_coords: cell,
+                    radix_key: ((cell.1 * self.size.x) | cell.0).try_into().unwrap(),
                 };
             }
-
-            radsort::sort_by_key(&mut self.cell_records, |CellRecord { cell_coords, .. }| {
-                (cell_coords.1 * self.size.x) | cell_coords.0
-            });
+            self.cell_records.radix_sort_unstable();
 
             if self.coords_to_cells.size() != (self.size.x, self.size.y) {
                 self.coords_to_cells.resize((self.size.x, self.size.y));
@@ -88,6 +83,21 @@ impl Grid {
     #[must_use]
     pub fn cell_iter(&self) -> CellIter<'_> {
         CellIter::new(&self.cell_records)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct CellRecord {
+    pub object_index: usize,
+    pub cell_coords: (usize, usize),
+    radix_key: u32,
+}
+
+impl RadixKey for CellRecord {
+    const LEVELS: usize = <u32 as RadixKey>::LEVELS;
+
+    fn get_level(&self, level: usize) -> u8 {
+        self.radix_key.get_level(level)
     }
 }
 
