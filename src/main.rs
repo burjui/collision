@@ -4,12 +4,7 @@ use core::f32;
 use std::{num::NonZero, path::Path, sync::Arc};
 
 use anyhow::{Context, Ok};
-use collision::{
-    app_config::AppConfig,
-    fps::FpsCalculator,
-    physics::{PhysicsEngine, SolverKind},
-    vector2::Vector2,
-};
+use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
 use demo::create_demo;
 use itertools::Itertools;
 use vello::{
@@ -156,12 +151,6 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     match event.logical_key.as_ref() {
                         Key::Named(NamedKey::Space) => self.advance_time = !self.advance_time,
                         Key::Named(NamedKey::Escape) => event_loop.exit(),
-                        Key::Character("s") => {
-                            self.physics.solver_kind = match self.physics.solver_kind {
-                                SolverKind::Bruteforce => SolverKind::Grid,
-                                SolverKind::Grid => SolverKind::Bruteforce,
-                            };
-                        }
                         Key::Character("a") => self.physics.enable_gpu = !self.physics.enable_gpu,
                         _ => {}
                     }

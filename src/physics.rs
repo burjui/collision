@@ -1,4 +1,4 @@
-use core::{f32, fmt};
+use core::f32;
 use std::{cmp::Ordering, time::Instant};
 
 use anyhow::Context as _;
@@ -18,7 +18,6 @@ mod leapfrog_yoshida;
 pub mod object;
 
 pub struct PhysicsEngine {
-    pub solver_kind: SolverKind,
     pub enable_constraint_bouncing: bool,
     pub enable_gpu: bool,
     objects: Vec<Object>,
@@ -50,7 +49,6 @@ impl PhysicsEngine {
         let yoshida_kernel_no_planets =
             Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
         Ok(Self {
-            solver_kind: SolverKind::Grid,
             enable_constraint_bouncing: true,
             enable_gpu: true,
             objects: Vec::default(),
@@ -161,13 +159,6 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
-        match self.solver_kind {
-            SolverKind::Grid => self.process_collisions_on_grid(),
-            SolverKind::Bruteforce => self.process_collisions_bruteforce(),
-        }
-    }
-
-    fn process_collisions_on_grid(&mut self) {
         for range in self.grid.cell_iter() {
             let cell_records = &self.grid.cell_records[range];
             let (x, y) = cell_records[0].cell_coords;
@@ -203,17 +194,6 @@ impl PhysicsEngine {
                 if object1_index != object2_index {
                     let [object1, object2] = objects.get_disjoint_mut([object1_index, object2_index]).unwrap();
                     process_object_collision(object1, object2, restitution_coefficient);
-                }
-            }
-        }
-    }
-
-    fn process_collisions_bruteforce(&mut self) {
-        for id1 in 0..self.objects.len() {
-            for id2 in id1 + 1..self.objects.len() {
-                if id1 != id2 {
-                    let [object1, object2] = self.objects.get_disjoint_mut([id1, id2]).expect("out of bounds");
-                    process_object_collision(object1, object2, self.restitution_coefficient);
                 }
             }
         }
@@ -440,30 +420,6 @@ impl PhysicsEngine {
                     object.velocity.y *= -1.0;
                 }
             }
-        }
-    }
-}
-
-pub enum SolverKind {
-    Bruteforce,
-    Grid,
-}
-
-impl SolverKind {
-    #[must_use]
-    pub fn next(&self) -> Self {
-        match self {
-            SolverKind::Bruteforce => SolverKind::Grid,
-            SolverKind::Grid => SolverKind::Bruteforce,
-        }
-    }
-}
-
-impl fmt::Display for SolverKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SolverKind::Bruteforce => write!(f, "bruteforce"),
-            SolverKind::Grid => write!(f, "grid"),
         }
     }
 }
