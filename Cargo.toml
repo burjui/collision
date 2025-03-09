@@ -16,6 +16,7 @@ vello = "0.4.0"
 winit = "0.30.9"
 pollster = "0.4.0"
 rdst = "0.20.14"
+indoc = "2.0.6"
 
 [dependencies.opencl3]
 version = "0.11"

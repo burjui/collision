@@ -1,8 +1,9 @@
 use core::f32;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use grid::{CellRecord, Grid};
+use indoc::indoc;
 use itertools::Itertools;
 use object::{Object, ObjectUpdate};
 use opencl3::kernel::{ExecuteKernel, Kernel};
@@ -24,6 +25,8 @@ pub struct PhysicsEngine {
     grid: Grid,
     time: f32,
     constraints: ConstraintBox,
+    stats: Stats,
+    best_stats: Stats,
     restitution_coefficient: f32,
     planets_count: usize,
     global_gravity: Vector2<f32>,
@@ -55,6 +58,8 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
+            stats: Stats::default(),
+            best_stats: Stats::default(),
             restitution_coefficient: config.restitution_coefficient,
             planets_count: 0,
             global_gravity: Vector2::from(config.gravity),
@@ -123,7 +128,27 @@ impl PhysicsEngine {
         self.time += dt * slowdown_factor;
         self.update(dt * slowdown_factor);
 
-        println!("total time: {:?}", start.elapsed());
+        self.stats.total_duration = start.elapsed();
+        self.best_stats = self.stats.best(&self.best_stats);
+        println!(
+            indoc!(
+                "updates: {:?} >= {:?}
+                grid: {:?} >= {:?}
+                collisions: {:?} >= {:?}
+                constraints: {:?} >= {:?}
+                total: {:?} >= {:?}"
+            ),
+            self.stats.updates_duration,
+            self.best_stats.updates_duration,
+            self.stats.grid_duration,
+            self.best_stats.grid_duration,
+            self.stats.collisions_duration,
+            self.best_stats.collisions_duration,
+            self.stats.constraints_duration,
+            self.best_stats.constraints_duration,
+            self.stats.total_duration,
+            self.best_stats.total_duration
+        );
         println!("-----------");
     }
 
@@ -146,19 +171,19 @@ impl PhysicsEngine {
 
         let start = Instant::now();
         self.update_objects(dt);
-        println!("updates: {:?}", start.elapsed());
+        self.stats.updates_duration = start.elapsed();
 
         let start = Instant::now();
         self.grid.update(&self.objects);
-        println!("grid: {:?}", start.elapsed());
+        self.stats.grid_duration = start.elapsed();
 
         let start = Instant::now();
         self.process_collisions();
-        println!("collisions: {:?}", start.elapsed());
+        self.stats.collisions_duration = start.elapsed();
 
         let start = Instant::now();
         self.apply_constraints();
-        println!("constraints: {:?}", start.elapsed());
+        self.stats.constraints_duration = start.elapsed();
     }
 
     fn process_collisions(&mut self) {
@@ -437,6 +462,38 @@ impl ConstraintBox {
     #[must_use]
     pub fn new(topleft: Vector2<f32>, bottomright: Vector2<f32>) -> Self {
         Self { topleft, bottomright }
+    }
+}
+
+struct Stats {
+    updates_duration: Duration,
+    grid_duration: Duration,
+    collisions_duration: Duration,
+    constraints_duration: Duration,
+    total_duration: Duration,
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self {
+            updates_duration: Duration::MAX,
+            grid_duration: Duration::MAX,
+            collisions_duration: Duration::MAX,
+            constraints_duration: Duration::MAX,
+            total_duration: Duration::MAX,
+        }
+    }
+}
+
+impl Stats {
+    fn best(&self, other: &Self) -> Self {
+        Self {
+            updates_duration: self.updates_duration.min(other.updates_duration),
+            grid_duration: self.grid_duration.min(other.grid_duration),
+            collisions_duration: self.collisions_duration.min(other.collisions_duration),
+            constraints_duration: self.constraints_duration.min(other.constraints_duration),
+            total_duration: self.total_duration.min(other.total_duration),
+        }
     }
 }
 
