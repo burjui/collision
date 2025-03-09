@@ -32,14 +32,7 @@ impl Grid {
             self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
 
             if self.cell_records.len() != objects.len() {
-                self.cell_records.resize(
-                    objects.len(),
-                    CellRecord {
-                        object_index: 0,
-                        cell_coords: (0, 0),
-                        radix_key: 0,
-                    },
-                );
+                self.cell_records.resize(objects.len(), CellRecord::EMPTY);
             }
 
             for (object_index, &Object { position, .. }) in objects.iter().enumerate() {
@@ -47,8 +40,8 @@ impl Grid {
                 self.cell_records[object_index] = CellRecord {
                     object_index,
                     cell_coords: cell,
-                    radix_key: ((cell.1 * self.size.x) | cell.0).try_into().unwrap(),
-                };
+                    radix_key: ((cell.1 << 16) | cell.0).try_into().unwrap(),
+                }
             }
             self.cell_records.radix_sort_unstable();
 
@@ -90,6 +83,14 @@ pub struct CellRecord {
     pub object_index: usize,
     pub cell_coords: (usize, usize),
     radix_key: u32,
+}
+
+impl CellRecord {
+    const EMPTY: Self = Self {
+        object_index: 0,
+        cell_coords: (0, 0),
+        radix_key: 0,
+    };
 }
 
 impl RadixKey for CellRecord {
