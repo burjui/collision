@@ -26,7 +26,8 @@ pub struct PhysicsEngine {
     time: f32,
     constraints: ConstraintBox,
     stats: Stats,
-    best_stats: Stats,
+    lowest_stats: Stats,
+    highest_stats: Stats,
     restitution_coefficient: f32,
     planets_count: usize,
     global_gravity: Vector2<f32>,
@@ -58,8 +59,9 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            stats: Stats::default(),
-            best_stats: Stats::default(),
+            stats: Stats::MIN,
+            lowest_stats: Stats::MAX,
+            highest_stats: Stats::MIN,
             restitution_coefficient: config.restitution_coefficient,
             planets_count: 0,
             global_gravity: Vector2::from(config.gravity),
@@ -129,25 +131,35 @@ impl PhysicsEngine {
         self.update(dt * slowdown_factor);
 
         self.stats.total_duration = start.elapsed();
-        self.best_stats = self.stats.best(&self.best_stats);
+        self.lowest_stats = self.stats.min(&self.lowest_stats);
+        self.highest_stats = self.stats.max(&self.highest_stats);
         println!(
             indoc!(
-                "updates: {:?} >= {:?}
-                grid: {:?} >= {:?}
-                collisions: {:?} >= {:?}
-                constraints: {:?} >= {:?}
-                total: {:?} >= {:?}"
+                "updates: {:?} <= {:?} <= {:?}
+                grid: {:?} <= {:?} <= {:?}
+                collisions: {:?} <= {:?} <= {:?}
+                constraints: {:?} <= {:?} <= {:?}
+                total: {:?} <= {:?} <= {:?}",
             ),
+            self.lowest_stats.updates_duration,
             self.stats.updates_duration,
-            self.best_stats.updates_duration,
+            self.highest_stats.updates_duration,
+            //
+            self.lowest_stats.grid_duration,
             self.stats.grid_duration,
-            self.best_stats.grid_duration,
+            self.highest_stats.grid_duration,
+            //
+            self.lowest_stats.collisions_duration,
             self.stats.collisions_duration,
-            self.best_stats.collisions_duration,
+            self.highest_stats.collisions_duration,
+            //
+            self.lowest_stats.constraints_duration,
             self.stats.constraints_duration,
-            self.best_stats.constraints_duration,
+            self.highest_stats.constraints_duration,
+            //
+            self.lowest_stats.total_duration,
             self.stats.total_duration,
-            self.best_stats.total_duration
+            self.highest_stats.total_duration
         );
         println!("-----------");
     }
@@ -473,26 +485,39 @@ struct Stats {
     total_duration: Duration,
 }
 
-impl Default for Stats {
-    fn default() -> Self {
-        Self {
-            updates_duration: Duration::MAX,
-            grid_duration: Duration::MAX,
-            collisions_duration: Duration::MAX,
-            constraints_duration: Duration::MAX,
-            total_duration: Duration::MAX,
-        }
-    }
-}
-
 impl Stats {
-    fn best(&self, other: &Self) -> Self {
+    const MIN: Self = Self {
+        updates_duration: Duration::ZERO,
+        grid_duration: Duration::ZERO,
+        collisions_duration: Duration::ZERO,
+        constraints_duration: Duration::ZERO,
+        total_duration: Duration::ZERO,
+    };
+    const MAX: Self = Self {
+        updates_duration: Duration::MAX,
+        grid_duration: Duration::MAX,
+        collisions_duration: Duration::MAX,
+        constraints_duration: Duration::MAX,
+        total_duration: Duration::MAX,
+    };
+
+    fn min(&self, other: &Self) -> Self {
         Self {
             updates_duration: self.updates_duration.min(other.updates_duration),
             grid_duration: self.grid_duration.min(other.grid_duration),
             collisions_duration: self.collisions_duration.min(other.collisions_duration),
             constraints_duration: self.constraints_duration.min(other.constraints_duration),
             total_duration: self.total_duration.min(other.total_duration),
+        }
+    }
+
+    fn max(&self, other: &Self) -> Self {
+        Self {
+            updates_duration: self.updates_duration.max(other.updates_duration),
+            grid_duration: self.grid_duration.max(other.grid_duration),
+            collisions_duration: self.collisions_duration.max(other.collisions_duration),
+            constraints_duration: self.constraints_duration.max(other.constraints_duration),
+            total_duration: self.total_duration.max(other.total_duration),
         }
     }
 }
