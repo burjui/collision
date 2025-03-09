@@ -1,5 +1,5 @@
 use core::f32;
-use std::{cmp::Ordering, time::Instant};
+use std::time::Instant;
 
 use anyhow::Context as _;
 use grid::{CellRecord, Grid};
@@ -119,16 +119,23 @@ impl PhysicsEngine {
 
     fn update_substeps(&mut self, dt: f32, substeps: usize) {
         println!("particles: {}", self.objects.len());
-        let max_velocity_squared = self
-            .objects
-            .iter()
-            .map(|o| TotalCmpF32(o.velocity.magnitude_squared()))
-            .max()
-            .map(|c| c.0)
-            .unwrap_or(0.0);
-        self.grid.update(&self.objects);
-        let slowdown_factor = if self.grid.cell_size() > 0.0 && max_velocity_squared > 0.0 {
-            (self.grid.cell_size() / max_velocity_squared.sqrt() * 1000.0 / substeps as f32).min(1.0)
+        // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
+        let (max_velocity_squared, max_object_size) =
+            self.objects
+                .iter()
+                .fold((0.0, 0.0), |(mut max_velocity_squared, mut max_object_size), object| {
+                    let velocity_squared = object.velocity.magnitude_squared();
+                    if velocity_squared > max_velocity_squared {
+                        max_velocity_squared = velocity_squared;
+                    }
+                    let object_size = object.radius * 2.0;
+                    if object_size > max_object_size {
+                        max_object_size = object_size;
+                    }
+                    (max_velocity_squared, max_object_size)
+                });
+        let slowdown_factor = if max_velocity_squared > 0.0 {
+            (max_object_size / max_velocity_squared.sqrt() * 1000.0 / substeps as f32).min(1.0)
         } else {
             1.0
         };
@@ -463,27 +470,5 @@ fn process_object_collision(object1: &mut Object, object2: &mut Object, restitut
         if !object2.is_planet {
             object2.velocity *= restitution_coefficient;
         }
-    }
-}
-
-struct TotalCmpF32(f32);
-
-impl Eq for TotalCmpF32 {}
-
-impl PartialEq for TotalCmpF32 {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Ord for TotalCmpF32 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.total_cmp(&other.0)
-    }
-}
-
-impl PartialOrd for TotalCmpF32 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
     }
 }
