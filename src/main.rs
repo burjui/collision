@@ -38,6 +38,7 @@ pub fn main() -> anyhow::Result<()> {
     let mut physics = PhysicsEngine::new(&config)?;
     create_demo(&mut physics);
 
+    let advance_time = config.sim_time_limit.is_some();
     let mut app = VelloApp {
         config,
         context: render_context,
@@ -50,7 +51,7 @@ pub fn main() -> anyhow::Result<()> {
         last_fps: None,
         min_fps: usize::MAX,
         physics,
-        advance_time: false,
+        advance_time,
         mouse_position: Vector2::new(0.0, 0.0),
     };
     event_loop.run_app(&mut app).expect("run to completion");
