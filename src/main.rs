@@ -1,12 +1,13 @@
 #![feature(more_float_constants)]
 
 use core::f32;
-use std::{num::NonZero, path::Path, sync::Arc};
+use std::{num::NonZero, path::Path, process::exit, sync::Arc};
 
 use anyhow::{Context, Ok};
 use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
 use demo::create_demo;
 use itertools::Itertools;
+use libc::EXIT_SUCCESS;
 use vello::{
     kurbo::{Affine, Circle},
     peniko::{color::palette::css, Color, Fill},
@@ -205,6 +206,14 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         const FRAME_INTERVAL: f32 = 1.0 / 60.0;
         const DEFAULT_DT: f32 = FRAME_INTERVAL / 32.0;
+
+        if self
+            .config
+            .sim_time_limit
+            .is_some_and(|limit| self.physics.time() > limit)
+        {
+            exit(EXIT_SUCCESS);
+        }
 
         if self.advance_time {
             self.physics.advance(DEFAULT_DT);

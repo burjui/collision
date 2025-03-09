@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub height: u32,
     pub restitution_coefficient: f32,
     pub gravity: (f32, f32),
+    pub sim_time_limit: Option<f32>,
 }
 
 impl AppConfig {
