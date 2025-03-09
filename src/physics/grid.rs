@@ -53,10 +53,9 @@ impl Grid {
             self.cell_records.radix_sort_unstable();
 
             if self.coords_to_cells.size() != (self.size.x, self.size.y) {
-                self.coords_to_cells.resize((self.size.x, self.size.y));
+                self.coords_to_cells.reset((self.size.x, self.size.y));
             }
             if !self.cell_records.is_empty() {
-                self.coords_to_cells.fill(None);
                 for range in CellIter::new(&self.cell_records) {
                     let cell_coords = self.cell_records[range.start].cell_coords;
                     self.coords_to_cells[cell_coords] = Some((range.start, range.end));
