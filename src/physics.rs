@@ -96,28 +96,9 @@ impl PhysicsEngine {
         &mut self.objects
     }
 
-    pub fn advance(&mut self, dt: f32, substeps: usize) {
+    pub fn advance(&mut self, dt: f32) {
         let start = Instant::now();
-        self.update_substeps(dt, substeps);
-        println!("total time: {:?}", start.elapsed());
-        println!("-----------");
-    }
 
-    #[must_use]
-    pub fn constraints(&self) -> &ConstraintBox {
-        &self.constraints
-    }
-
-    #[must_use]
-    pub fn time(&self) -> f32 {
-        self.time
-    }
-
-    pub fn objects_momentum(&self) -> Vector2<f32> {
-        self.objects.iter().map(Object::momentum).sum()
-    }
-
-    fn update_substeps(&mut self, dt: f32, substeps: usize) {
         println!("particles: {}", self.objects.len());
         // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
         let (max_velocity_squared, max_object_size) =
@@ -135,14 +116,29 @@ impl PhysicsEngine {
                     (max_velocity_squared, max_object_size)
                 });
         let slowdown_factor = if max_velocity_squared > 0.0 {
-            (max_object_size / max_velocity_squared.sqrt() * 1000.0 / substeps as f32).min(1.0)
+            (max_object_size / max_velocity_squared.sqrt() * 1000.0).min(1.0)
         } else {
             1.0
         };
-        let dt_substep = dt * slowdown_factor / substeps as f32;
-        for _ in 0..substeps {
-            self.update(dt_substep);
-        }
+        self.time += dt * slowdown_factor;
+        self.update(dt * slowdown_factor);
+
+        println!("total time: {:?}", start.elapsed());
+        println!("-----------");
+    }
+
+    #[must_use]
+    pub fn constraints(&self) -> &ConstraintBox {
+        &self.constraints
+    }
+
+    #[must_use]
+    pub fn time(&self) -> f32 {
+        self.time
+    }
+
+    pub fn objects_momentum(&self) -> Vector2<f32> {
+        self.objects.iter().map(Object::momentum).sum()
     }
 
     fn update(&mut self, dt: f32) {
