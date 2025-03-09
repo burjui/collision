@@ -1,6 +1,5 @@
 #![feature(random)]
 #![feature(impl_trait_in_bindings)]
-#![feature(maybe_uninit_uninit_array)]
 #![feature(array_repeat)]
 
 pub mod app_config;
