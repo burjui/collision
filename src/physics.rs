@@ -135,30 +135,30 @@ impl PhysicsEngine {
         self.highest_stats = self.stats.max(&self.highest_stats);
         println!(
             indoc!(
-                "updates: {:?} <= {:?} <= {:?}
-                grid: {:?} <= {:?} <= {:?}
-                collisions: {:?} <= {:?} <= {:?}
-                constraints: {:?} <= {:?} <= {:?}
-                total: {:?} <= {:?} <= {:?}",
+                "updates: {:?} -- {:?}  {:?}
+                grid: {:?} -- {:?}  {:?}
+                collisions: {:?} -- {:?}  {:?}
+                constraints: {:?} -- {:?}  {:?}
+                total: {:?} -- {:?}  {:?}",
             ),
-            self.lowest_stats.updates_duration,
             self.stats.updates_duration,
+            self.lowest_stats.updates_duration,
             self.highest_stats.updates_duration,
             //
-            self.lowest_stats.grid_duration,
             self.stats.grid_duration,
+            self.lowest_stats.grid_duration,
             self.highest_stats.grid_duration,
             //
-            self.lowest_stats.collisions_duration,
             self.stats.collisions_duration,
+            self.lowest_stats.collisions_duration,
             self.highest_stats.collisions_duration,
             //
-            self.lowest_stats.constraints_duration,
             self.stats.constraints_duration,
+            self.lowest_stats.constraints_duration,
             self.highest_stats.constraints_duration,
             //
-            self.lowest_stats.total_duration,
             self.stats.total_duration,
+            self.lowest_stats.total_duration,
             self.highest_stats.total_duration
         );
         println!("-----------");
