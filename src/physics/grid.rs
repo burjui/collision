@@ -93,6 +93,12 @@ impl CellRecord {
     };
 }
 
+impl Default for CellRecord {
+    fn default() -> Self {
+        Self::EMPTY
+    }
+}
+
 impl RadixKey for CellRecord {
     const LEVELS: usize = <u32 as RadixKey>::LEVELS;
 

@@ -10,6 +10,7 @@ use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
     app_config::AppConfig,
+    fixed_vec::FixedVec,
     gpu::{Gpu, GpuBufferAccess, GpuHostBuffer},
     vector2::Vector2,
 };
@@ -203,38 +204,47 @@ impl PhysicsEngine {
             let cell_records = &self.grid.cell_records[range];
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
-                let adjacent_cells = (x.saturating_sub(1)..=(x + 1).min(self.grid.size().x - 1))
-                    .cartesian_product(y.saturating_sub(1)..=(y + 1).min(self.grid.size().y - 1));
-                for adjacent_cell in adjacent_cells {
-                    Self::process_object_with_cell_collisions(
-                        object_index,
-                        adjacent_cell,
-                        &self.grid,
-                        &mut self.objects,
-                        self.restitution_coefficient,
-                    );
-                }
+                let mut candidate_area = (x.saturating_sub(1)..=(x + 1).min(self.grid.size().x - 1))
+                    .cartesian_product(y.saturating_sub(1)..=(y + 1).min(self.grid.size().y - 1))
+                    .flat_map(|coords| {
+                        self.grid.coords_to_cells[coords]
+                            .into_iter()
+                            .flat_map(|(start, end)| self.grid.cell_records[start..end].iter().copied())
+                    })
+                    .collect::<FixedVec<_, 18>>();
+                candidate_area.sort_by(|a, b| {
+                    let object = &self.objects[a.object_index];
+                    let a = &self.objects[a.object_index];
+                    let b = &self.objects[b.object_index];
+                    (a.position - object.position)
+                        .magnitude_squared()
+                        .partial_cmp(&(b.position - object.position).magnitude_squared())
+                        .unwrap()
+                });
+                Self::process_object_with_cell_collisions(
+                    object_index,
+                    &candidate_area,
+                    &mut self.objects,
+                    self.restitution_coefficient,
+                );
             }
         }
     }
 
     fn process_object_with_cell_collisions(
         object1_index: usize,
-        cell: (usize, usize),
-        grid: &Grid,
+        candidate_area: &[CellRecord],
         objects: &mut [Object],
         restitution_coefficient: f32,
     ) {
-        if let Some((start, end)) = grid.coords_to_cells[cell] {
-            for &CellRecord {
-                object_index: object2_index,
-                ..
-            } in &grid.cell_records[start..end]
-            {
-                if object1_index != object2_index {
-                    let [object1, object2] = objects.get_disjoint_mut([object1_index, object2_index]).unwrap();
-                    process_object_collision(object1, object2, restitution_coefficient);
-                }
+        for &CellRecord {
+            object_index: object2_index,
+            ..
+        } in candidate_area
+        {
+            if object1_index != object2_index {
+                let [object1, object2] = objects.get_disjoint_mut([object1_index, object2_index]).unwrap();
+                process_object_collision(object1, object2, restitution_coefficient);
             }
         }
     }

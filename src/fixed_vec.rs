@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 #[derive(Clone, Copy)]
 pub struct FixedVec<T, const N: usize> {
     inner: [T; N],
@@ -42,6 +44,20 @@ impl<T: Default + Copy, const N: usize> FromIterator<T> for FixedVec<T, N> {
             len += 1;
         }
         Self { inner: data, len }
+    }
+}
+
+impl<T, const N: usize> Deref for FixedVec<T, N> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner[..self.len]
+    }
+}
+
+impl<T, const N: usize> DerefMut for FixedVec<T, N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner[..self.len]
     }
 }
 
