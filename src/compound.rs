@@ -99,11 +99,14 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
+                let hue = 360.0 * (position - ball.position).magnitude() / ball.radius;
+                let hsl = [hue, 100.0, 50.0];
+                let rgb = Hsl::convert::<Srgb>(hsl);
                 let mut object = Object {
                     acceleration: ball.acceleration,
                     radius: ball.particle_radius,
                     mass: ball.particle_mass,
-                    color: ball.color,
+                    color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),
                     ..Object::new(position)
                 };
                 object.velocity = ball.velocity;

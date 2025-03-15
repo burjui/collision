@@ -9,7 +9,7 @@ use demo::create_demo;
 use itertools::Itertools;
 use libc::EXIT_SUCCESS;
 use vello::{
-    kurbo::{Affine, Circle},
+    kurbo::{Affine, Circle, Rect, Stroke},
     peniko::{color::palette::css, Color, Fill},
     util::{DeviceHandle, RenderContext, RenderSurface},
     wgpu::{Maintain, PresentMode},
@@ -18,7 +18,7 @@ use vello::{
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
-    event::{ElementState, MouseButton, WindowEvent},
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
@@ -53,6 +53,7 @@ pub fn main() -> anyhow::Result<()> {
         physics,
         advance_time,
         mouse_position: Vector2::new(0.0, 0.0),
+        mouse_influence_radius: 50.0,
     };
     event_loop.run_app(&mut app).expect("run to completion");
     Ok(())
@@ -90,6 +91,7 @@ struct VelloApp<'s> {
     physics: PhysicsEngine,
     advance_time: bool,
     mouse_position: Vector2<f32>,
+    mouse_influence_radius: f32,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -168,7 +170,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 if let Some(RenderState { surface, .. }) = &self.state {
                     self.scene.reset();
                     render_physics(&self.physics, &mut self.scene);
-                    render_mouse_position(&mut self.scene, self.mouse_position);
+                    render_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                     let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
                     let device_handle = &self.context.devices[surface.dev_id];
                     render_scene(&self.scene, surface, renderer, device_handle);
@@ -191,7 +193,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                         MouseButton::Left => {
                             for object in self.physics.objects_mut() {
                                 let from_mouse_to_object = object.position - self.mouse_position;
-                                if (from_mouse_to_object).magnitude() < 100.0 {
+                                if (from_mouse_to_object).magnitude() < self.mouse_influence_radius {
                                     object.velocity += from_mouse_to_object.normalize() * 2000.0;
                                 }
                             }
@@ -200,13 +202,18 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     }
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if let MouseScrollDelta::LineDelta(_, dy) = delta {
+                    self.mouse_influence_radius = (self.mouse_influence_radius + dy * 3.0).max(0.0);
+                }
+            }
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         const FRAME_INTERVAL: f32 = 1.0 / 60.0;
-        const DEFAULT_DT: f32 = FRAME_INTERVAL / 32.0;
+        const DEFAULT_DT: f32 = FRAME_INTERVAL / 64.0;
 
         if self
             .config
@@ -233,13 +240,74 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 }
 
-fn render_mouse_position(scene: &mut Scene, mouse_position: Vector2<f32>) {
+fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
+    let transform = Affine::IDENTITY;
+
+    std::thread::scope(|scope| {
+        let handles = physics
+            .objects()
+            .chunks(physics.objects().len() / 20)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    let mut scene = Scene::new();
+                    for object in chunk {
+                        if !object.is_planet {
+                            scene.fill(
+                                Fill::NonZero,
+                                transform,
+                                object.color.unwrap_or_else(|| {
+                                    const SCALE_FACTOR: f32 = 0.0004;
+                                    let parameter = (object.velocity.magnitude() * SCALE_FACTOR).powf(0.6);
+                                    let spectrum_position = parameter.clamp(0.0, 1.0);
+                                    spectrum(spectrum_position)
+                                }),
+                                None,
+                                &Circle::new((object.position.x, object.position.y), object.radius.into()),
+                            );
+                        }
+                    }
+                    scene
+                })
+            })
+            .collect_vec();
+        for handle in handles {
+            scene.append(&handle.join().unwrap(), None);
+        }
+    });
+
+    for planet in physics.planets() {
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            planet.color.unwrap_or(css::WHITE),
+            None,
+            &Circle::new((planet.position.x, planet.position.y), (planet.radius * 3.0).into()),
+        );
+    }
+
+    let topleft = physics.constraints().topleft;
+    let bottomright = physics.constraints().bottomright;
+    scene.stroke(
+        &Stroke::default(),
+        transform,
+        css::WHITE,
+        None,
+        &Rect::new(
+            topleft.x as f64,
+            topleft.y as f64,
+            bottomright.x as f64,
+            bottomright.y as f64,
+        ),
+    );
+}
+
+fn render_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse_influence_radius: f32) {
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
-        css::GREEN,
+        Color::new([1.0, 1.0, 1.0, 0.3]),
         None,
-        &Circle::new((mouse_position.x, mouse_position.y), 10.0),
+        &Circle::new((mouse_position.x, mouse_position.y), mouse_influence_radius as f64),
     );
 }
 
@@ -267,38 +335,6 @@ fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer,
         .expect("failed to render to surface");
     surface_texture.present();
     device_handle.device.poll(Maintain::Poll);
-}
-
-fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
-    std::thread::scope(|scope| {
-        let handles = physics
-            .objects()
-            .chunks(physics.objects().len() / 20)
-            .map(|chunk| {
-                scope.spawn(move || {
-                    let mut scene = Scene::new();
-                    for object in chunk {
-                        scene.fill(
-                            Fill::NonZero,
-                            Affine::IDENTITY,
-                            object.color.unwrap_or_else(|| {
-                                const SCALE_FACTOR: f32 = 0.0004;
-                                let parameter = (object.velocity.magnitude() * SCALE_FACTOR).powf(0.6);
-                                let spectrum_position = parameter.clamp(0.0, 1.0);
-                                spectrum(spectrum_position)
-                            }),
-                            None,
-                            &Circle::new((object.position.x, object.position.y), object.radius.into()),
-                        );
-                    }
-                    scene
-                })
-            })
-            .collect_vec();
-        for handle in handles {
-            scene.append(&handle.join().unwrap(), None);
-        }
-    });
 }
 
 fn spectrum(position: f32) -> Color {

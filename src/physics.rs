@@ -44,10 +44,7 @@ impl PhysicsEngine {
     const GRAVITATIONAL_CONSTANT: f32 = 10000.0;
 
     pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
-        let constraints = ConstraintBox::new(
-            Vector2::new(0.0, 0.0),
-            Vector2::new(config.width as f32, config.height as f32),
-        );
+        let constraints = ConstraintBox::new(Vector2::new(400.0, 300.0), Vector2::new(900.0, 700.0));
         let gpu = Gpu::default(10)?;
         let yoshida_program = gpu.build_program("src/yoshida.cl")?;
         let yoshida_kernel = Kernel::create(&yoshida_program, "yoshida").context("Failed to create kernel")?;
@@ -102,6 +99,10 @@ impl PhysicsEngine {
 
     pub fn objects_mut(&mut self) -> &mut [Object] {
         &mut self.objects
+    }
+
+    pub fn planets(&self) -> &[Object] {
+        &self.objects[..self.planets_count]
     }
 
     pub fn advance(&mut self, dt: f32) {
@@ -447,6 +448,7 @@ impl PhysicsEngine {
     fn apply_constraints(&mut self) {
         let cb = self.constraints;
         for object in &mut self.objects {
+            let initial_velocity = object.velocity;
             if object.position.x - object.radius < cb.topleft.x {
                 object.position.x = cb.topleft.x + object.radius;
                 if self.enable_constraint_bouncing {
@@ -469,6 +471,10 @@ impl PhysicsEngine {
                 if self.enable_constraint_bouncing {
                     object.velocity.y *= -1.0;
                 }
+            }
+
+            if object.velocity != initial_velocity {
+                object.velocity *= self.restitution_coefficient;
             }
         }
     }
