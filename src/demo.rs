@@ -6,7 +6,7 @@ use collision::{
 use vello::peniko::color::palette::css;
 
 pub fn create_demo(physics: &mut PhysicsEngine) {
-    const RADIUS: f32 = 1.0;
+    const RADIUS: f32 = 2.0;
 
     physics.add(ObjectPrototype {
         velocity: Vector2::new(-700.0, 0.0),
@@ -26,19 +26,10 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
         ..ObjectPrototype::new(Vector2::new(700.0, 600.0))
     });
 
-    // physics.add(Object {
-    //     radius: 10.0,
-    //     mass: 20000.0,
-    //     color: Some(css::YELLOW),
-    //     is_planet: true,
-    //     ..Object::new(Vector2::new(900.0, 500.0))
-    // });
-
     let brick = Brick {
         particle_radius: RADIUS,
         particle_spacing: 0.01,
         particle_mass: 0.01,
-        velocity: Vector2::new(0.0, 0.0),
         ..Brick::new(Vector2::new(400.0, 100.0), Vector2::new(600.0, 300.0))
     };
     generate_brick(physics, &brick);
@@ -47,7 +38,6 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
     //     particle_radius: RADIUS,
     //     particle_spacing: 0.01,
     //     particle_mass: 0.01,
-    //     velocity: Vector2::new(0.0, 0.0),
     //     ..Ball::new(Vector2::new(500.0, 400.0), 100.0)
     // };
     // generate_ball(physics, &ball);

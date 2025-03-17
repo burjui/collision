@@ -4,7 +4,9 @@ use core::f32;
 use std::{iter::zip, num::NonZero, path::Path, process::exit, sync::Arc};
 
 use anyhow::{Context, Ok};
-use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
+use collision::{
+    app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, simple_text::SimpleText, vector2::Vector2,
+};
 use demo::create_demo;
 use itertools::Itertools;
 use libc::EXIT_SUCCESS;
@@ -55,6 +57,7 @@ pub fn main() -> anyhow::Result<()> {
         mouse_position: Vector2::new(0.0, 0.0),
         mouse_influence_radius: 50.0,
         draw_grid: false,
+        draw_ids: false,
     };
     event_loop.run_app(&mut app).expect("run to completion");
     Ok(())
@@ -94,6 +97,7 @@ struct VelloApp<'s> {
     mouse_position: Vector2<f32>,
     mouse_influence_radius: f32,
     draw_grid: bool,
+    draw_ids: bool,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -159,6 +163,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                         Key::Named(NamedKey::Escape) => event_loop.exit(),
                         Key::Character("a") => self.physics.enable_gpu = !self.physics.enable_gpu,
                         Key::Character("g") => self.draw_grid = !self.draw_grid,
+                        Key::Character("i") => self.draw_ids = !self.draw_ids,
                         _ => {}
                     }
                 }
@@ -172,7 +177,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             WindowEvent::RedrawRequested => {
                 if let Some(RenderState { surface, .. }) = &self.state {
                     self.scene.reset();
-                    render_physics(&self.physics, &mut self.scene);
+                    render_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
                     render_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                     if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
                         render_grid(
@@ -252,12 +257,18 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 }
 
-fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
-    let transform = Affine::IDENTITY;
+struct DrawIds(bool);
 
+fn render_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds) {
+    let transform = Affine::IDENTITY;
     let objects = physics.objects();
+    let chunk_size = physics.objects().len() / 20;
     let chunks = (0..physics.objects().len())
-        .chunks(physics.objects().len() / 20)
+        .chunks(if chunk_size > 0 {
+            chunk_size
+        } else {
+            physics.objects().len()
+        })
         .into_iter()
         .map(|chunk| chunk.collect_vec())
         .collect_vec();
@@ -267,6 +278,7 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
             .map(|chunk| {
                 scope.spawn(move || {
                     let mut scene = Scene::new();
+                    let mut text = SimpleText::new();
                     for &object_index in chunk.into_iter() {
                         if !objects.is_planet[object_index] {
                             let position = objects.positions[object_index];
@@ -284,6 +296,15 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
                                 None,
                                 &Circle::new((position.x, position.y), radius.into()),
                             );
+                            if draw_ids {
+                                text.add(
+                                    &mut scene,
+                                    10.0,
+                                    None,
+                                    Affine::translate((position.x as f64, position.y as f64)),
+                                    &format!("{}", object_index),
+                                );
+                            }
                         }
                     }
                     scene
