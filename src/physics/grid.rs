@@ -1,8 +1,8 @@
-use std::ops::Range;
+use std::{iter::zip, ops::Range};
 
 use rdst::{RadixKey, RadixSort};
 
-use super::object::Object;
+use super::object::ObjectSoa;
 use crate::{array2::Array2, vector2::Vector2};
 
 pub struct Grid {
@@ -14,12 +14,12 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn update(&mut self, objects: &[Object]) {
+    pub fn update(&mut self, objects: &ObjectSoa) {
         let mut end = Vector2::new(f32::MIN, f32::MIN);
         self.position = Vector2::new(f32::MAX, f32::MAX);
         self.cell_size = 0.0;
 
-        for &Object { position, radius, .. } in objects {
+        for (position, radius) in zip(&objects.positions, &objects.radii) {
             self.position.x = self.position.x.min(position.x - radius);
             self.position.y = self.position.y.min(position.y - radius);
             end.x = end.x.max(position.x + radius);
@@ -35,7 +35,7 @@ impl Grid {
                 self.cell_records.resize(objects.len(), CellRecord::EMPTY);
             }
 
-            for (object_index, &Object { position, .. }) in objects.iter().enumerate() {
+            for (object_index, &position) in objects.positions.iter().enumerate() {
                 let cell = cell_at(position, self.position, self.cell_size);
                 self.cell_records[object_index] = CellRecord {
                     object_index,
@@ -87,9 +87,9 @@ pub struct CellRecord {
 
 impl CellRecord {
     const EMPTY: Self = Self {
-        object_index: 0,
-        cell_coords: (0, 0),
-        radix_key: 0,
+        object_index: usize::MAX,
+        cell_coords: (usize::MAX, usize::MAX),
+        radix_key: u32::MAX,
     };
 }
 

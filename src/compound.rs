@@ -4,7 +4,7 @@ use vello::peniko::{
 };
 
 use crate::{
-    physics::{object::Object, PhysicsEngine},
+    physics::{object::ObjectPrototype, PhysicsEngine},
     vector2::Vector2,
 };
 
@@ -46,15 +46,15 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
             let selection_factor = (position.x - brick.position.x) / brick.size.x;
-            let hue = 360.0 * selection_factor;
+            let hue = 300.0 * selection_factor;
             let hsl = [hue, 100.0, 50.0];
             let rgb = Hsl::convert::<Srgb>(hsl);
-            let id = physics.add(Object {
+            let id = physics.add(ObjectPrototype {
                 velocity: brick.velocity,
                 radius: brick.particle_radius,
                 mass: brick.particle_mass,
                 color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),
-                ..Object::new(position)
+                ..ObjectPrototype::new(position)
             });
             result.push(id);
         }
@@ -99,15 +99,15 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
-                let hue = 360.0 * (position - ball.position).magnitude() / ball.radius;
+                let hue = 300.0 * (position - ball.position).magnitude() / ball.radius;
                 let hsl = [hue, 100.0, 50.0];
                 let rgb = Hsl::convert::<Srgb>(hsl);
-                let mut object = Object {
+                let mut object = ObjectPrototype {
                     acceleration: ball.acceleration,
                     radius: ball.particle_radius,
                     mass: ball.particle_mass,
                     color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),
-                    ..Object::new(position)
+                    ..ObjectPrototype::new(position)
                 };
                 object.velocity = ball.velocity;
                 let id = physics.add(object);

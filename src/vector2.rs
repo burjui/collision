@@ -6,6 +6,7 @@ use std::{
 
 use num_traits::Float;
 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Vector2<T> {
     pub x: T,
@@ -31,7 +32,7 @@ impl<T> Vector2<T> {
     where
         T: Float,
     {
-        (self.x * self.x + self.y * self.y).sqrt()
+        self.magnitude_squared().sqrt()
     }
 
     pub fn magnitude_squared(&self) -> T

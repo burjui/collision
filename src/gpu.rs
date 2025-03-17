@@ -110,7 +110,7 @@ impl Gpu {
     ) -> anyhow::Result<GpuDeviceBuffer<T>> {
         let buffer = unsafe { Buffer::create(&self.context, mem_flags, length, null_mut()) }
             .context("Failed to create device buffer")?;
-        Ok(GpuDeviceBuffer { buffer })
+        Ok(GpuDeviceBuffer { buffer, length })
     }
 
     pub fn enqueue_write_buffer<T>(&self, buffer: &mut GpuDeviceBuffer<T>, data: &[T]) -> anyhow::Result<Event> {
@@ -193,11 +193,17 @@ impl<T> GpuHostBuffer<T> {
 
 pub struct GpuDeviceBuffer<T> {
     buffer: Buffer<T>,
+    length: usize,
 }
 
 impl<T> GpuDeviceBuffer<T> {
     #[must_use]
     pub fn buffer(&self) -> &Buffer<T> {
         &self.buffer
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.length
     }
 }

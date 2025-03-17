@@ -1,7 +1,7 @@
 #![feature(more_float_constants)]
 
 use core::f32;
-use std::{num::NonZero, path::Path, process::exit, sync::Arc};
+use std::{iter::zip, num::NonZero, path::Path, process::exit, sync::Arc};
 
 use anyhow::{Context, Ok};
 use collision::{app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, vector2::Vector2};
@@ -191,10 +191,11 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 if state == ElementState::Pressed {
                     match button {
                         MouseButton::Left => {
-                            for object in self.physics.objects_mut() {
-                                let from_mouse_to_object = object.position - self.mouse_position;
+                            let objects = self.physics.objects_mut();
+                            for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
+                                let from_mouse_to_object = position - self.mouse_position;
                                 if (from_mouse_to_object).magnitude() < self.mouse_influence_radius {
-                                    object.velocity += from_mouse_to_object.normalize() * 2000.0;
+                                    *velocity += from_mouse_to_object.normalize() * 2000.0;
                                 }
                             }
                         }
@@ -243,26 +244,34 @@ impl ApplicationHandler<()> for VelloApp<'_> {
 fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
     let transform = Affine::IDENTITY;
 
+    let objects = physics.objects();
+    let chunks = (0..physics.objects().len())
+        .chunks(physics.objects().len() / 20)
+        .into_iter()
+        .map(|chunk| chunk.collect_vec())
+        .collect_vec();
     std::thread::scope(|scope| {
-        let handles = physics
-            .objects()
-            .chunks(physics.objects().len() / 20)
+        let handles = chunks
+            .iter()
             .map(|chunk| {
                 scope.spawn(move || {
                     let mut scene = Scene::new();
-                    for object in chunk {
-                        if !object.is_planet {
+                    for &object_index in chunk.into_iter() {
+                        if !objects.is_planet[object_index] {
+                            let position = objects.positions[object_index];
+                            let radius = objects.radii[object_index];
                             scene.fill(
                                 Fill::NonZero,
                                 transform,
-                                object.color.unwrap_or_else(|| {
+                                objects.colors[object_index].unwrap_or_else(|| {
                                     const SCALE_FACTOR: f32 = 0.0004;
-                                    let parameter = (object.velocity.magnitude() * SCALE_FACTOR).powf(0.6);
-                                    let spectrum_position = parameter.clamp(0.0, 1.0);
+                                    let velocity = objects.velocities[object_index];
+                                    let spectrum_position =
+                                        (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0);
                                     spectrum(spectrum_position)
                                 }),
                                 None,
-                                &Circle::new((object.position.x, object.position.y), object.radius.into()),
+                                &Circle::new((position.x, position.y), radius.into()),
                             );
                         }
                     }
@@ -275,13 +284,19 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene) {
         }
     });
 
-    for planet in physics.planets() {
+    for ((position, radius), color) in zip(
+        zip(
+            &objects.positions[..objects.planet_count],
+            &objects.radii[..objects.planet_count],
+        ),
+        &objects.colors[..objects.planet_count],
+    ) {
         scene.fill(
             Fill::NonZero,
             transform,
-            planet.color.unwrap_or(css::WHITE),
+            color.unwrap_or(css::WHITE),
             None,
-            &Circle::new((planet.position.x, planet.position.y), (planet.radius * 3.0).into()),
+            &Circle::new((position.x, position.y), (radius * 3.0).into()),
         );
     }
 
