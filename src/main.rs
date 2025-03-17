@@ -9,7 +9,7 @@ use demo::create_demo;
 use itertools::Itertools;
 use libc::EXIT_SUCCESS;
 use vello::{
-    kurbo::{Affine, Circle, Rect, Stroke},
+    kurbo::{Affine, Circle, Line, Rect, Stroke},
     peniko::{color::palette::css, Color, Fill},
     util::{DeviceHandle, RenderContext, RenderSurface},
     wgpu::{Maintain, PresentMode},
@@ -54,6 +54,7 @@ pub fn main() -> anyhow::Result<()> {
         advance_time,
         mouse_position: Vector2::new(0.0, 0.0),
         mouse_influence_radius: 50.0,
+        draw_grid: false,
     };
     event_loop.run_app(&mut app).expect("run to completion");
     Ok(())
@@ -92,6 +93,7 @@ struct VelloApp<'s> {
     advance_time: bool,
     mouse_position: Vector2<f32>,
     mouse_influence_radius: f32,
+    draw_grid: bool,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -156,6 +158,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                         Key::Named(NamedKey::Space) => self.advance_time = !self.advance_time,
                         Key::Named(NamedKey::Escape) => event_loop.exit(),
                         Key::Character("a") => self.physics.enable_gpu = !self.physics.enable_gpu,
+                        Key::Character("g") => self.draw_grid = !self.draw_grid,
                         _ => {}
                     }
                 }
@@ -171,6 +174,14 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     self.scene.reset();
                     render_physics(&self.physics, &mut self.scene);
                     render_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
+                    if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
+                        render_grid(
+                            &mut self.scene,
+                            self.physics.constraints().topleft,
+                            self.physics.constraints().bottomright,
+                            self.physics.grid().cell_size(),
+                        );
+                    }
                     let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
                     let device_handle = &self.context.devices[surface.dev_id];
                     render_scene(&self.scene, surface, renderer, device_handle);
@@ -324,6 +335,33 @@ fn render_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse
         None,
         &Circle::new((mouse_position.x, mouse_position.y), mouse_influence_radius as f64),
     );
+}
+
+fn render_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f32>, cell_size: f32) {
+    for i in 0..((bottomright.x - topleft.x) / cell_size) as usize + 1 {
+        scene.stroke(
+            &Stroke::default(),
+            Affine::IDENTITY,
+            css::LIGHT_GRAY,
+            None,
+            &Line::new(
+                (topleft.x + i as f32 * cell_size, topleft.y),
+                (topleft.x + i as f32 * cell_size, bottomright.y),
+            ),
+        );
+    }
+    for j in 0..((bottomright.y - topleft.y) / cell_size) as usize + 1 {
+        scene.stroke(
+            &Stroke::default(),
+            Affine::IDENTITY,
+            css::LIGHT_GRAY,
+            None,
+            &Line::new(
+                (topleft.x, topleft.y + j as f32 * cell_size),
+                (bottomright.x, topleft.y + j as f32 * cell_size),
+            ),
+        )
+    }
 }
 
 fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer, device_handle: &DeviceHandle) {
