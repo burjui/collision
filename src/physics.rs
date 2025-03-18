@@ -5,9 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Context as _;
+use anyhow::Context;
 use grid::{CellRecord, Grid};
-use itertools::Itertools;
 use object::{ObjectPrototype, ObjectSoa, ObjectUpdate};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
@@ -334,33 +333,48 @@ impl PhysicsEngine {
             let cell_records = &self.grid.cell_records[range];
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
-                let mut candidate_area = (x.saturating_sub(1)..=(x + 1).min(self.grid.size().x - 1))
-                    .cartesian_product(y.saturating_sub(1)..=(y + 1).min(self.grid.size().y - 1))
-                    .flat_map(|coords| {
-                        self.grid.coords_to_cells[coords]
-                            .into_iter()
-                            .flat_map(|(start, end)| self.grid.cell_records[start..end].iter().copied())
-                    })
-                    .collect::<FixedVec<_, 32>>();
-                let position = self.objects.positions[object_index];
-                candidate_area.sort_by(|a, b| {
-                    let a = self.objects.positions[a.object_index];
-                    let b = self.objects.positions[b.object_index];
-                    (a - position)
-                        .magnitude_squared()
-                        .partial_cmp(&(b - position).magnitude_squared())
-                        .unwrap()
-                });
-                Self::process_object_with_area_collisions(
-                    object_index,
-                    &candidate_area,
-                    self.restitution_coefficient,
-                    &mut self.objects.positions,
-                    &mut self.objects.velocities,
-                    &self.objects.radii,
-                    &self.objects.masses,
-                    &self.objects.is_planet,
-                );
+                const AREA_CELL_OFFSETS: [(isize, isize); 9] = [
+                    (-1, -1),
+                    (0, -1),
+                    (1, -1),
+                    (-1, 0),
+                    (0, 0),
+                    (1, 0),
+                    (-1, 1),
+                    (0, 1),
+                    (1, 1),
+                ];
+                for (ox, oy) in AREA_CELL_OFFSETS {
+                    let x = x.wrapping_add_signed(ox);
+                    let y = y.wrapping_add_signed(oy);
+                    if x < self.grid.size().x && y < self.grid.size().y {
+                        if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
+                            let mut candidate_area = self.grid.cell_records[start..end]
+                                .iter()
+                                .copied()
+                                .collect::<FixedVec<_, 4>>();
+                            let position = self.objects.positions[object_index];
+                            candidate_area.sort_by(|a, b| {
+                                let a = self.objects.positions[a.object_index];
+                                let b = self.objects.positions[b.object_index];
+                                (a - position)
+                                    .magnitude_squared()
+                                    .partial_cmp(&(b - position).magnitude_squared())
+                                    .unwrap()
+                            });
+                            Self::process_object_with_area_collisions(
+                                object_index,
+                                &candidate_area,
+                                self.restitution_coefficient,
+                                &mut self.objects.positions,
+                                &mut self.objects.velocities,
+                                &self.objects.radii,
+                                &self.objects.masses,
+                                &self.objects.is_planet,
+                            );
+                        }
+                    }
+                }
             }
         }
     }
