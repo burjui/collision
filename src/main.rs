@@ -1,11 +1,13 @@
-#![feature(more_float_constants)]
-
 use core::f32;
 use std::{iter::zip, num::NonZero, path::Path, process::exit, sync::Arc};
 
-use anyhow::{Context, Ok};
+use anyhow::{anyhow, Context, Ok};
 use collision::{
-    app_config::AppConfig, fps::FpsCalculator, physics::PhysicsEngine, simple_text::SimpleText, vector2::Vector2,
+    app_config::AppConfig,
+    fps::FpsCalculator,
+    physics::{DurationStat, PhysicsEngine},
+    simple_text::SimpleText,
+    vector2::Vector2,
 };
 use demo::create_demo;
 use itertools::Itertools;
@@ -58,8 +60,15 @@ pub fn main() -> anyhow::Result<()> {
         mouse_influence_radius: 50.0,
         draw_grid: false,
         draw_ids: false,
+        text: SimpleText::new(),
     };
+
     event_loop.run_app(&mut app).expect("run to completion");
+
+    let mut stats_buffer = String::new();
+    print_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics).unwrap();
+    print!("{}", stats_buffer);
+
     Ok(())
 }
 
@@ -98,6 +107,7 @@ struct VelloApp<'s> {
     mouse_influence_radius: f32,
     draw_grid: bool,
     draw_ids: bool,
+    text: SimpleText,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -137,10 +147,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                         num_init_threads: NonZero::new(2),
                     },
                 )
-                .map_err(|e| {
-                    // Pretty-print any renderer creation error using Display formatting before unwrapping.
-                    anyhow::format_err!("{e}")
-                })
+                .map_err(|e| anyhow!("{e}"))
                 .expect("Failed to create renderer")
             });
             Some(render_state)
@@ -177,27 +184,31 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             WindowEvent::RedrawRequested => {
                 if let Some(RenderState { surface, .. }) = &self.state {
                     self.scene.reset();
-                    render_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
-                    render_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
+                    draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
+                    draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                     if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
-                        render_grid(
+                        draw_grid(
                             &mut self.scene,
                             self.physics.constraints().topleft,
                             self.physics.constraints().bottomright,
                             self.physics.grid().cell_size(),
                         );
                     }
-                    let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
-                    let device_handle = &self.context.devices[surface.dev_id];
-                    render_scene(&self.scene, surface, renderer, device_handle);
                     self.frame_count += 1;
-
                     self.last_fps = self.fps_calculator.update(self.frame_count).or(self.last_fps);
                     if let Some(fps) = self.last_fps {
                         self.min_fps = self.min_fps.min(fps);
-                        eprintln!("FPS: {fps} (min {})", self.min_fps);
-                        eprintln!("Sim time: {}", self.physics.time());
                     }
+                    draw_stats(
+                        &mut self.scene,
+                        &mut self.text,
+                        (self.last_fps, self.min_fps),
+                        &self.physics,
+                    )
+                    .expect("failed to draw stats");
+                    let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
+                    let device_handle = &self.context.devices[surface.dev_id];
+                    render_scene(&self.scene, surface, renderer, device_handle);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -259,7 +270,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
 
 struct DrawIds(bool);
 
-fn render_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds) {
+fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds) {
     let transform = Affine::IDENTITY;
     let objects = physics.objects();
     let chunk_size = physics.objects().len() / 20;
@@ -348,7 +359,7 @@ fn render_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids):
     );
 }
 
-fn render_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse_influence_radius: f32) {
+fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse_influence_radius: f32) {
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
@@ -358,7 +369,7 @@ fn render_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse
     );
 }
 
-fn render_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f32>, cell_size: f32) {
+fn draw_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f32>, cell_size: f32) {
     for i in 0..((bottomright.x - topleft.x) / cell_size) as usize + 1 {
         scene.stroke(
             &Stroke::default(),
@@ -383,6 +394,56 @@ fn render_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f3
             ),
         )
     }
+}
+
+use std::fmt::Write;
+
+fn draw_stats(
+    scene: &mut Scene,
+    text: &mut SimpleText,
+    (fps, min_fps): (Option<usize>, usize),
+    physics: &PhysicsEngine,
+) -> anyhow::Result<()> {
+    let buffer = &mut String::new();
+    print_stats(buffer, (fps, min_fps), physics)?;
+
+    const TEXT_SIZE: f32 = 16.0;
+    text.add(
+        scene,
+        TEXT_SIZE,
+        None,
+        Affine::translate((0.0, TEXT_SIZE as f64)),
+        &buffer,
+    );
+
+    Ok(())
+}
+
+fn print_stats(
+    buffer: &mut String,
+    (fps, min_fps): (Option<usize>, usize),
+    physics: &PhysicsEngine,
+) -> anyhow::Result<()> {
+    writeln!(buffer, "FPS: {:?} (min {:?})", fps.unwrap_or(0), min_fps).unwrap();
+    writeln!(buffer, "sim time: {}", physics.time()).unwrap();
+    writeln!(buffer, "objects: {}", physics.objects().len()).unwrap();
+    let stats = physics.stats();
+    print_duration_stat(buffer, "updates", &stats.updates_duration);
+    print_duration_stat(buffer, "grid", &stats.grid_duration);
+    print_duration_stat(buffer, "collisions", &stats.collisions_duration);
+    print_duration_stat(buffer, "constraints", &stats.constraints_duration);
+    print_duration_stat(buffer, "total", &stats.total_duration);
+    print!("{}", buffer);
+    Ok(())
+}
+
+fn print_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) {
+    writeln!(
+        buffer,
+        "{}: {:?} (min {:?}, max {:?})",
+        name, stat.current, stat.lowest, stat.highest
+    )
+    .unwrap();
 }
 
 fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer, device_handle: &DeviceHandle) {

@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::Context as _;
 use grid::{CellRecord, Grid};
-use indoc::indoc;
 use itertools::Itertools;
 use object::{ObjectPrototype, ObjectSoa, ObjectUpdate};
 use opencl3::kernel::{ExecuteKernel, Kernel};
@@ -31,8 +30,6 @@ pub struct PhysicsEngine {
     time: f32,
     constraints: ConstraintBox,
     stats: Stats,
-    lowest_stats: Stats,
-    highest_stats: Stats,
     restitution_coefficient: f32,
     global_gravity: Vector2<f32>,
     gpu: Gpu,
@@ -63,9 +60,7 @@ impl PhysicsEngine {
             grid: Grid::default(),
             time: 0.0,
             constraints,
-            stats: Stats::MIN,
-            lowest_stats: Stats::MAX,
-            highest_stats: Stats::MIN,
+            stats: Stats::default(),
             restitution_coefficient: config.restitution_coefficient,
             global_gravity: Vector2::from(config.gravity),
             gpu,
@@ -99,10 +94,13 @@ impl PhysicsEngine {
         &mut self.objects
     }
 
+    pub fn stats(&self) -> &Stats {
+        &self.stats
+    }
+
     pub fn advance(&mut self, dt: f32) {
         let start = Instant::now();
 
-        println!("particles: {}", self.objects.len());
         // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
         let (max_velocity_squared, max_object_size) = zip(self.objects.velocities.iter(), self.objects.radii.iter())
             .fold(
@@ -127,38 +125,7 @@ impl PhysicsEngine {
         self.time += dt * slowdown_factor;
         self.update(dt * slowdown_factor);
 
-        self.stats.total_duration = start.elapsed();
-        self.lowest_stats = self.stats.min(&self.lowest_stats);
-        self.highest_stats = self.stats.max(&self.highest_stats);
-        println!(
-            indoc!(
-                "updates: {:?} -- {:?}  {:?}
-                grid: {:?} -- {:?}  {:?}
-                collisions: {:?} -- {:?}  {:?}
-                constraints: {:?} -- {:?}  {:?}
-                total: {:?} -- {:?}  {:?}",
-            ),
-            self.stats.updates_duration,
-            self.lowest_stats.updates_duration,
-            self.highest_stats.updates_duration,
-            //
-            self.stats.grid_duration,
-            self.lowest_stats.grid_duration,
-            self.highest_stats.grid_duration,
-            //
-            self.stats.collisions_duration,
-            self.lowest_stats.collisions_duration,
-            self.highest_stats.collisions_duration,
-            //
-            self.stats.constraints_duration,
-            self.lowest_stats.constraints_duration,
-            self.highest_stats.constraints_duration,
-            //
-            self.stats.total_duration,
-            self.lowest_stats.total_duration,
-            self.highest_stats.total_duration
-        );
-        println!("-----------");
+        self.stats.total_duration.update(start.elapsed());
     }
 
     #[must_use]
@@ -176,85 +143,19 @@ impl PhysicsEngine {
 
         let start = Instant::now();
         self.update_objects(dt);
-        self.stats.updates_duration = start.elapsed();
+        self.stats.updates_duration.update(start.elapsed());
 
         let start = Instant::now();
         self.grid.update(&self.objects);
-        self.stats.grid_duration = start.elapsed();
+        self.stats.grid_duration.update(start.elapsed());
 
         let start = Instant::now();
         self.process_collisions();
-        self.stats.collisions_duration = start.elapsed();
+        self.stats.collisions_duration.update(start.elapsed());
 
         let start = Instant::now();
         self.apply_constraints();
-        self.stats.constraints_duration = start.elapsed();
-    }
-
-    fn process_collisions(&mut self) {
-        for range in self.grid.cell_iter() {
-            let cell_records = &self.grid.cell_records[range];
-            let (x, y) = cell_records[0].cell_coords;
-            for &CellRecord { object_index, .. } in cell_records {
-                let mut candidate_area = (x.saturating_sub(1)..=(x + 1).min(self.grid.size().x - 1))
-                    .cartesian_product(y.saturating_sub(1)..=(y + 1).min(self.grid.size().y - 1))
-                    .flat_map(|coords| {
-                        self.grid.coords_to_cells[coords]
-                            .into_iter()
-                            .flat_map(|(start, end)| self.grid.cell_records[start..end].iter().copied())
-                    })
-                    .collect::<FixedVec<_, 18>>();
-                let position = self.objects.positions[object_index];
-                candidate_area.sort_by(|a, b| {
-                    let a = self.objects.positions[a.object_index];
-                    let b = self.objects.positions[b.object_index];
-                    (a - position)
-                        .magnitude_squared()
-                        .partial_cmp(&(b - position).magnitude_squared())
-                        .unwrap()
-                });
-                Self::process_object_with_area_collisions(
-                    object_index,
-                    &candidate_area,
-                    self.restitution_coefficient,
-                    &mut self.objects.positions,
-                    &mut self.objects.velocities,
-                    &self.objects.radii,
-                    &self.objects.masses,
-                    &self.objects.is_planet,
-                );
-            }
-        }
-    }
-
-    fn process_object_with_area_collisions(
-        object1_index: usize,
-        candidate_area: &[CellRecord],
-        restitution_coefficient: f32,
-        positions: &mut [Vector2<f32>],
-        velocities: &mut [Vector2<f32>],
-        radii: &[f32],
-        masses: &[f32],
-        is_planet: &[bool],
-    ) {
-        for &CellRecord {
-            object_index: object2_index,
-            ..
-        } in candidate_area
-        {
-            if object1_index != object2_index {
-                process_object_collision(
-                    object1_index,
-                    object2_index,
-                    restitution_coefficient,
-                    positions,
-                    velocities,
-                    radii,
-                    masses,
-                    is_planet,
-                );
-            }
-        }
+        self.stats.constraints_duration.update(start.elapsed());
     }
 
     fn update_objects(&mut self, dt: f32) {
@@ -428,6 +329,72 @@ impl PhysicsEngine {
         gravity
     }
 
+    fn process_collisions(&mut self) {
+        for range in self.grid.cell_iter() {
+            let cell_records = &self.grid.cell_records[range];
+            let (x, y) = cell_records[0].cell_coords;
+            for &CellRecord { object_index, .. } in cell_records {
+                let mut candidate_area = (x.saturating_sub(1)..=(x + 1).min(self.grid.size().x - 1))
+                    .cartesian_product(y.saturating_sub(1)..=(y + 1).min(self.grid.size().y - 1))
+                    .flat_map(|coords| {
+                        self.grid.coords_to_cells[coords]
+                            .into_iter()
+                            .flat_map(|(start, end)| self.grid.cell_records[start..end].iter().copied())
+                    })
+                    .collect::<FixedVec<_, 32>>();
+                let position = self.objects.positions[object_index];
+                candidate_area.sort_by(|a, b| {
+                    let a = self.objects.positions[a.object_index];
+                    let b = self.objects.positions[b.object_index];
+                    (a - position)
+                        .magnitude_squared()
+                        .partial_cmp(&(b - position).magnitude_squared())
+                        .unwrap()
+                });
+                Self::process_object_with_area_collisions(
+                    object_index,
+                    &candidate_area,
+                    self.restitution_coefficient,
+                    &mut self.objects.positions,
+                    &mut self.objects.velocities,
+                    &self.objects.radii,
+                    &self.objects.masses,
+                    &self.objects.is_planet,
+                );
+            }
+        }
+    }
+
+    fn process_object_with_area_collisions(
+        object1_index: usize,
+        candidate_area: &[CellRecord],
+        restitution_coefficient: f32,
+        positions: &mut [Vector2<f32>],
+        velocities: &mut [Vector2<f32>],
+        radii: &[f32],
+        masses: &[f32],
+        is_planet: &[bool],
+    ) {
+        for &CellRecord {
+            object_index: object2_index,
+            ..
+        } in candidate_area
+        {
+            if object1_index != object2_index {
+                process_object_collision(
+                    object1_index,
+                    object2_index,
+                    restitution_coefficient,
+                    positions,
+                    velocities,
+                    radii,
+                    masses,
+                    is_planet,
+                );
+            }
+        }
+    }
+
     fn apply_constraints(&mut self) {
         let cb = self.constraints;
         for ((position, velocity), radius) in zip(
@@ -479,49 +446,37 @@ impl ConstraintBox {
     }
 }
 
-struct Stats {
-    updates_duration: Duration,
-    grid_duration: Duration,
-    collisions_duration: Duration,
-    constraints_duration: Duration,
-    total_duration: Duration,
+pub struct DurationStat {
+    pub current: Duration,
+    pub lowest: Duration,
+    pub highest: Duration,
 }
 
-impl Stats {
-    const MIN: Self = Self {
-        updates_duration: Duration::ZERO,
-        grid_duration: Duration::ZERO,
-        collisions_duration: Duration::ZERO,
-        constraints_duration: Duration::ZERO,
-        total_duration: Duration::ZERO,
-    };
-    const MAX: Self = Self {
-        updates_duration: Duration::MAX,
-        grid_duration: Duration::MAX,
-        collisions_duration: Duration::MAX,
-        constraints_duration: Duration::MAX,
-        total_duration: Duration::MAX,
-    };
+impl DurationStat {
+    pub fn update(&mut self, duration: Duration) {
+        self.current = duration;
+        self.lowest = self.lowest.min(duration);
+        self.highest = self.highest.max(duration);
+    }
+}
 
-    fn min(&self, other: &Self) -> Self {
+impl Default for DurationStat {
+    fn default() -> Self {
         Self {
-            updates_duration: self.updates_duration.min(other.updates_duration),
-            grid_duration: self.grid_duration.min(other.grid_duration),
-            collisions_duration: self.collisions_duration.min(other.collisions_duration),
-            constraints_duration: self.constraints_duration.min(other.constraints_duration),
-            total_duration: self.total_duration.min(other.total_duration),
+            current: Duration::ZERO,
+            lowest: Duration::MAX,
+            highest: Duration::ZERO,
         }
     }
+}
 
-    fn max(&self, other: &Self) -> Self {
-        Self {
-            updates_duration: self.updates_duration.max(other.updates_duration),
-            grid_duration: self.grid_duration.max(other.grid_duration),
-            collisions_duration: self.collisions_duration.max(other.collisions_duration),
-            constraints_duration: self.constraints_duration.max(other.constraints_duration),
-            total_duration: self.total_duration.max(other.total_duration),
-        }
-    }
+#[derive(Default)]
+pub struct Stats {
+    pub updates_duration: DurationStat,
+    pub grid_duration: DurationStat,
+    pub collisions_duration: DurationStat,
+    pub constraints_duration: DurationStat,
+    pub total_duration: DurationStat,
 }
 
 fn process_object_collision(

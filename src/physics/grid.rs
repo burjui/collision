@@ -34,15 +34,15 @@ impl Grid {
             if self.cell_records.len() != objects.len() {
                 self.cell_records.resize(objects.len(), CellRecord::EMPTY);
             }
-
             for (object_index, &position) in objects.positions.iter().enumerate() {
                 let cell = cell_at(position, self.position, self.cell_size);
                 self.cell_records[object_index] = CellRecord {
                     object_index,
                     cell_coords: cell,
-                    radix_key: ((cell.1 << 16) | cell.0).try_into().unwrap(),
+                    radix_key: ((cell.1 << (CellRadixKey::BITS / 2)) | cell.0).try_into().unwrap(),
                 }
             }
+
             self.cell_records.radix_sort_unstable();
 
             if self.coords_to_cells.size() != (self.size.x, self.size.y) {
@@ -78,18 +78,20 @@ impl Grid {
     }
 }
 
+type CellRadixKey = u32;
+
 #[derive(Copy, Clone)]
 pub struct CellRecord {
     pub object_index: usize,
     pub cell_coords: (usize, usize),
-    radix_key: u32,
+    radix_key: CellRadixKey,
 }
 
 impl CellRecord {
     const EMPTY: Self = Self {
         object_index: usize::MAX,
         cell_coords: (usize::MAX, usize::MAX),
-        radix_key: u32::MAX,
+        radix_key: CellRadixKey::MAX,
     };
 }
 
@@ -100,7 +102,7 @@ impl Default for CellRecord {
 }
 
 impl RadixKey for CellRecord {
-    const LEVELS: usize = <u32 as RadixKey>::LEVELS;
+    const LEVELS: usize = <CellRadixKey as RadixKey>::LEVELS;
 
     fn get_level(&self, level: usize) -> u8 {
         self.radix_key.get_level(level)

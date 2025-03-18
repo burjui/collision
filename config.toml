@@ -1,5 +1,5 @@
 width = 1600
 height = 800
-restitution_coefficient = 0.997
+restitution_coefficient = 0.998
 gravity = [0.0, 0.0]
-sim_time_limit = 0.35
+# sim_time_limit = 0.35

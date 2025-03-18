@@ -2,6 +2,7 @@
 #![feature(impl_trait_in_bindings)]
 #![feature(array_repeat)]
 #![feature(array_windows)]
+#![feature(more_float_constants)]
 
 pub mod app_config;
 pub mod array2;

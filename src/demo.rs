@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use collision::{
     compound::{generate_ball, generate_brick, Ball, Brick},
     physics::{object::ObjectPrototype, PhysicsEngine},
@@ -6,7 +8,7 @@ use collision::{
 use vello::peniko::color::palette::css;
 
 pub fn create_demo(physics: &mut PhysicsEngine) {
-    const RADIUS: f32 = 2.0;
+    const RADIUS: f32 = 1.0;
 
     physics.add(ObjectPrototype {
         velocity: Vector2::new(-700.0, 0.0),
