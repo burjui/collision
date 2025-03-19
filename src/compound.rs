@@ -4,6 +4,7 @@ use vello::peniko::{
 };
 
 use crate::{
+    app_config::ColorSource,
     physics::{object::ObjectPrototype, PhysicsEngine},
     vector2::Vector2,
 };
@@ -35,7 +36,7 @@ impl Brick {
     }
 }
 
-pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> {
+pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick, color_source: ColorSource) -> Vec<usize> {
     let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -45,15 +46,22 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
                 position + (index + 1) as f32 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
-            let selection_factor = (position.x - brick.position.x) / brick.size.x;
-            let hue = 300.0 * selection_factor;
-            let hsl = [hue, 100.0, 50.0];
-            let rgb = Hsl::convert::<Srgb>(hsl);
+            let color = match color_source {
+                ColorSource::Demo => {
+                    let selection_factor = (position.x - brick.position.x) / brick.size.x;
+                    let hue = 300.0 * selection_factor;
+                    let hsl = [hue, 100.0, 50.0];
+                    let rgb = Hsl::convert::<Srgb>(hsl);
+                    Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
+                }
+                ColorSource::Velocity => None,
+            };
+
             let id = physics.add(ObjectPrototype {
                 velocity: brick.velocity,
                 radius: brick.particle_radius,
                 mass: brick.particle_mass,
-                color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),
+                color,
                 ..ObjectPrototype::new(position)
             });
             result.push(id);
@@ -70,7 +78,6 @@ pub struct Ball {
     pub particle_radius: f32,
     pub particle_spacing: f32,
     pub particle_mass: f32,
-    pub color: Option<Color>,
 }
 
 impl Ball {
@@ -84,12 +91,11 @@ impl Ball {
             particle_radius: DEFAULT_PARTICLE_RADIUS,
             particle_spacing: DEFAULT_PARTICLE_SPACING,
             particle_mass: DEFAULT_PARTICLE_MASS,
-            color: None,
         }
     }
 }
 
-pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
+pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball, color_source: ColorSource) -> Vec<usize> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
@@ -99,14 +105,20 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
-                let hue = 300.0 * (position - ball.position).magnitude() / ball.radius;
-                let hsl = [hue, 100.0, 50.0];
-                let rgb = Hsl::convert::<Srgb>(hsl);
+                let color = match color_source {
+                    ColorSource::Demo => {
+                        let hue = 300.0 * (position - ball.position).magnitude() / ball.radius;
+                        let hsl = [hue, 100.0, 50.0];
+                        let rgb = Hsl::convert::<Srgb>(hsl);
+                        Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
+                    }
+                    ColorSource::Velocity => None,
+                };
                 let mut object = ObjectPrototype {
                     acceleration: ball.acceleration,
                     radius: ball.particle_radius,
                     mass: ball.particle_mass,
-                    color: Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0])),
+                    color,
                     ..ObjectPrototype::new(position)
                 };
                 object.velocity = ball.velocity;

@@ -39,7 +39,7 @@ impl Grid {
                 self.cell_records[object_index] = CellRecord {
                     object_index,
                     cell_coords: cell,
-                    radix_key: ((cell.1 << (CellRadixKey::BITS / 2)) | cell.0).try_into().unwrap(),
+                    radix_key: ((cell.0 << (CellRadixKey::BITS / 2)) | cell.1).try_into().unwrap(),
                 }
             }
 

@@ -3,6 +3,7 @@ use vello::peniko::Color;
 use crate::vector2::Vector2;
 
 // TODO: FixedVec?
+#[derive(Default)]
 pub struct ObjectSoa {
     pub positions: Vec<Vector2<f32>>,
     pub velocities: Vec<Vector2<f32>>,
@@ -15,6 +16,8 @@ pub struct ObjectSoa {
 }
 
 impl ObjectSoa {
+    #[must_use]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.positions.len()
     }
@@ -57,21 +60,6 @@ impl ObjectSoa {
             masses: &self.masses[..self.planet_count],
             colors: &self.colors[..self.planet_count],
             is_planet: &self.is_planet[..self.planet_count],
-        }
-    }
-}
-
-impl Default for ObjectSoa {
-    fn default() -> Self {
-        Self {
-            positions: Vec::default(),
-            velocities: Vec::default(),
-            accelerations: Vec::default(),
-            radii: Vec::default(),
-            masses: Vec::default(),
-            colors: Vec::default(),
-            is_planet: Vec::default(),
-            planet_count: 0,
         }
     }
 }

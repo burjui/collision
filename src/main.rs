@@ -1,5 +1,5 @@
 use core::f32;
-use std::{iter::zip, num::NonZero, path::Path, process::exit, sync::Arc};
+use std::{iter::zip, num::NonZero, path::Path, process::exit, sync::Arc, time::Instant};
 
 use anyhow::{anyhow, Context, Ok};
 use collision::{
@@ -40,9 +40,9 @@ pub fn main() -> anyhow::Result<()> {
     let render_state = None::<RenderState<'_>>;
 
     let mut physics = PhysicsEngine::new(&config)?;
-    create_demo(&mut physics);
+    create_demo(&mut physics, &config);
 
-    let advance_time = config.sim_time_limit.is_some();
+    let advance_time = config.simulation.time_limit.is_some();
     let mut app = VelloApp {
         config,
         context: render_context,
@@ -52,7 +52,7 @@ pub fn main() -> anyhow::Result<()> {
         scene: Scene::new(),
         frame_count: 0,
         fps_calculator: FpsCalculator::default(),
-        last_fps: None,
+        last_fps: 0,
         min_fps: usize::MAX,
         physics,
         advance_time,
@@ -61,6 +61,7 @@ pub fn main() -> anyhow::Result<()> {
         draw_grid: false,
         draw_ids: false,
         text: SimpleText::new(),
+        last_redraw: Instant::now(),
     };
 
     event_loop.run_app(&mut app).expect("run to completion");
@@ -99,7 +100,7 @@ struct VelloApp<'s> {
     scene: Scene,
     frame_count: usize,
     fps_calculator: FpsCalculator,
-    last_fps: Option<usize>,
+    last_fps: usize,
     min_fps: usize,
     physics: PhysicsEngine,
     advance_time: bool,
@@ -108,6 +109,7 @@ struct VelloApp<'s> {
     draw_grid: bool,
     draw_ids: bool,
     text: SimpleText,
+    last_redraw: Instant,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -120,7 +122,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_inner_size(PhysicalSize::new(self.config.width, self.config.height))
+                            .with_inner_size(PhysicalSize::new(self.config.window.width, self.config.window.height))
                             .with_resizable(false)
                             .with_title(format!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))),
                     )
@@ -183,32 +185,36 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(RenderState { surface, .. }) = &self.state {
-                    self.scene.reset();
-                    draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
-                    draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
-                    if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
-                        draw_grid(
+                    self.last_fps = self.fps_calculator.update(self.frame_count).unwrap_or(self.last_fps);
+                    self.min_fps = self.min_fps.min(self.last_fps);
+
+                    let now = Instant::now();
+                    if (now - self.last_redraw).as_secs_f32() > 1.0 / 60.0 {
+                        self.last_redraw = now;
+                        self.scene.reset();
+                        draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
+                        draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
+                        if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
+                            draw_grid(
+                                &mut self.scene,
+                                self.physics.constraints().topleft,
+                                self.physics.constraints().bottomright,
+                                self.physics.grid().cell_size(),
+                            );
+                        }
+
+                        draw_stats(
                             &mut self.scene,
-                            self.physics.constraints().topleft,
-                            self.physics.constraints().bottomright,
-                            self.physics.grid().cell_size(),
-                        );
+                            &mut self.text,
+                            (self.last_fps, self.min_fps),
+                            &self.physics,
+                        )
+                        .expect("failed to draw stats");
+                        let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
+                        let device_handle = &self.context.devices[surface.dev_id];
+                        render_scene(&self.scene, surface, renderer, device_handle);
+                        self.frame_count += 1;
                     }
-                    self.frame_count += 1;
-                    self.last_fps = self.fps_calculator.update(self.frame_count).or(self.last_fps);
-                    if let Some(fps) = self.last_fps {
-                        self.min_fps = self.min_fps.min(fps);
-                    }
-                    draw_stats(
-                        &mut self.scene,
-                        &mut self.text,
-                        (self.last_fps, self.min_fps),
-                        &self.physics,
-                    )
-                    .expect("failed to draw stats");
-                    let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
-                    let device_handle = &self.context.devices[surface.dev_id];
-                    render_scene(&self.scene, surface, renderer, device_handle);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -216,43 +222,39 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
-                    match button {
-                        MouseButton::Left => {
-                            let objects = self.physics.objects_mut();
-                            for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
-                                let from_mouse_to_object = position - self.mouse_position;
-                                if (from_mouse_to_object).magnitude() < self.mouse_influence_radius {
-                                    *velocity += from_mouse_to_object.normalize() * 2000.0;
-                                }
+                    if let MouseButton::Left = button {
+                        let objects = self.physics.objects_mut();
+                        for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
+                            let from_mouse_to_object = position - self.mouse_position;
+                            if (from_mouse_to_object).magnitude() < self.mouse_influence_radius {
+                                *velocity += from_mouse_to_object.normalize() * 2000.0;
                             }
                         }
-                        _ => {}
                     }
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                if let MouseScrollDelta::LineDelta(_, dy) = delta {
-                    self.mouse_influence_radius = (self.mouse_influence_radius + dy * 3.0).max(0.0);
-                }
+            WindowEvent::MouseWheel {
+                delta: MouseScrollDelta::LineDelta(_, dy),
+                ..
+            } => {
+                self.mouse_influence_radius = (self.mouse_influence_radius + dy * 3.0).max(0.0);
             }
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        const FRAME_INTERVAL: f32 = 1.0 / 60.0;
-        const DEFAULT_DT: f32 = FRAME_INTERVAL / 64.0;
-
         if self
             .config
-            .sim_time_limit
+            .simulation
+            .time_limit
             .is_some_and(|limit| self.physics.time() > limit)
         {
             exit(EXIT_SUCCESS);
         }
 
         if self.advance_time {
-            self.physics.advance(DEFAULT_DT);
+            self.physics.advance(self.config.simulation.speed_factor);
         }
 
         if let Some(render_state) = &mut self.state {
@@ -290,10 +292,10 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
                 scope.spawn(move || {
                     let mut scene = Scene::new();
                     let mut text = SimpleText::new();
-                    for &object_index in chunk.into_iter() {
+                    for &object_index in chunk {
                         if !objects.is_planet[object_index] {
-                            let position = objects.positions[object_index];
-                            let radius = objects.radii[object_index];
+                            let particle_position = objects.positions[object_index];
+                            let particle_radius = objects.radii[object_index];
                             scene.fill(
                                 Fill::NonZero,
                                 transform,
@@ -305,14 +307,14 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
                                     spectrum(spectrum_position)
                                 }),
                                 None,
-                                &Circle::new((position.x, position.y), radius.into()),
+                                &Circle::new((particle_position.x, particle_position.y), particle_radius.into()),
                             );
                             if draw_ids {
                                 text.add(
                                     &mut scene,
                                     10.0,
                                     None,
-                                    Affine::translate((position.x as f64, position.y as f64)),
+                                    Affine::translate((particle_position.x as f64, particle_position.y as f64)),
                                     &format!("{}", object_index),
                                 );
                             }
@@ -327,7 +329,7 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
         }
     });
 
-    for ((position, radius), color) in zip(
+    for ((&planet_position, &planet_radius), color) in zip(
         zip(
             &objects.positions[..objects.planet_count],
             &objects.radii[..objects.planet_count],
@@ -339,7 +341,7 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
             transform,
             color.unwrap_or(css::WHITE),
             None,
-            &Circle::new((position.x, position.y), (radius * 3.0).into()),
+            &Circle::new((planet_position.x, planet_position.y), planet_radius.into()),
         );
     }
 
@@ -401,7 +403,7 @@ use std::fmt::Write;
 fn draw_stats(
     scene: &mut Scene,
     text: &mut SimpleText,
-    (fps, min_fps): (Option<usize>, usize),
+    (fps, min_fps): (usize, usize),
     physics: &PhysicsEngine,
 ) -> anyhow::Result<()> {
     let buffer = &mut String::new();
@@ -413,18 +415,14 @@ fn draw_stats(
         TEXT_SIZE,
         None,
         Affine::translate((0.0, TEXT_SIZE as f64)),
-        &buffer,
+        buffer,
     );
 
     Ok(())
 }
 
-fn print_stats(
-    buffer: &mut String,
-    (fps, min_fps): (Option<usize>, usize),
-    physics: &PhysicsEngine,
-) -> anyhow::Result<()> {
-    writeln!(buffer, "FPS: {:?} (min {:?})", fps.unwrap_or(0), min_fps).unwrap();
+fn print_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &PhysicsEngine) -> anyhow::Result<()> {
+    writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps).unwrap();
     writeln!(buffer, "sim time: {}", physics.time()).unwrap();
     writeln!(buffer, "objects: {}", physics.objects().len()).unwrap();
     let stats = physics.stats();

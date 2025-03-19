@@ -1,7 +1,6 @@
 use core::f32;
 use std::{
     iter::zip,
-    mem::transmute,
     time::{Duration, Instant},
 };
 
@@ -45,7 +44,7 @@ impl PhysicsEngine {
     pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
-            Vector2::new(config.width as f32, config.height as f32),
+            Vector2::new(config.window.width as f32, config.window.height as f32),
         );
         let gpu = Gpu::default(10)?;
         let yoshida_program = gpu.build_program("src/yoshida.cl")?;
@@ -60,8 +59,8 @@ impl PhysicsEngine {
             time: 0.0,
             constraints,
             stats: Stats::default(),
-            restitution_coefficient: config.restitution_coefficient,
-            global_gravity: Vector2::from(config.gravity),
+            restitution_coefficient: config.simulation.restitution_coefficient,
+            global_gravity: Vector2::from(config.simulation.gravity),
             gpu,
             yoshida_kernel,
             yoshida_kernel_no_planets,
@@ -97,7 +96,7 @@ impl PhysicsEngine {
         &self.stats
     }
 
-    pub fn advance(&mut self, dt: f32) {
+    pub fn advance(&mut self, speed_factor: f32) {
         let start = Instant::now();
 
         // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
@@ -116,13 +115,16 @@ impl PhysicsEngine {
                     (max_velocity_squared, max_object_size)
                 },
             );
-        let slowdown_factor = if max_velocity_squared > 0.0 {
-            (max_object_size / max_velocity_squared.sqrt() * 1000.0).min(1.0)
-        } else {
+        let max_cells_crossed_per_second = if max_object_size == 0.0 || max_velocity_squared == 0.0 {
             1.0
+        } else {
+            let grid_cell_size = max_object_size;
+            // Two times velocity because particles can collide head on
+            (max_velocity_squared.sqrt() * 2.0 / grid_cell_size).min(1.0)
         };
-        self.time += dt * slowdown_factor;
-        self.update(dt * slowdown_factor);
+        let dt = speed_factor / max_cells_crossed_per_second * 0.0000625;
+        self.time += dt;
+        self.update(dt);
 
         self.stats.total_duration.update(start.elapsed());
     }
@@ -230,14 +232,10 @@ impl PhysicsEngine {
             .context("Failed to execute kernel")
             .unwrap();
         self.gpu
-            .enqueue_read_device_buffer(position_buffer, unsafe {
-                transmute(self.objects.positions.as_mut_slice())
-            })
+            .enqueue_read_device_buffer(position_buffer, self.objects.positions.as_mut_slice())
             .unwrap();
         self.gpu
-            .enqueue_read_device_buffer(velocity_buffer, unsafe {
-                transmute(self.objects.velocities.as_mut_slice())
-            })
+            .enqueue_read_device_buffer(velocity_buffer, self.objects.velocities.as_mut_slice())
             .unwrap();
         self.gpu.submit_queue().unwrap();
     }
@@ -334,12 +332,12 @@ impl PhysicsEngine {
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
                 const AREA_CELL_OFFSETS: [(isize, isize); 9] = [
+                    (0, 0), // goes first because objectls in the same cell are closest
+                    (-1, 0),
+                    (1, 0),
                     (-1, -1),
                     (0, -1),
                     (1, -1),
-                    (-1, 0),
-                    (0, 0),
-                    (1, 0),
                     (-1, 1),
                     (0, 1),
                     (1, 1),
