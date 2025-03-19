@@ -107,7 +107,6 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
                     Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
                 };
                 let mut object = ObjectPrototype {
-                    acceleration: ball.acceleration,
                     radius: ball.particle_radius,
                     mass: ball.particle_mass,
                     color,

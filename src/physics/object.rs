@@ -7,7 +7,6 @@ use crate::vector2::Vector2;
 pub struct ObjectSoa {
     pub positions: Vec<Vector2<f64>>,
     pub velocities: Vec<Vector2<f64>>,
-    pub accelerations: Vec<Vector2<f64>>,
     pub radii: Vec<f64>,
     pub masses: Vec<f64>,
     pub colors: Vec<Option<Color>>,
@@ -31,7 +30,6 @@ impl ObjectSoa {
 
         self.positions.push(object.position);
         self.velocities.push(object.velocity);
-        self.accelerations.push(object.acceleration);
         self.radii.push(object.radius);
         self.masses.push(object.mass);
         self.colors.push(object.color);
@@ -44,7 +42,6 @@ impl ObjectSoa {
     pub fn resize(&mut self, size: usize) {
         self.positions.resize(size, Vector2::default());
         self.velocities.resize(size, Vector2::default());
-        self.accelerations.resize(size, Vector2::default());
         self.radii.resize(size, 0.0);
         self.masses.resize(size, 0.0);
         self.colors.resize(size, None);
@@ -55,7 +52,6 @@ impl ObjectSoa {
         ObjectSoaRef {
             positions: &self.positions[..self.planet_count],
             velocities: &self.velocities[..self.planet_count],
-            accelerations: &self.accelerations[..self.planet_count],
             radii: &self.radii[..self.planet_count],
             masses: &self.masses[..self.planet_count],
             colors: &self.colors[..self.planet_count],
@@ -67,7 +63,6 @@ impl ObjectSoa {
 pub struct ObjectSoaRef<'a> {
     pub positions: &'a [Vector2<f64>],
     pub velocities: &'a [Vector2<f64>],
-    pub accelerations: &'a [Vector2<f64>],
     pub radii: &'a [f64],
     pub masses: &'a [f64],
     pub colors: &'a [Option<Color>],
@@ -78,7 +73,6 @@ pub struct ObjectSoaRef<'a> {
 pub struct ObjectPrototype {
     pub position: Vector2<f64>,
     pub velocity: Vector2<f64>,
-    pub acceleration: Vector2<f64>,
     pub radius: f64,
     pub mass: f64,
     pub color: Option<Color>,
@@ -91,7 +85,6 @@ impl ObjectPrototype {
         Self {
             position,
             velocity: Vector2::new(0.0, 0.0),
-            acceleration: Vector2::new(0.0, 0.0),
             radius: 1.0,
             mass: 1.0,
             color: None,

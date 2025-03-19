@@ -376,7 +376,7 @@ impl PhysicsEngine {
                                     .partial_cmp(&(b - position).magnitude_squared())
                                     .unwrap()
                             });
-                            Self::process_object_with_area_collisions(
+                            Self::process_object_with_cell_collisions(
                                 object_index,
                                 &candidate_area,
                                 self.restitution_coefficient,
@@ -393,7 +393,7 @@ impl PhysicsEngine {
         }
     }
 
-    fn process_object_with_area_collisions(
+    fn process_object_with_cell_collisions(
         object1_index: usize,
         candidate_area: &[CellRecord],
         restitution_coefficient: f64,
@@ -527,10 +527,11 @@ fn process_object_collision(
         let mut velocity2 = velocities[object2_index];
         let distance = from_1_to_2.magnitude();
         {
-            let divisor = (total_mass * distance * distance).max(f64::EPSILON);
+            let inv_divisor = 1.0 / (total_mass * distance.powi(2)).max(f64::MIN_POSITIVE);
             let velocity_diff = velocity1 - velocity2;
-            velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
-            velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
+            let scalar = 2.0 * mass2 * velocity_diff.dot(&from_1_to_2) * inv_divisor;
+            velocity1 -= from_1_to_2 * scalar;
+            velocity2 -= -from_1_to_2 * scalar;
         }
         let intersection_depth = collision_distance - distance;
         let momentum1 = mass1 * velocity1.magnitude();
