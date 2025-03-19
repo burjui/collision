@@ -15,12 +15,9 @@ double2 gravity_acceleration(size_t object_index, const double2 position,
   double2 gravity = global_gravity;
   for (size_t planet_index = 0; planet_index < planet_count; ++planet_index) {
     if (planet_index != object_index) {
-      const double2 to_planet =
-          positions[planet_index] - positions[object_index];
-      const double distance_squared_unchecked =
-          to_planet.x * to_planet.x + to_planet.y * to_planet.y;
+      const double2 to_planet = positions[planet_index] - position;
       const double distance_squared =
-          fmax(distance_squared_unchecked, (double)(0.000001));
+          to_planet.x * to_planet.x + to_planet.y * to_planet.y;
       const double2 direction = to_planet / sqrt(distance_squared);
       const double planet_mass = planet_masses[planet_index];
       const double factor =

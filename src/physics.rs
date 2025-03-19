@@ -337,8 +337,7 @@ impl PhysicsEngine {
                 let to_planet = positions[planet_index] - position;
                 let direction = to_planet.normalize();
                 gravity += direction
-                    * (Self::GRAVITATIONAL_CONSTANT * planet_masses[planet_index]
-                        / to_planet.magnitude_squared().max(f64::EPSILON));
+                    * (Self::GRAVITATIONAL_CONSTANT * planet_masses[planet_index] / to_planet.magnitude_squared());
             }
         }
         gravity
