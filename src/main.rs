@@ -1,5 +1,10 @@
 use core::f64;
-use std::{iter::zip, num::NonZero, sync::Arc, time::Instant};
+use std::{
+    iter::zip,
+    num::NonZero,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Ok};
 use collision::{
@@ -59,6 +64,7 @@ pub fn main() -> anyhow::Result<()> {
         last_redraw: Instant::now(),
         time_limit_action_executed: false,
         jerk_applied: false,
+        sim_total_duration: Duration::ZERO,
     };
 
     event_loop.run_app(&mut app).expect("run to completion");
@@ -66,6 +72,11 @@ pub fn main() -> anyhow::Result<()> {
     let mut stats_buffer = String::new();
     write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics)?;
     print!("{}", stats_buffer);
+    println!("total simulation duration: {:?}", app.sim_total_duration);
+    println!(
+        "relative speed: {}",
+        app.physics.time() / app.sim_total_duration.as_secs_f64()
+    );
 
     Ok(())
 }
@@ -108,6 +119,7 @@ struct VelloApp<'s> {
     last_redraw: Instant,
     time_limit_action_executed: bool,
     jerk_applied: bool,
+    sim_total_duration: Duration,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -284,7 +296,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
         }
 
         if self.advance_time {
+            let start = Instant::now();
             self.physics.advance(config.simulation.speed_factor);
+            self.sim_total_duration += start.elapsed();
             if config
                 .simulation
                 .jerk_at
