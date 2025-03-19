@@ -252,6 +252,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 ..
             } => {
                 self.mouse_influence_radius = (self.mouse_influence_radius + dy as f64 * 3.0).max(0.0);
+                if let Some(render_state) = &mut self.state {
+                    render_state.window.request_redraw();
+                }
             }
             _ => {}
         }
