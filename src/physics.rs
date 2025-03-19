@@ -1,4 +1,4 @@
-use core::f32;
+use core::f64;
 use std::{
     iter::zip,
     time::{Duration, Instant},
@@ -25,26 +25,26 @@ pub struct PhysicsEngine {
     pub enable_gpu: bool,
     objects: ObjectSoa,
     grid: Grid,
-    time: f32,
+    time: f64,
     constraints: ConstraintBox,
     stats: Stats,
-    restitution_coefficient: f32,
-    global_gravity: Vector2<f32>,
+    restitution_coefficient: f64,
+    global_gravity: Vector2<f64>,
     gpu: Gpu,
     yoshida_kernel: Kernel,
     yoshida_kernel_no_planets: Kernel,
-    yoshida_position_buffer: Option<GpuDeviceBuffer<Vector2<f32>>>,
-    yoshida_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f32>>>,
-    yoshida_planet_mass_buffer: Option<GpuDeviceBuffer<f32>>,
+    yoshida_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    yoshida_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    yoshida_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
 }
 
 impl PhysicsEngine {
-    const GRAVITATIONAL_CONSTANT: f32 = 10000.0;
+    const GRAVITATIONAL_CONSTANT: f64 = 10000.0;
 
     pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
-            Vector2::new(config.window.width as f32, config.window.height as f32),
+            Vector2::new(config.window.width as f64, config.window.height as f64),
         );
         let gpu = Gpu::default(10)?;
         let yoshida_program = gpu.build_program("src/yoshida.cl")?;
@@ -92,37 +92,43 @@ impl PhysicsEngine {
         &mut self.objects
     }
 
+    pub fn planet_count(&self) -> usize {
+        self.objects.planet_count
+    }
+
     pub fn stats(&self) -> &Stats {
         &self.stats
     }
 
-    pub fn advance(&mut self, speed_factor: f32) {
+    pub fn advance(&mut self, speed_factor: f64) {
         let start = Instant::now();
 
         // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
-        let (max_velocity_squared, max_object_size) = zip(self.objects.velocities.iter(), self.objects.radii.iter())
+        let (max_velocity_squared, min_object_size) = zip(self.objects.velocities.iter(), self.objects.radii.iter())
             .fold(
-                (0.0, 0.0),
-                |(mut max_velocity_squared, mut max_object_size), (velocity, radius)| {
+                (0.0, f64::MAX),
+                |(mut max_velocity_squared, mut min_object_size), (velocity, radius)| {
                     let velocity_squared = velocity.magnitude_squared();
                     if velocity_squared > max_velocity_squared {
                         max_velocity_squared = velocity_squared;
                     }
                     let object_size = radius * 2.0;
-                    if object_size > max_object_size {
-                        max_object_size = object_size;
+                    if object_size < min_object_size {
+                        min_object_size = object_size;
                     }
-                    (max_velocity_squared, max_object_size)
+                    (max_velocity_squared, min_object_size)
                 },
             );
-        let max_cells_crossed_per_second = if max_object_size == 0.0 || max_velocity_squared == 0.0 {
+        let velocity_factor = if min_object_size == f64::MAX {
             1.0
         } else {
-            let grid_cell_size = max_object_size;
-            // Two times velocity because particles can collide head on
-            (max_velocity_squared.sqrt() * 2.0 / grid_cell_size).min(1.0)
+            // Two times velocity because objects can collide head on
+            let current_velocity = max_velocity_squared.sqrt();
+            current_velocity * 2.0 / min_object_size
         };
-        let dt = speed_factor / max_cells_crossed_per_second * 0.0000625;
+        let future_velocity = self.global_gravity.magnitude();
+        let gravity_factor = future_velocity * 8.0 / min_object_size;
+        let dt = speed_factor / 2.0 * (1.0 / velocity_factor.max(gravity_factor).max(1.0));
         self.time += dt;
         self.update(dt);
 
@@ -135,11 +141,11 @@ impl PhysicsEngine {
     }
 
     #[must_use]
-    pub fn time(&self) -> f32 {
+    pub fn time(&self) -> f64 {
         self.time
     }
 
-    fn update(&mut self, dt: f32) {
+    fn update(&mut self, dt: f64) {
         self.time += dt;
 
         let start = Instant::now();
@@ -159,7 +165,7 @@ impl PhysicsEngine {
         self.stats.constraints_duration.update(start.elapsed());
     }
 
-    fn update_objects(&mut self, dt: f32) {
+    fn update_objects(&mut self, dt: f64) {
         if self.enable_gpu {
             self.update_objects_leapfrog_yoshida_gpu(dt);
         } else {
@@ -176,7 +182,7 @@ impl PhysicsEngine {
         }
     }
 
-    fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f32) {
+    fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f64) {
         if self.yoshida_gpu_buffers_are_outdated() {
             self.allocate_yoshida_gpu_buffers();
         }
@@ -188,7 +194,7 @@ impl PhysicsEngine {
         }
     }
 
-    fn execute_yoshida_gpu_kernel(&mut self, dt: f32) {
+    fn execute_yoshida_gpu_kernel(&mut self, dt: f64) {
         let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
         let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
         let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
@@ -216,7 +222,7 @@ impl PhysicsEngine {
         self.gpu.submit_queue().unwrap();
     }
 
-    fn execute_yoshida_no_planets_gpu_kernel(&mut self, dt: f32) {
+    fn execute_yoshida_no_planets_gpu_kernel(&mut self, dt: f64) {
         let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
         let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
         let mut kernel = ExecuteKernel::new(&self.yoshida_kernel_no_planets);
@@ -290,9 +296,9 @@ impl PhysicsEngine {
     fn update_object_leapfrog_yoshida(
         &self,
         object_index: usize,
-        position: Vector2<f32>,
-        velocity: Vector2<f32>,
-        dt: f32,
+        position: Vector2<f64>,
+        velocity: Vector2<f64>,
+        dt: f64,
     ) -> ObjectUpdate {
         use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
         let x0 = position;
@@ -312,7 +318,7 @@ impl PhysicsEngine {
         }
     }
 
-    fn gravity_acceleration(&self, object_index: usize, position: Vector2<f32>) -> Vector2<f32> {
+    fn gravity_acceleration(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
         let mut gravity = Vector2::default();
         for planet_index in 0..self.objects.planet_count {
             if planet_index != object_index {
@@ -320,7 +326,7 @@ impl PhysicsEngine {
                 let direction = to_planet.normalize();
                 gravity += direction
                     * (Self::GRAVITATIONAL_CONSTANT * self.objects.masses[planet_index]
-                        / to_planet.magnitude_squared().max(f32::EPSILON));
+                        / to_planet.magnitude_squared().max(f64::EPSILON));
             }
         }
         gravity
@@ -380,11 +386,11 @@ impl PhysicsEngine {
     fn process_object_with_area_collisions(
         object1_index: usize,
         candidate_area: &[CellRecord],
-        restitution_coefficient: f32,
-        positions: &mut [Vector2<f32>],
-        velocities: &mut [Vector2<f32>],
-        radii: &[f32],
-        masses: &[f32],
+        restitution_coefficient: f64,
+        positions: &mut [Vector2<f64>],
+        velocities: &mut [Vector2<f64>],
+        radii: &[f64],
+        masses: &[f64],
         is_planet: &[bool],
     ) {
         for &CellRecord {
@@ -447,13 +453,13 @@ impl PhysicsEngine {
 
 #[derive(Clone, Copy)]
 pub struct ConstraintBox {
-    pub topleft: Vector2<f32>,
-    pub bottomright: Vector2<f32>,
+    pub topleft: Vector2<f64>,
+    pub bottomright: Vector2<f64>,
 }
 
 impl ConstraintBox {
     #[must_use]
-    pub fn new(topleft: Vector2<f32>, bottomright: Vector2<f32>) -> Self {
+    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
         Self { topleft, bottomright }
     }
 }
@@ -494,11 +500,11 @@ pub struct Stats {
 fn process_object_collision(
     object1_index: usize,
     object2_index: usize,
-    restitution_coefficient: f32,
-    positions: &mut [Vector2<f32>],
-    velocities: &mut [Vector2<f32>],
-    radii: &[f32],
-    masses: &[f32],
+    restitution_coefficient: f64,
+    positions: &mut [Vector2<f64>],
+    velocities: &mut [Vector2<f64>],
+    radii: &[f64],
+    masses: &[f64],
     is_planet: &[bool],
 ) {
     let collision_distance = radii[object1_index] + radii[object2_index];
@@ -511,7 +517,7 @@ fn process_object_collision(
         let mut velocity2 = velocities[object2_index];
         let distance = from_1_to_2.magnitude();
         {
-            let divisor = (total_mass * distance * distance).max(f32::EPSILON);
+            let divisor = (total_mass * distance * distance).max(f64::EPSILON);
             let velocity_diff = velocity1 - velocity2;
             velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
             velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
@@ -521,7 +527,7 @@ fn process_object_collision(
         let momentum2 = mass2 * velocity2.magnitude();
         let total_momentum = momentum1 + momentum2;
         let position_adjustment_base =
-            from_1_to_2.normalize() * (intersection_depth / total_momentum.max(f32::EPSILON));
+            from_1_to_2.normalize() * (intersection_depth / total_momentum.max(f64::EPSILON));
         positions[object1_index] += position_adjustment_base * momentum2;
         positions[object2_index] -= position_adjustment_base * momentum1;
 

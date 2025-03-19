@@ -1,10 +1,10 @@
-pub const C1: f32 = 0.6756036;
-pub const C2: f32 = -0.17560363;
-pub const C3: f32 = -0.17560363;
-pub const C4: f32 = 0.6756036;
-pub const D1: f32 = 1.3512073;
-pub const D2: f32 = -1.7024145;
-pub const D3: f32 = 1.3512073;
+pub const C1: f64 = 0.675603595979829;
+pub const C2: f64 = -0.1756035959798291;
+pub const C3: f64 = -0.1756035959798291;
+pub const C4: f64 = 0.675603595979829;
+pub const D1: f64 = 1.351207191959658;
+pub const D2: f64 = -1.7024143839193162;
+pub const D3: f64 = 1.351207191959658;
 
 #[allow(unused)]
 pub struct YoshidaCoefficients {

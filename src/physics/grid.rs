@@ -6,17 +6,17 @@ use super::object::ObjectSoa;
 use crate::{array2::Array2, vector2::Vector2};
 
 pub struct Grid {
-    position: Vector2<f32>,
+    position: Vector2<f64>,
     size: Vector2<usize>,
-    cell_size: f32,
+    cell_size: f64,
     pub(super) cell_records: Vec<CellRecord>,
     pub(super) coords_to_cells: Array2<Option<(usize, usize)>>,
 }
 
 impl Grid {
     pub fn update(&mut self, objects: &ObjectSoa) {
-        let mut end = Vector2::new(f32::MIN, f32::MIN);
-        self.position = Vector2::new(f32::MAX, f32::MAX);
+        let mut end = Vector2::new(f64::MIN, f64::MIN);
+        self.position = Vector2::new(f64::MAX, f64::MAX);
         self.cell_size = 0.0;
 
         for (position, radius) in zip(&objects.positions, &objects.radii) {
@@ -58,7 +58,7 @@ impl Grid {
     }
 
     #[must_use]
-    pub fn position(&self) -> Vector2<f32> {
+    pub fn position(&self) -> Vector2<f64> {
         self.position
     }
 
@@ -68,7 +68,7 @@ impl Grid {
     }
 
     #[must_use]
-    pub fn cell_size(&self) -> f32 {
+    pub fn cell_size(&self) -> f64 {
         self.cell_size
     }
 
@@ -156,7 +156,7 @@ impl Default for Grid {
 }
 
 #[must_use]
-pub fn cell_at(position: Vector2<f32>, cells_start: Vector2<f32>, cell_size: f32) -> (usize, usize) {
+pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> (usize, usize) {
     (
         ((position.x - cells_start.x) / cell_size) as usize,
         ((position.y - cells_start.y) / cell_size) as usize,

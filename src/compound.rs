@@ -9,22 +9,22 @@ use crate::{
     vector2::Vector2,
 };
 
-const DEFAULT_PARTICLE_RADIUS: f32 = 2.0;
-const DEFAULT_PARTICLE_SPACING: f32 = 2.0;
-const DEFAULT_PARTICLE_MASS: f32 = 1.0;
+const DEFAULT_PARTICLE_RADIUS: f64 = 2.0;
+const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
+const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 pub struct Brick {
-    pub position: Vector2<f32>,
-    pub size: Vector2<f32>,
-    pub velocity: Vector2<f32>,
-    pub particle_radius: f32,
-    pub particle_spacing: f32,
-    pub particle_mass: f32,
+    pub position: Vector2<f64>,
+    pub size: Vector2<f64>,
+    pub velocity: Vector2<f64>,
+    pub particle_radius: f64,
+    pub particle_spacing: f64,
+    pub particle_mass: f64,
 }
 
 impl Brick {
     #[must_use]
-    pub fn new(position: Vector2<f32>, size: Vector2<f32>) -> Self {
+    pub fn new(position: Vector2<f64>, size: Vector2<f64>) -> Self {
         Self {
             position,
             size,
@@ -43,14 +43,14 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick, color_source: 
     for i in 0..dims.x {
         for j in 0..dims.y {
             let p = |position, index| {
-                position + (index + 1) as f32 * (brick.particle_radius * 2.0 + brick.particle_spacing)
+                position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
             let color = match color_source {
                 ColorSource::Demo => {
                     let selection_factor = (position.x - brick.position.x) / brick.size.x;
                     let hue = 300.0 * selection_factor;
-                    let hsl = [hue, 100.0, 50.0];
+                    let hsl = [hue as f32, 100.0, 50.0];
                     let rgb = Hsl::convert::<Srgb>(hsl);
                     Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
                 }
@@ -71,18 +71,18 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick, color_source: 
 }
 
 pub struct Ball {
-    pub position: Vector2<f32>,
-    pub radius: f32,
-    pub acceleration: Vector2<f32>,
-    pub velocity: Vector2<f32>,
-    pub particle_radius: f32,
-    pub particle_spacing: f32,
-    pub particle_mass: f32,
+    pub position: Vector2<f64>,
+    pub radius: f64,
+    pub acceleration: Vector2<f64>,
+    pub velocity: Vector2<f64>,
+    pub particle_radius: f64,
+    pub particle_spacing: f64,
+    pub particle_mass: f64,
 }
 
 impl Ball {
     #[must_use]
-    pub fn new(position: Vector2<f32>, radius: f32) -> Self {
+    pub fn new(position: Vector2<f64>, radius: f64) -> Self {
         Self {
             position,
             radius,
@@ -100,15 +100,15 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball, color_source: Col
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
         for j in 0..num_particles {
-            let x = -ball.radius + (i as f32) * (ball.particle_radius * 2.0 + ball.particle_spacing);
-            let y = -ball.radius + (j as f32) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let x = -ball.radius + (i as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let y = -ball.radius + (j as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
                 let color = match color_source {
                     ColorSource::Demo => {
                         let hue = 300.0 * (position - ball.position).magnitude() / ball.radius;
-                        let hsl = [hue, 100.0, 50.0];
+                        let hsl = [hue as f32, 100.0, 50.0];
                         let rgb = Hsl::convert::<Srgb>(hsl);
                         Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
                     }

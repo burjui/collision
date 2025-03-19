@@ -14,7 +14,7 @@ pub fn create_demo(physics: &mut PhysicsEngine, config: &AppConfig) {
             velocity: Vector2::new(-700.0, 0.0),
             radius: config.demo.object_radius,
             mass: 10000.0,
-            color: Some(css::MAGENTA),
+            // color: Some(css::MAGENTA),
             is_planet: true,
             ..ObjectPrototype::new(Vector2::new(700.0, 500.0))
         });
@@ -23,7 +23,7 @@ pub fn create_demo(physics: &mut PhysicsEngine, config: &AppConfig) {
             velocity: Vector2::new(700.0, 0.0),
             radius: config.demo.object_radius,
             mass: 10000.0,
-            color: Some(css::YELLOW),
+            // color: Some(css::YELLOW),
             is_planet: true,
             ..ObjectPrototype::new(Vector2::new(700.0, 600.0))
         });

@@ -170,7 +170,7 @@ where
     }
 }
 
-impl Sum for Vector2<f32> {
+impl Sum for Vector2<f64> {
     fn sum<I>(iter: I) -> Self
     where
         I: Iterator<Item = Self>,
@@ -179,13 +179,13 @@ impl Sum for Vector2<f32> {
     }
 }
 
-impl From<(f32, f32)> for Vector2<f32> {
-    fn from(tuple: (f32, f32)) -> Self {
+impl From<(f64, f64)> for Vector2<f64> {
+    fn from(tuple: (f64, f64)) -> Self {
         Self { x: tuple.0, y: tuple.1 }
     }
 }
 
-impl fmt::Debug for Vector2<f32> {
+impl fmt::Debug for Vector2<f64> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.x, self.y)
     }

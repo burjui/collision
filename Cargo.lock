@@ -386,7 +386,6 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "itertools 0.14.0",
- "libc",
  "num-traits",
  "opencl3",
  "pollster",

@@ -1,9 +1,9 @@
-use core::f32;
-use std::{iter::zip, num::NonZero, path::Path, process::exit, sync::Arc, time::Instant};
+use core::f64;
+use std::{iter::zip, num::NonZero, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{anyhow, Context, Ok};
 use collision::{
-    app_config::AppConfig,
+    app_config::{AppConfig, TimeLimitAction},
     fps::FpsCalculator,
     physics::{DurationStat, PhysicsEngine},
     simple_text::SimpleText,
@@ -11,7 +11,6 @@ use collision::{
 };
 use demo::create_demo;
 use itertools::Itertools;
-use libc::EXIT_SUCCESS;
 use vello::{
     kurbo::{Affine, Circle, Line, Rect, Stroke},
     peniko::{color::palette::css, Color, Fill},
@@ -62,12 +61,14 @@ pub fn main() -> anyhow::Result<()> {
         draw_ids: false,
         text: SimpleText::new(),
         last_redraw: Instant::now(),
+        time_limit_action_executed: false,
+        jerk_applied: false,
     };
 
     event_loop.run_app(&mut app).expect("run to completion");
 
     let mut stats_buffer = String::new();
-    print_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics).unwrap();
+    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics).unwrap();
     print!("{}", stats_buffer);
 
     Ok(())
@@ -104,12 +105,14 @@ struct VelloApp<'s> {
     min_fps: usize,
     physics: PhysicsEngine,
     advance_time: bool,
-    mouse_position: Vector2<f32>,
-    mouse_influence_radius: f32,
+    mouse_position: Vector2<f64>,
+    mouse_influence_radius: f64,
     draw_grid: bool,
     draw_ids: bool,
     text: SimpleText,
     last_redraw: Instant,
+    time_limit_action_executed: bool,
+    jerk_applied: bool,
 }
 
 impl ApplicationHandler<()> for VelloApp<'_> {
@@ -189,7 +192,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     self.min_fps = self.min_fps.min(self.last_fps);
 
                     let now = Instant::now();
-                    if (now - self.last_redraw).as_secs_f32() > 1.0 / 60.0 {
+                    if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
                         self.last_redraw = now;
                         self.scene.reset();
                         draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
@@ -218,7 +221,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_position = Vector2::new(position.x as f32, position.y as f32);
+                self.mouse_position = Vector2::new(position.x as f64, position.y as f64);
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
@@ -237,24 +240,45 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 delta: MouseScrollDelta::LineDelta(_, dy),
                 ..
             } => {
-                self.mouse_influence_radius = (self.mouse_influence_radius + dy * 3.0).max(0.0);
+                self.mouse_influence_radius = (self.mouse_influence_radius + dy as f64 * 3.0).max(0.0);
             }
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self
             .config
             .simulation
             .time_limit
             .is_some_and(|limit| self.physics.time() > limit)
+            && !self.time_limit_action_executed
         {
-            exit(EXIT_SUCCESS);
+            self.time_limit_action_executed = true;
+            match self
+                .config
+                .simulation
+                .time_limit_action
+                .unwrap_or(TimeLimitAction::Exit)
+            {
+                TimeLimitAction::Exit => event_loop.exit(),
+                TimeLimitAction::Pause => self.advance_time = false,
+            }
         }
 
         if self.advance_time {
             self.physics.advance(self.config.simulation.speed_factor);
+            if self
+                .config
+                .simulation
+                .jerk_at
+                .is_some_and(|jerk_at| self.physics.time() >= jerk_at)
+                && !self.jerk_applied
+            {
+                self.jerk_applied = true;
+                let first_non_planet = self.physics.planet_count();
+                self.physics.objects_mut().velocities[first_non_planet] += Vector2::new(1000.0, 1000.0);
+            }
         }
 
         if let Some(render_state) = &mut self.state {
@@ -300,10 +324,10 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
                                 Fill::NonZero,
                                 transform,
                                 objects.colors[object_index].unwrap_or_else(|| {
-                                    const SCALE_FACTOR: f32 = 0.0004;
+                                    const SCALE_FACTOR: f64 = 0.0004;
                                     let velocity = objects.velocities[object_index];
                                     let spectrum_position =
-                                        (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0);
+                                        (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
                                     spectrum(spectrum_position)
                                 }),
                                 None,
@@ -361,7 +385,7 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
     );
 }
 
-fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse_influence_radius: f32) {
+fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_influence_radius: f64) {
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
@@ -371,7 +395,7 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse_i
     );
 }
 
-fn draw_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f32>, cell_size: f32) {
+fn draw_grid(scene: &mut Scene, topleft: Vector2<f64>, bottomright: Vector2<f64>, cell_size: f64) {
     for i in 0..((bottomright.x - topleft.x) / cell_size) as usize + 1 {
         scene.stroke(
             &Stroke::default(),
@@ -379,8 +403,8 @@ fn draw_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f32>
             css::LIGHT_GRAY,
             None,
             &Line::new(
-                (topleft.x + i as f32 * cell_size, topleft.y),
-                (topleft.x + i as f32 * cell_size, bottomright.y),
+                (topleft.x + i as f64 * cell_size, topleft.y),
+                (topleft.x + i as f64 * cell_size, bottomright.y),
             ),
         );
     }
@@ -391,8 +415,8 @@ fn draw_grid(scene: &mut Scene, topleft: Vector2<f32>, bottomright: Vector2<f32>
             css::LIGHT_GRAY,
             None,
             &Line::new(
-                (topleft.x, topleft.y + j as f32 * cell_size),
-                (bottomright.x, topleft.y + j as f32 * cell_size),
+                (topleft.x, topleft.y + j as f64 * cell_size),
+                (bottomright.x, topleft.y + j as f64 * cell_size),
             ),
         )
     }
@@ -407,7 +431,7 @@ fn draw_stats(
     physics: &PhysicsEngine,
 ) -> anyhow::Result<()> {
     let buffer = &mut String::new();
-    print_stats(buffer, (fps, min_fps), physics)?;
+    write_stats(buffer, (fps, min_fps), physics)?;
 
     const TEXT_SIZE: f32 = 16.0;
     text.add(
@@ -421,21 +445,20 @@ fn draw_stats(
     Ok(())
 }
 
-fn print_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &PhysicsEngine) -> anyhow::Result<()> {
+fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &PhysicsEngine) -> anyhow::Result<()> {
     writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps).unwrap();
     writeln!(buffer, "sim time: {}", physics.time()).unwrap();
     writeln!(buffer, "objects: {}", physics.objects().len()).unwrap();
     let stats = physics.stats();
-    print_duration_stat(buffer, "updates", &stats.updates_duration);
-    print_duration_stat(buffer, "grid", &stats.grid_duration);
-    print_duration_stat(buffer, "collisions", &stats.collisions_duration);
-    print_duration_stat(buffer, "constraints", &stats.constraints_duration);
-    print_duration_stat(buffer, "total", &stats.total_duration);
-    print!("{}", buffer);
+    write_duration_stat(buffer, "updates", &stats.updates_duration);
+    write_duration_stat(buffer, "grid", &stats.grid_duration);
+    write_duration_stat(buffer, "collisions", &stats.collisions_duration);
+    write_duration_stat(buffer, "constraints", &stats.constraints_duration);
+    write_duration_stat(buffer, "total", &stats.total_duration);
     Ok(())
 }
 
-fn print_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) {
+fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) {
     writeln!(
         buffer,
         "{}: {:?} (min {:?}, max {:?})",
