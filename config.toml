@@ -4,7 +4,7 @@ height = 800
 
 [simulation]
 enable_gpu = false
-speed_factor = 0.1
+speed_factor = 1
 restitution_coefficient = 0.997
 gravity = [0, 0]
 # time_limit = 20
