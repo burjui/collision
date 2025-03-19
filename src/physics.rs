@@ -126,8 +126,7 @@ impl PhysicsEngine {
             let current_velocity = max_velocity_squared.sqrt();
             current_velocity * 2.0 / min_object_size
         };
-        let future_velocity = self.global_gravity.magnitude();
-        let gravity_factor = future_velocity * 8.0 / min_object_size;
+        let gravity_factor = self.global_gravity.magnitude().sqrt() * 80.0 / min_object_size.sqrt();
         let dt = speed_factor / 2.0 * (1.0 / velocity_factor.max(gravity_factor).max(1.0));
         self.time += dt;
         self.update(dt);
@@ -341,12 +340,12 @@ impl PhysicsEngine {
                     (0, 0), // goes first because objectls in the same cell are closest
                     (-1, 0),
                     (1, 0),
-                    (-1, -1),
                     (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (1, 1),
                     (1, -1),
                     (-1, 1),
-                    (0, 1),
-                    (1, 1),
                 ];
                 for (ox, oy) in AREA_CELL_OFFSETS {
                     let x = x.wrapping_add_signed(ox);

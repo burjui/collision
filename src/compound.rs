@@ -4,7 +4,6 @@ use vello::peniko::{
 };
 
 use crate::{
-    app_config::ColorSource,
     physics::{object::ObjectPrototype, PhysicsEngine},
     vector2::Vector2,
 };
@@ -36,7 +35,7 @@ impl Brick {
     }
 }
 
-pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick, color_source: ColorSource) -> Vec<usize> {
+pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> {
     let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -46,17 +45,13 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick, color_source: 
                 position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
-            let color = match color_source {
-                ColorSource::Demo => {
-                    let selection_factor = (position.x - brick.position.x) / brick.size.x;
-                    let hue = 300.0 * selection_factor;
-                    let hsl = [hue as f32, 100.0, 50.0];
-                    let rgb = Hsl::convert::<Srgb>(hsl);
-                    Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
-                }
-                ColorSource::Velocity => None,
+            let color = {
+                let selection_factor = (position.x - brick.position.x) / brick.size.x;
+                let hue = 300.0 * selection_factor;
+                let hsl = [hue as f32, 100.0, 50.0];
+                let rgb = Hsl::convert::<Srgb>(hsl);
+                Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
             };
-
             let id = physics.add(ObjectPrototype {
                 velocity: brick.velocity,
                 radius: brick.particle_radius,
@@ -95,7 +90,7 @@ impl Ball {
     }
 }
 
-pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball, color_source: ColorSource) -> Vec<usize> {
+pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
@@ -105,14 +100,11 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball, color_source: Col
             let position = Vector2::new(x, y);
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
-                let color = match color_source {
-                    ColorSource::Demo => {
-                        let hue = 300.0 * (position - ball.position).magnitude() / ball.radius;
-                        let hsl = [hue as f32, 100.0, 50.0];
-                        let rgb = Hsl::convert::<Srgb>(hsl);
-                        Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
-                    }
-                    ColorSource::Velocity => None,
+                let color = {
+                    let hue = 300.0 * (position - ball.position).magnitude() / ball.radius;
+                    let hsl = [hue as f32, 100.0, 50.0];
+                    let rgb = Hsl::convert::<Srgb>(hsl);
+                    Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
                 };
                 let mut object = ObjectPrototype {
                     acceleration: ball.acceleration,

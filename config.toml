@@ -4,15 +4,15 @@ height = 800
 
 [simulation]
 speed_factor = 1
-restitution_coefficient = 0.997
-gravity = [0.0, 0.0]
-time_limit = 2
+restitution_coefficient = 0.998
+gravity = [0, 1000]
+# time_limit = 2
 time_limit_action = "pause"
-# jerk_at = 0.5
+# jerk_at = 0.83
 
 [demo]
-object_radius = 2.5
-enable_planets = true
+object_radius = 2
+# enable_planets = true
 enable_brick = true
 # enable_ball = true
 

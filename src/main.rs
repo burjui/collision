@@ -3,7 +3,7 @@ use std::{iter::zip, num::NonZero, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{anyhow, Context, Ok};
 use collision::{
-    app_config::{AppConfig, TimeLimitAction},
+    app_config::{AppConfig, ColorSource, TimeLimitAction},
     fps::FpsCalculator,
     physics::{DurationStat, PhysicsEngine},
     simple_text::SimpleText,
@@ -176,11 +176,25 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
-                        Key::Named(NamedKey::Space) => self.advance_time = !self.advance_time,
                         Key::Named(NamedKey::Escape) => event_loop.exit(),
+                        Key::Named(NamedKey::Space) => self.advance_time = !self.advance_time,
                         Key::Character("a") => self.physics.enable_gpu = !self.physics.enable_gpu,
-                        Key::Character("g") => self.draw_grid = !self.draw_grid,
-                        Key::Character("i") => self.draw_ids = !self.draw_ids,
+                        Key::Character("g") => {
+                            self.draw_grid = !self.draw_grid;
+                            request_redraw(&self.state);
+                        }
+                        Key::Character("i") => {
+                            self.draw_ids = !self.draw_ids;
+                            request_redraw(&self.state);
+                        }
+                        Key::Character("v") => {
+                            self.config.rendering.color_source =
+                                Some(match self.config.rendering.color_source.unwrap_or_default() {
+                                    ColorSource::Demo => ColorSource::Velocity,
+                                    ColorSource::Velocity => ColorSource::Demo,
+                                });
+                            request_redraw(&self.state);
+                        }
                         _ => {}
                     }
                 }
@@ -200,7 +214,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
                         self.last_redraw = now;
                         self.scene.reset();
-                        draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
+                        draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids), &self.config);
                         draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                         if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
                             draw_grid(
@@ -227,9 +241,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Vector2::new(position.x as f64, position.y as f64);
-                if let Some(render_state) = &mut self.state {
-                    render_state.window.request_redraw();
-                }
+                request_redraw(&self.state);
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
@@ -241,9 +253,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                                 *velocity += from_mouse_to_object.normalize() * 2000.0;
                             }
                         }
-                        if let Some(render_state) = &mut self.state {
-                            render_state.window.request_redraw();
-                        }
+                        request_redraw(&self.state);
                     }
                 }
             }
@@ -252,9 +262,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 ..
             } => {
                 self.mouse_influence_radius = (self.mouse_influence_radius + dy as f64 * 3.0).max(0.0);
-                if let Some(render_state) = &mut self.state {
-                    render_state.window.request_redraw();
-                }
+                request_redraw(&self.state);
             }
             _ => {}
         }
@@ -305,9 +313,15 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 }
 
+fn request_redraw(render_state: &Option<RenderState<'_>>) {
+    if let Some(render_state) = render_state {
+        render_state.window.request_redraw();
+    }
+}
+
 struct DrawIds(bool);
 
-fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds) {
+fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds, config: &AppConfig) {
     let transform = Affine::IDENTITY;
     let objects = physics.objects();
     let chunk_size = physics.objects().len() / 20;
@@ -331,16 +345,20 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
                         if !objects.is_planet[object_index] {
                             let particle_position = objects.positions[object_index];
                             let particle_radius = objects.radii[object_index];
-                            scene.fill(
-                                Fill::NonZero,
-                                transform,
-                                objects.colors[object_index].unwrap_or_else(|| {
+                            let color = match config.rendering.color_source.unwrap_or_default() {
+                                ColorSource::Demo => objects.colors[object_index],
+                                ColorSource::Velocity => {
                                     const SCALE_FACTOR: f64 = 0.0004;
                                     let velocity = objects.velocities[object_index];
                                     let spectrum_position =
                                         (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
-                                    spectrum(spectrum_position)
-                                }),
+                                    Some(spectrum(spectrum_position))
+                                }
+                            };
+                            scene.fill(
+                                Fill::NonZero,
+                                transform,
+                                color.unwrap_or(css::GRAY),
                                 None,
                                 &Circle::new((particle_position.x, particle_position.y), particle_radius.into()),
                             );
