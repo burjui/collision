@@ -177,8 +177,14 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
                         Key::Named(NamedKey::Escape) => event_loop.exit(),
-                        Key::Named(NamedKey::Space) => self.advance_time = !self.advance_time,
-                        Key::Character("a") => self.physics.enable_gpu = !self.physics.enable_gpu,
+                        Key::Named(NamedKey::Space) => {
+                            self.advance_time = !self.advance_time;
+                            request_redraw(&self.state);
+                        }
+                        Key::Character("a") => {
+                            self.physics.enable_gpu = !self.physics.enable_gpu;
+                            request_redraw(&self.state);
+                        }
                         Key::Character("g") => {
                             self.draw_grid = !self.draw_grid;
                             request_redraw(&self.state);
@@ -279,7 +285,10 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             self.time_limit_action_executed = true;
             match self.config.simulation.time_limit_action.unwrap_or_default() {
                 TimeLimitAction::Exit => event_loop.exit(),
-                TimeLimitAction::Pause => self.advance_time = false,
+                TimeLimitAction::Pause => {
+                    self.advance_time = false;
+                    request_redraw(&self.state);
+                }
             }
         }
 
@@ -296,12 +305,11 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 let first_non_planet = self.physics.planet_count();
                 self.physics.objects_mut().velocities[first_non_planet] += Vector2::new(1000.0, 1000.0);
             }
+            request_redraw(&self.state);
         }
-
-        if let Some(render_state) = &mut self.state {
-            if self.advance_time {
-                render_state.window.request_redraw();
-            }
+        let now = Instant::now();
+        if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
+            request_redraw(&self.state);
         }
     }
 
@@ -488,6 +496,11 @@ fn write_stats(
         write!(buffer, " ({action} at {time_limit})")?;
     }
     writeln!(buffer)?;
+    writeln!(
+        buffer,
+        "gpu compute: {}",
+        if physics.enable_gpu { "enabled" } else { "disabled" }
+    )?;
     writeln!(buffer, "objects: {}", physics.objects().len())?;
     let stats = physics.stats();
     write_duration_stat(buffer, "updates", &stats.updates_duration)?;

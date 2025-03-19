@@ -1,10 +1,10 @@
-#define C1 0.6756036
-#define C2 -0.17560363
-#define C3 -0.17560363
-#define C4 0.6756036
-#define D1 1.3512073
-#define D2 -1.7024145
-#define D3 1.3512073
+#define C1 0.675603595979829
+#define C2 -0.1756035959798291
+#define C3 -0.1756035959798291
+#define C4 0.675603595979829
+#define D1 1.351207191959658
+#define D2 -1.7024143839193162
+#define D3 1.351207191959658
 
 double2 gravity_acceleration(size_t object_index, const double2 position,
                              global const double2 *positions,

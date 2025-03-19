@@ -318,7 +318,7 @@ impl PhysicsEngine {
     }
 
     fn gravity_acceleration(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
-        let mut gravity = Vector2::default();
+        let mut gravity = self.global_gravity;
         for planet_index in 0..self.objects.planet_count {
             if planet_index != object_index {
                 let to_planet = self.objects.positions[planet_index] - position;
