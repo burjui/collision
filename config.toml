@@ -5,17 +5,17 @@ height = 800
 [simulation]
 enable_gpu = false
 speed_factor = 1
-restitution_coefficient = 0.999
-gravity = [0, 0]
-# time_limit = 2
-time_limit_action = "pause"
-# jerk_at = 1.87
+restitution_coefficient = 0.997
+gravity = [0, 1000]
+time_limit = 2.5
+time_limit_action = "exit"
+jerk_at = 1.87
 
 [demo]
 object_radius = 2
 # enable_planets = true
 enable_brick = true
-enable_ball = true
+# enable_ball = true
 
 [rendering]
 color_source = "velocity"
