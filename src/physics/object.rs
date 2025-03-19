@@ -115,3 +115,12 @@ pub struct ObjectUpdate {
     pub position: Vector2<f64>,
     pub velocity: Vector2<f64>,
 }
+
+impl Default for ObjectUpdate {
+    fn default() -> Self {
+        Self {
+            position: Vector2::default(),
+            velocity: Vector2::default(),
+        }
+    }
+}

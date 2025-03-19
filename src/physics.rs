@@ -53,7 +53,7 @@ impl PhysicsEngine {
             Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
         Ok(Self {
             enable_constraint_bouncing: true,
-            enable_gpu: true,
+            enable_gpu: false,
             objects: ObjectSoa::default(),
             grid: Grid::default(),
             time: 0.0,
@@ -168,16 +168,22 @@ impl PhysicsEngine {
         if self.enable_gpu {
             self.update_objects_leapfrog_yoshida_gpu(dt);
         } else {
-            for object_index in 0..self.objects.len() {
-                let update = self.update_object_leapfrog_yoshida(
-                    object_index,
-                    self.objects.positions[object_index],
-                    self.objects.velocities[object_index],
-                    dt,
-                );
-                self.objects.positions[object_index] = update.position;
-                self.objects.velocities[object_index] = update.velocity;
-            }
+            self.update_object_leapfrog_yoshida_cpu(dt)
+        }
+    }
+
+    fn update_object_leapfrog_yoshida_cpu(&mut self, dt: f64) {
+        for object_index in 0..self.objects.positions.len() {
+            let update = Self::update_object_leapfrog_yoshida(
+                object_index,
+                &self.objects.positions,
+                self.objects.velocities[object_index],
+                dt,
+                self.global_gravity,
+                &self.objects.masses[..self.objects.planet_count],
+            );
+            self.objects.positions[object_index] = update.position;
+            self.objects.velocities[object_index] = update.velocity;
         }
     }
 
@@ -293,23 +299,24 @@ impl PhysicsEngine {
     }
 
     fn update_object_leapfrog_yoshida(
-        &self,
         object_index: usize,
-        position: Vector2<f64>,
+        positions: &[Vector2<f64>],
         velocity: Vector2<f64>,
         dt: f64,
+        global_gravity: Vector2<f64>,
+        planet_masses: &[f64],
     ) -> ObjectUpdate {
         use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
-        let x0 = position;
+        let x0 = positions[object_index];
         let v0 = velocity;
         let x1 = x0 + v0 * (C1 * dt);
-        let a1 = self.gravity_acceleration(object_index, x1);
+        let a1 = Self::gravity_acceleration(object_index, x1, positions, global_gravity, planet_masses);
         let v1 = v0 + a1 * (D1 * dt);
         let x2 = x0 + v1 * (C2 * dt);
-        let a2 = self.gravity_acceleration(object_index, x2);
+        let a2 = Self::gravity_acceleration(object_index, x2, positions, global_gravity, planet_masses);
         let v2 = v0 + a2 * (D2 * dt);
         let x3 = x0 + v2 * (C3 * dt);
-        let a3 = self.gravity_acceleration(object_index, x3);
+        let a3 = Self::gravity_acceleration(object_index, x3, positions, global_gravity, planet_masses);
         let v3 = v0 + a3 * (D3 * dt);
         ObjectUpdate {
             position: x0 + v3 * (C4 * dt),
@@ -317,14 +324,20 @@ impl PhysicsEngine {
         }
     }
 
-    fn gravity_acceleration(&self, object_index: usize, position: Vector2<f64>) -> Vector2<f64> {
-        let mut gravity = self.global_gravity;
-        for planet_index in 0..self.objects.planet_count {
+    fn gravity_acceleration(
+        object_index: usize,
+        position: Vector2<f64>,
+        positions: &[Vector2<f64>],
+        global_gravity: Vector2<f64>,
+        planet_masses: &[f64],
+    ) -> Vector2<f64> {
+        let mut gravity = global_gravity;
+        for planet_index in 0..planet_masses.len() {
             if planet_index != object_index {
-                let to_planet = self.objects.positions[planet_index] - position;
+                let to_planet = positions[planet_index] - position;
                 let direction = to_planet.normalize();
                 gravity += direction
-                    * (Self::GRAVITATIONAL_CONSTANT * self.objects.masses[planet_index]
+                    * (Self::GRAVITATIONAL_CONSTANT * planet_masses[planet_index]
                         / to_planet.magnitude_squared().max(f64::EPSILON));
             }
         }
