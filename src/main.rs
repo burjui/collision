@@ -68,7 +68,12 @@ pub fn main() -> anyhow::Result<()> {
     event_loop.run_app(&mut app).expect("run to completion");
 
     let mut stats_buffer = String::new();
-    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics).unwrap();
+    write_stats(
+        &mut stats_buffer,
+        (app.last_fps, app.min_fps),
+        &app.physics,
+        &app.config,
+    )?;
     print!("{}", stats_buffer);
 
     Ok(())
@@ -205,12 +210,12 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                                 self.physics.grid().cell_size(),
                             );
                         }
-
                         draw_stats(
                             &mut self.scene,
                             &mut self.text,
                             (self.last_fps, self.min_fps),
                             &self.physics,
+                            &self.config,
                         )
                         .expect("failed to draw stats");
                         let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
@@ -222,6 +227,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Vector2::new(position.x as f64, position.y as f64);
+                if let Some(render_state) = &mut self.state {
+                    render_state.window.request_redraw();
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
@@ -232,6 +240,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                             if (from_mouse_to_object).magnitude() < self.mouse_influence_radius {
                                 *velocity += from_mouse_to_object.normalize() * 2000.0;
                             }
+                        }
+                        if let Some(render_state) = &mut self.state {
+                            render_state.window.request_redraw();
                         }
                     }
                 }
@@ -255,12 +266,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             && !self.time_limit_action_executed
         {
             self.time_limit_action_executed = true;
-            match self
-                .config
-                .simulation
-                .time_limit_action
-                .unwrap_or(TimeLimitAction::Exit)
-            {
+            match self.config.simulation.time_limit_action.unwrap_or_default() {
                 TimeLimitAction::Exit => event_loop.exit(),
                 TimeLimitAction::Pause => self.advance_time = false,
             }
@@ -282,7 +288,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
         }
 
         if let Some(render_state) = &mut self.state {
-            render_state.window.request_redraw();
+            if self.advance_time {
+                render_state.window.request_redraw();
+            }
         }
     }
 
@@ -429,9 +437,10 @@ fn draw_stats(
     text: &mut SimpleText,
     (fps, min_fps): (usize, usize),
     physics: &PhysicsEngine,
+    config: &AppConfig,
 ) -> anyhow::Result<()> {
     let buffer = &mut String::new();
-    write_stats(buffer, (fps, min_fps), physics)?;
+    write_stats(buffer, (fps, min_fps), physics, config)?;
 
     const TEXT_SIZE: f32 = 16.0;
     text.add(
@@ -445,26 +454,36 @@ fn draw_stats(
     Ok(())
 }
 
-fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &PhysicsEngine) -> anyhow::Result<()> {
-    writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps).unwrap();
-    writeln!(buffer, "sim time: {}", physics.time()).unwrap();
-    writeln!(buffer, "objects: {}", physics.objects().len()).unwrap();
+fn write_stats(
+    buffer: &mut String,
+    (fps, min_fps): (usize, usize),
+    physics: &PhysicsEngine,
+    config: &AppConfig,
+) -> anyhow::Result<()> {
+    writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps)?;
+    write!(buffer, "sim time: {}", physics.time())?;
+    if let Some(time_limit) = config.simulation.time_limit {
+        let action = config.simulation.time_limit_action.unwrap_or_default().to_string();
+        write!(buffer, " ({action} at {time_limit})")?;
+    }
+    writeln!(buffer)?;
+    writeln!(buffer, "objects: {}", physics.objects().len())?;
     let stats = physics.stats();
-    write_duration_stat(buffer, "updates", &stats.updates_duration);
-    write_duration_stat(buffer, "grid", &stats.grid_duration);
-    write_duration_stat(buffer, "collisions", &stats.collisions_duration);
-    write_duration_stat(buffer, "constraints", &stats.constraints_duration);
-    write_duration_stat(buffer, "total", &stats.total_duration);
+    write_duration_stat(buffer, "updates", &stats.updates_duration)?;
+    write_duration_stat(buffer, "grid", &stats.grid_duration)?;
+    write_duration_stat(buffer, "collisions", &stats.collisions_duration)?;
+    write_duration_stat(buffer, "constraints", &stats.constraints_duration)?;
+    write_duration_stat(buffer, "total", &stats.total_duration)?;
     Ok(())
 }
 
-fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) {
+fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) -> anyhow::Result<()> {
     writeln!(
         buffer,
         "{}: {:?} (min {:?}, max {:?})",
         name, stat.current, stat.lowest, stat.highest
-    )
-    .unwrap();
+    )?;
+    Ok(())
 }
 
 fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer, device_handle: &DeviceHandle) {

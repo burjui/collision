@@ -36,7 +36,7 @@ pub fn create_demo(physics: &mut PhysicsEngine, config: &AppConfig) {
             particle_mass: 0.01,
             ..Brick::new(Vector2::new(400.0, 100.0), Vector2::new(600.0, 300.0))
         };
-        generate_brick(physics, &brick, config.rendering.color_source);
+        generate_brick(physics, &brick, config.rendering.color_source.unwrap_or_default());
     }
 
     if config.demo.enable_ball {
@@ -46,6 +46,6 @@ pub fn create_demo(physics: &mut PhysicsEngine, config: &AppConfig) {
             particle_mass: 0.01,
             ..Ball::new(Vector2::new(400.0, 600.0), 100.0)
         };
-        generate_ball(physics, &ball, config.rendering.color_source);
+        generate_ball(physics, &ball, config.rendering.color_source.unwrap_or_default());
     }
 }

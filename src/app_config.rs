@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{fmt::Display, fs::File, io::Read, path::Path};
 
 use anyhow::{anyhow, Context};
 use serde_derive::Deserialize;
@@ -83,13 +83,23 @@ pub struct SimulationConfig {
     pub jerk_at: Option<f64>,
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, Default)]
 pub enum TimeLimitAction {
+    #[default]
     #[serde(rename = "exit")]
     Exit,
 
     #[serde(rename = "pause")]
     Pause,
+}
+
+impl Display for TimeLimitAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeLimitAction::Exit => f.write_str("exit"),
+            TimeLimitAction::Pause => f.write_str("pause"),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -110,11 +120,12 @@ pub struct DemoConfig {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct RenderConfig {
-    pub color_source: ColorSource,
+    pub color_source: Option<ColorSource>,
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, Default)]
 pub enum ColorSource {
+    #[default]
     #[serde(rename = "demo")]
     Demo,
 
