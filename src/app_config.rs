@@ -1,7 +1,24 @@
-use std::{fmt::Display, fs::File, io::Read, path::Path};
+use std::{fmt::Display, fs::File, io::Read, path::Path, sync::LazyLock};
 
 use anyhow::{anyhow, Context};
 use serde_derive::Deserialize;
+
+static mut APP_CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
+    AppConfig::from_file(Path::new("config.toml"))
+        .context("load config")
+        .unwrap()
+});
+
+#[allow(static_mut_refs)]
+pub fn config() -> &'static AppConfig {
+    unsafe { &APP_CONFIG }
+}
+
+// TODO copy mutable parameters from config instead
+#[allow(static_mut_refs)]
+pub fn config_mut() -> &'static mut AppConfig {
+    LazyLock::get_mut(unsafe { &mut APP_CONFIG }).unwrap()
+}
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +30,7 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn from_file(config_path: &Path) -> anyhow::Result<AppConfig> {
+    fn from_file(config_path: &Path) -> anyhow::Result<AppConfig> {
         let mut config_file =
             File::open(config_path).context(format!("open config \"{}\"", config_path.to_string_lossy()))?;
         let mut config_string = String::new();
@@ -75,6 +92,7 @@ pub struct WindowConfig {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct SimulationConfig {
+    pub enable_gpu: bool,
     pub speed_factor: f64,
     pub restitution_coefficient: f64,
     pub gravity: (f64, f64),

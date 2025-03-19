@@ -4,6 +4,7 @@
 #![feature(array_windows)]
 #![feature(more_float_constants)]
 #![allow(clippy::too_many_arguments)]
+#![feature(lazy_get)]
 
 pub mod app_config;
 pub mod array2;

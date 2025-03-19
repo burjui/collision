@@ -1,14 +1,15 @@
 #![allow(unused)]
 
 use collision::{
-    app_config::AppConfig,
+    app_config::{self, config, AppConfig},
     compound::{generate_ball, generate_brick, Ball, Brick},
     physics::{object::ObjectPrototype, PhysicsEngine},
     vector2::Vector2,
 };
 use vello::peniko::color::palette::css;
 
-pub fn create_demo(physics: &mut PhysicsEngine, config: &AppConfig) {
+pub fn create_demo(physics: &mut PhysicsEngine) {
+    let config = config();
     if config.demo.enable_planets {
         physics.add(ObjectPrototype {
             velocity: Vector2::new(-700.0, 0.0),

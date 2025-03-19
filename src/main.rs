@@ -1,9 +1,9 @@
 use core::f64;
-use std::{iter::zip, num::NonZero, path::Path, sync::Arc, time::Instant};
+use std::{iter::zip, num::NonZero, sync::Arc, time::Instant};
 
-use anyhow::{anyhow, Context, Ok};
+use anyhow::{anyhow, Ok};
 use collision::{
-    app_config::{AppConfig, ColorSource, TimeLimitAction},
+    app_config::{config, config_mut, ColorSource, TimeLimitAction},
     fps::FpsCalculator,
     physics::{DurationStat, PhysicsEngine},
     simple_text::SimpleText,
@@ -31,19 +31,15 @@ mod demo;
 
 pub fn main() -> anyhow::Result<()> {
     enable_floating_point_exceptions();
-
-    let config = AppConfig::from_file(Path::new("config.toml")).context("load config")?;
     let event_loop = EventLoop::new()?;
     let render_context = RenderContext::new();
     let renderers: Vec<Option<Renderer>> = vec![];
     let render_state = None::<RenderState<'_>>;
-
-    let mut physics = PhysicsEngine::new(&config)?;
-    create_demo(&mut physics, &config);
-
+    let config = config();
+    let mut physics = PhysicsEngine::new()?;
+    create_demo(&mut physics);
     let advance_time = config.simulation.time_limit.is_some();
     let mut app = VelloApp {
-        config,
         context: render_context,
         renderers,
         state: render_state,
@@ -68,12 +64,7 @@ pub fn main() -> anyhow::Result<()> {
     event_loop.run_app(&mut app).expect("run to completion");
 
     let mut stats_buffer = String::new();
-    write_stats(
-        &mut stats_buffer,
-        (app.last_fps, app.min_fps),
-        &app.physics,
-        &app.config,
-    )?;
+    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics)?;
     print!("{}", stats_buffer);
 
     Ok(())
@@ -96,7 +87,6 @@ struct RenderState<'s> {
 }
 
 struct VelloApp<'s> {
-    config: AppConfig,
     context: RenderContext,
     renderers: Vec<Option<Renderer>>,
     state: Option<RenderState<'s>>,
@@ -130,7 +120,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_inner_size(PhysicalSize::new(self.config.window.width, self.config.window.height))
+                            .with_inner_size(PhysicalSize::new(config().window.width, config().window.height))
                             .with_resizable(false)
                             .with_title(format!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))),
                     )
@@ -182,7 +172,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                             request_redraw(&self.state);
                         }
                         Key::Character("a") => {
-                            self.physics.enable_gpu = !self.physics.enable_gpu;
+                            config_mut().simulation.enable_gpu = !config().simulation.enable_gpu;
                             request_redraw(&self.state);
                         }
                         Key::Character("g") => {
@@ -194,8 +184,8 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                             request_redraw(&self.state);
                         }
                         Key::Character("v") => {
-                            self.config.rendering.color_source =
-                                Some(match self.config.rendering.color_source.unwrap_or_default() {
+                            config_mut().rendering.color_source =
+                                Some(match config().rendering.color_source.unwrap_or_default() {
                                     ColorSource::Demo => ColorSource::Velocity,
                                     ColorSource::Velocity => ColorSource::Demo,
                                 });
@@ -220,7 +210,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
                         self.last_redraw = now;
                         self.scene.reset();
-                        draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids), &self.config);
+                        draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
                         draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                         if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
                             draw_grid(
@@ -235,7 +225,6 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                             &mut self.text,
                             (self.last_fps, self.min_fps),
                             &self.physics,
-                            &self.config,
                         )
                         .expect("failed to draw stats");
                         let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
@@ -275,15 +264,15 @@ impl ApplicationHandler<()> for VelloApp<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self
-            .config
+        let config = config();
+        if config
             .simulation
             .time_limit
             .is_some_and(|limit| self.physics.time() > limit)
             && !self.time_limit_action_executed
         {
             self.time_limit_action_executed = true;
-            match self.config.simulation.time_limit_action.unwrap_or_default() {
+            match config.simulation.time_limit_action.unwrap_or_default() {
                 TimeLimitAction::Exit => event_loop.exit(),
                 TimeLimitAction::Pause => {
                     self.advance_time = false;
@@ -293,9 +282,8 @@ impl ApplicationHandler<()> for VelloApp<'_> {
         }
 
         if self.advance_time {
-            self.physics.advance(self.config.simulation.speed_factor);
-            if self
-                .config
+            self.physics.advance(config.simulation.speed_factor);
+            if config
                 .simulation
                 .jerk_at
                 .is_some_and(|jerk_at| self.physics.time() >= jerk_at)
@@ -329,7 +317,8 @@ fn request_redraw(render_state: &Option<RenderState<'_>>) {
 
 struct DrawIds(bool);
 
-fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds, config: &AppConfig) {
+fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): DrawIds) {
+    let config = config();
     let transform = Affine::IDENTITY;
     let objects = physics.objects();
     let chunk_size = physics.objects().len() / 20;
@@ -466,10 +455,9 @@ fn draw_stats(
     text: &mut SimpleText,
     (fps, min_fps): (usize, usize),
     physics: &PhysicsEngine,
-    config: &AppConfig,
 ) -> anyhow::Result<()> {
     let buffer = &mut String::new();
-    write_stats(buffer, (fps, min_fps), physics, config)?;
+    write_stats(buffer, (fps, min_fps), physics)?;
 
     const TEXT_SIZE: f32 = 16.0;
     text.add(
@@ -483,12 +471,8 @@ fn draw_stats(
     Ok(())
 }
 
-fn write_stats(
-    buffer: &mut String,
-    (fps, min_fps): (usize, usize),
-    physics: &PhysicsEngine,
-    config: &AppConfig,
-) -> anyhow::Result<()> {
+fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &PhysicsEngine) -> anyhow::Result<()> {
+    let config = config();
     writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps)?;
     write!(buffer, "sim time: {}", physics.time())?;
     if let Some(time_limit) = config.simulation.time_limit {
@@ -499,7 +483,11 @@ fn write_stats(
     writeln!(
         buffer,
         "gpu compute: {}",
-        if physics.enable_gpu { "enabled" } else { "disabled" }
+        if config.simulation.enable_gpu {
+            "enabled"
+        } else {
+            "disabled"
+        }
     )?;
     writeln!(buffer, "objects: {}", physics.objects().len())?;
     let stats = physics.stats();

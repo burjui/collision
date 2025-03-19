@@ -10,7 +10,7 @@ use object::{ObjectPrototype, ObjectSoa, ObjectUpdate};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
-    app_config::AppConfig,
+    app_config::config,
     fixed_vec::FixedVec,
     gpu::{Gpu, GpuBufferAccess, GpuDeviceBuffer},
     vector2::Vector2,
@@ -22,7 +22,6 @@ pub mod object;
 
 pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
-    pub enable_gpu: bool,
     objects: ObjectSoa,
     grid: Grid,
     time: f64,
@@ -41,7 +40,8 @@ pub struct PhysicsEngine {
 impl PhysicsEngine {
     const GRAVITATIONAL_CONSTANT: f64 = 10000.0;
 
-    pub fn new(config: &AppConfig) -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
+        let config = config();
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
             Vector2::new(config.window.width as f64, config.window.height as f64),
@@ -53,7 +53,6 @@ impl PhysicsEngine {
             Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
         Ok(Self {
             enable_constraint_bouncing: true,
-            enable_gpu: false,
             objects: ObjectSoa::default(),
             grid: Grid::default(),
             time: 0.0,
@@ -165,7 +164,7 @@ impl PhysicsEngine {
     }
 
     fn update_objects(&mut self, dt: f64) {
-        if self.enable_gpu {
+        if config().simulation.enable_gpu {
             self.update_objects_leapfrog_yoshida_gpu(dt);
         } else {
             self.update_object_leapfrog_yoshida_cpu(dt)
@@ -349,15 +348,15 @@ impl PhysicsEngine {
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
                 const AREA_CELL_OFFSETS: [(isize, isize); 9] = [
-                    (0, 0), // goes first because objectls in the same cell are closest
+                    (0, 0), // goes first because objects in the same cell are closest
                     (-1, 0),
                     (1, 0),
                     (0, -1),
                     (0, 1),
                     (-1, -1),
                     (1, 1),
-                    (1, -1),
                     (-1, 1),
+                    (1, -1),
                 ];
                 for (ox, oy) in AREA_CELL_OFFSETS {
                     let x = x.wrapping_add_signed(ox);
