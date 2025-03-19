@@ -203,8 +203,10 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(RenderState { surface, .. }) = &self.state {
-                    self.last_fps = self.fps_calculator.update(self.frame_count).unwrap_or(self.last_fps);
-                    self.min_fps = self.min_fps.min(self.last_fps);
+                    if let Some(fps) = self.fps_calculator.update(self.frame_count) {
+                        self.last_fps = fps;
+                        self.min_fps = self.min_fps.min(fps);
+                    }
 
                     let now = Instant::now();
                     if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
