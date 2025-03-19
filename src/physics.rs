@@ -10,7 +10,7 @@ use object::{ObjectPrototype, ObjectSoa, ObjectUpdate};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
-    app_config::config,
+    app_config::{config, DtSource},
     fixed_vec::FixedVec,
     gpu::{Gpu, GpuBufferAccess, GpuDeviceBuffer},
     vector2::Vector2,
@@ -101,32 +101,55 @@ impl PhysicsEngine {
 
     pub fn advance(&mut self, speed_factor: f64) {
         let start = Instant::now();
-
-        // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
-        let (max_velocity_squared, min_object_size) = zip(self.objects.velocities.iter(), self.objects.radii.iter())
-            .fold(
-                (0.0, f64::MAX),
-                |(mut max_velocity_squared, mut min_object_size), (velocity, radius)| {
-                    let velocity_squared = velocity.magnitude_squared();
-                    if velocity_squared > max_velocity_squared {
-                        max_velocity_squared = velocity_squared;
-                    }
-                    let object_size = radius * 2.0;
-                    if object_size < min_object_size {
-                        min_object_size = object_size;
-                    }
-                    (max_velocity_squared, min_object_size)
-                },
-            );
-        let velocity_factor = if min_object_size == f64::MAX {
-            1.0
-        } else {
-            // Two times velocity because objects can collide head on
-            let current_velocity = max_velocity_squared.sqrt();
-            current_velocity * 2.0 / min_object_size
+        let dt = match config().simulation.dt {
+            DtSource::Auto => {
+                // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
+                let (max_velocity_squared, min_object_size) =
+                    zip(self.objects.velocities.iter(), self.objects.radii.iter()).fold(
+                        (0.0, f64::MAX),
+                        |(mut max_velocity_squared, mut min_object_size), (velocity, radius)| {
+                            let velocity_squared = velocity.magnitude_squared();
+                            if velocity_squared > max_velocity_squared {
+                                max_velocity_squared = velocity_squared;
+                            }
+                            let object_size = radius * 2.0;
+                            if object_size < min_object_size {
+                                min_object_size = object_size;
+                            }
+                            (max_velocity_squared, min_object_size)
+                        },
+                    );
+                let velocity_factor = if min_object_size == f64::MAX {
+                    1.0
+                } else {
+                    // Two times velocity because objects can collide head on
+                    let current_velocity = max_velocity_squared.sqrt();
+                    current_velocity * 2.0 / min_object_size
+                };
+                let max_gravity_squared = self.objects.positions.iter().enumerate().fold(
+                    0.0,
+                    |max_gravity_squared, (object_index, &position)| {
+                        let gravity_squared = Self::gravity_acceleration(
+                            object_index,
+                            position,
+                            &self.objects.positions,
+                            self.global_gravity,
+                            &self.objects.masses[..self.objects.planet_count],
+                        )
+                        .magnitude_squared();
+                        if gravity_squared > max_gravity_squared {
+                            gravity_squared
+                        } else {
+                            max_gravity_squared
+                        }
+                    },
+                );
+                // Experimentally derived
+                let gravity_factor = max_gravity_squared.sqrt().sqrt() * 80.0 / min_object_size.sqrt();
+                speed_factor / 2.0 * (1.0 / velocity_factor.max(gravity_factor).max(1.0))
+            }
+            DtSource::Fixed(dt) => dt,
         };
-        let gravity_factor = self.global_gravity.magnitude().sqrt() * 80.0 / min_object_size.sqrt();
-        let dt = speed_factor / 2.0 * (1.0 / velocity_factor.max(gravity_factor).max(1.0));
         self.time += dt;
         self.update(dt);
 
@@ -347,35 +370,24 @@ impl PhysicsEngine {
             let cell_records = &self.grid.cell_records[range];
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
-                const AREA_CELL_OFFSETS: [(isize, isize); 9] = [
-                    (0, 0), // goes first because objects in the same cell are closest
-                    (-1, 0),
-                    (1, 0),
-                    (0, -1),
-                    (0, 1),
-                    (-1, -1),
-                    (1, 1),
+                const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
+                    // Objects in the same cell are the closest
+                    (0, 0),
+                    // Checking only these neighboring cells to avoid duplicate collisions
                     (-1, 1),
-                    (1, -1),
+                    (0, 1),
+                    (1, 1),
+                    (1, 0),
                 ];
                 for (ox, oy) in AREA_CELL_OFFSETS {
                     let x = x.wrapping_add_signed(ox);
                     let y = y.wrapping_add_signed(oy);
                     if x < self.grid.size().x && y < self.grid.size().y {
                         if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
-                            let mut candidate_area = self.grid.cell_records[start..end]
+                            let candidate_area = self.grid.cell_records[start..end]
                                 .iter()
                                 .copied()
                                 .collect::<FixedVec<_, 4>>();
-                            let position = self.objects.positions[object_index];
-                            candidate_area.sort_by(|a, b| {
-                                let a = self.objects.positions[a.object_index];
-                                let b = self.objects.positions[b.object_index];
-                                (a - position)
-                                    .magnitude_squared()
-                                    .partial_cmp(&(b - position).magnitude_squared())
-                                    .unwrap()
-                            });
                             Self::process_object_with_cell_collisions(
                                 object_index,
                                 &candidate_area,
@@ -527,11 +539,10 @@ fn process_object_collision(
         let mut velocity2 = velocities[object2_index];
         let distance = from_1_to_2.magnitude();
         {
-            let inv_divisor = 1.0 / (total_mass * distance.powi(2)).max(f64::MIN_POSITIVE);
+            let divisor = (total_mass * distance * distance).max(f64::EPSILON);
             let velocity_diff = velocity1 - velocity2;
-            let scalar = 2.0 * mass2 * velocity_diff.dot(&from_1_to_2) * inv_divisor;
-            velocity1 -= from_1_to_2 * scalar;
-            velocity2 -= -from_1_to_2 * scalar;
+            velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
+            velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
         }
         let intersection_depth = collision_distance - distance;
         let momentum1 = mass1 * velocity1.magnitude();

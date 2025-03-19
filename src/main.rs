@@ -286,7 +286,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             && !self.time_limit_action_executed
         {
             self.time_limit_action_executed = true;
-            match config.simulation.time_limit_action.unwrap_or_default() {
+            match config.simulation.time_limit_action {
                 TimeLimitAction::Exit => event_loop.exit(),
                 TimeLimitAction::Pause => {
                     self.advance_time = false;
@@ -492,7 +492,7 @@ fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &Ph
     writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps)?;
     write!(buffer, "sim time: {}", physics.time())?;
     if let Some(time_limit) = config.simulation.time_limit {
-        let action = config.simulation.time_limit_action.unwrap_or_default().to_string();
+        let action = config.simulation.time_limit_action.to_string();
         write!(buffer, " ({action} at {time_limit})")?;
     }
     writeln!(buffer)?;

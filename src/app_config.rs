@@ -92,13 +92,27 @@ pub struct WindowConfig {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct SimulationConfig {
-    pub enable_gpu: bool,
+    #[serde(default)]
+    pub dt: DtSource,
     pub speed_factor: f64,
+    pub enable_gpu: bool,
     pub restitution_coefficient: f64,
     pub gravity: (f64, f64),
     pub time_limit: Option<f64>,
-    pub time_limit_action: Option<TimeLimitAction>,
+    #[serde(default)]
+    pub time_limit_action: TimeLimitAction,
     pub jerk_at: Option<f64>,
+}
+
+#[derive(Deserialize, Clone, Copy, Default)]
+#[serde(deny_unknown_fields)]
+pub enum DtSource {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+
+    #[serde(rename = "fixed")]
+    Fixed(f64),
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
@@ -133,6 +147,9 @@ pub struct DemoConfig {
 
     #[serde(default)]
     pub enable_ball: bool,
+
+    #[serde(default)]
+    pub randomize_positions: bool,
 }
 
 #[derive(Deserialize, Clone, Copy)]

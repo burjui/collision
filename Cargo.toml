@@ -17,6 +17,7 @@ pollster = "0.4.0"
 rdst = "0.20.14"
 skrifa = "0.29.0"
 bytemuck = "1.22.0"
+rand = "0.9.0"
 
 [dependencies.opencl3]
 version = "0.11"

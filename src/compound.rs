@@ -1,9 +1,11 @@
+use rand::random;
 use vello::peniko::{
     color::{ColorSpace, Hsl, Srgb},
     Color,
 };
 
 use crate::{
+    app_config::config,
     physics::{object::ObjectPrototype, PhysicsEngine},
     vector2::Vector2,
 };
@@ -44,7 +46,15 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
             let p = |position, index| {
                 position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
-            let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j));
+            let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j))
+                + if config().demo.randomize_positions {
+                    Vector2::new(
+                        random::<f64>() * brick.particle_radius,
+                        random::<f64>() * brick.particle_radius,
+                    )
+                } else {
+                    Vector2::default()
+                };
             let color = {
                 let selection_factor = (position.x - brick.position.x) / brick.size.x;
                 let hue = 300.0 * selection_factor;
@@ -97,7 +107,15 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
         for j in 0..num_particles {
             let x = -ball.radius + (i as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let y = -ball.radius + (j as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
-            let position = Vector2::new(x, y);
+            let position = Vector2::new(x, y)
+                + if config().demo.randomize_positions {
+                    Vector2::new(
+                        random::<f64>() * ball.particle_radius,
+                        random::<f64>() * ball.particle_radius,
+                    )
+                } else {
+                    Vector2::default()
+                };
             if position.magnitude() <= ball.radius {
                 let position = ball.position + position;
                 let color = {
