@@ -96,17 +96,4 @@ impl ObjectPrototype {
     pub fn momentum(&self) -> Vector2<f64> {
         self.velocity * self.mass
     }
-
-    pub fn update(&mut self, update: ObjectUpdate) {
-        self.position = update.position;
-        self.velocity = update.velocity;
-    }
 }
-
-#[derive(Copy, Clone)]
-#[derive(Default)]
-pub struct ObjectUpdate {
-    pub position: Vector2<f64>,
-    pub velocity: Vector2<f64>,
-}
-

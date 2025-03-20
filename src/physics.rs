@@ -5,7 +5,7 @@ use std::{
 };
 
 use grid::Grid;
-use object::{ObjectPrototype, ObjectSoa, ObjectUpdate};
+use object::{ObjectPrototype, ObjectSoa};
 
 use crate::{
     app_config::{config, DtSource},
@@ -122,10 +122,10 @@ impl PhysicsEngine {
                     let current_velocity = max_velocity_squared.sqrt();
                     current_velocity * 2.0 / min_object_size
                 };
-                let max_gravity_squared = self.objects.positions.iter().enumerate().fold(
+                let max_force_acceleration = self.objects.positions.iter().enumerate().fold(
                     0.0,
-                    |max_gravity_squared, (object_index, &position)| {
-                        let gravity_squared = Self::gravity_acceleration(
+                    |max_force_acceleration, (object_index, &position)| {
+                        let force_acceleration = Self::force_acceleration(
                             object_index,
                             position,
                             &self.objects.positions,
@@ -133,15 +133,15 @@ impl PhysicsEngine {
                             &self.objects.masses[..self.objects.planet_count],
                         )
                         .magnitude_squared();
-                        if gravity_squared > max_gravity_squared {
-                            gravity_squared
+                        if force_acceleration > max_force_acceleration {
+                            force_acceleration
                         } else {
-                            max_gravity_squared
+                            max_force_acceleration
                         }
                     },
                 );
                 // Experimentally derived
-                let force_factor = max_gravity_squared.sqrt().sqrt() * 80.0 / min_object_size.sqrt();
+                let force_factor = max_force_acceleration.sqrt().sqrt() * 80.0 / min_object_size.sqrt();
                 speed_factor / 2.0 * (1.0 / velocity_factor.max(force_factor).max(1.0))
             }
             DtSource::Fixed(dt) => dt,
@@ -178,23 +178,109 @@ impl PhysicsEngine {
         // if config().simulation.enable_gpu {
         //     self.update_objects_leapfrog_yoshida_gpu(dt);
         // } else {
-        self.update_object_leapfrog_yoshida_cpu(dt)
-        // }
-    }
-
-    fn update_object_leapfrog_yoshida_cpu(&mut self, dt: f64) {
         for object_index in 0..self.objects.positions.len() {
-            let update = Self::update_object_leapfrog_yoshida(
+            Self::update_object_leapfrog_yoshida_cpu(
                 object_index,
-                &self.objects.positions,
-                self.objects.velocities[object_index],
                 dt,
+                &mut self.objects.positions,
+                &mut self.objects.velocities,
                 self.global_gravity,
                 &self.objects.masses[..self.objects.planet_count],
             );
-            self.objects.positions[object_index] = update.position;
-            self.objects.velocities[object_index] = update.velocity;
         }
+        for object_index in 0..self.objects.positions.len() {
+            Self::apply_constraints(
+                object_index,
+                &mut self.objects.positions,
+                &mut self.objects.velocities,
+                &self.objects.radii,
+                &self.constraints,
+            );
+        }
+        // }
+    }
+
+    fn update_object_leapfrog_yoshida_cpu(
+        object_index: usize,
+        dt: f64,
+        positions: &mut [Vector2<f64>],
+        velocities: &mut [Vector2<f64>],
+        global_gravity: Vector2<f64>,
+        planet_masses: &[f64],
+    ) {
+        use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
+        let x0 = positions[object_index];
+        let v0 = velocities[object_index];
+        let x1 = x0 + v0 * (C1 * dt);
+        let a1 = Self::force_acceleration(object_index, x1, positions, global_gravity, planet_masses);
+        let v1 = v0 + a1 * (D1 * dt);
+        let x2 = x0 + v1 * (C2 * dt);
+        let a2 = Self::force_acceleration(object_index, x2, positions, global_gravity, planet_masses);
+        let v2 = v0 + a2 * (D2 * dt);
+        let x3 = x0 + v2 * (C3 * dt);
+        let a3 = Self::force_acceleration(object_index, x3, positions, global_gravity, planet_masses);
+        let v3 = v0 + a3 * (D3 * dt);
+        positions[object_index] = x0 + v3 * (C4 * dt);
+        velocities[object_index] = v3;
+    }
+
+    fn force_acceleration(
+        object_index: usize,
+        position: Vector2<f64>,
+        positions: &[Vector2<f64>],
+        global_gravity: Vector2<f64>,
+        planet_masses: &[f64],
+    ) -> Vector2<f64> {
+        global_gravity + Self::planetary_gravity_acceleration(object_index, position, positions, planet_masses)
+    }
+
+    fn planetary_gravity_acceleration(
+        object_index: usize,
+        object_position: Vector2<f64>,
+        positions: &[Vector2<f64>],
+        planet_masses: &[f64],
+    ) -> Vector2<f64> {
+        let mut gravity = Vector2::default();
+        for planet_index in 0..planet_masses.len() {
+            if planet_index != object_index {
+                let to_planet = positions[planet_index] - object_position;
+                let direction = to_planet.normalize();
+                gravity += direction
+                    * (Self::GRAVITATIONAL_CONSTANT * planet_masses[planet_index] / to_planet.magnitude_squared());
+            }
+        }
+        gravity
+    }
+
+    fn apply_constraints(
+        object_index: usize,
+        positions: &mut [Vector2<f64>],
+        velocities: &mut [Vector2<f64>],
+        radii: &[f64],
+        cb: &ConstraintBox,
+    ) {
+        let position = &mut positions[object_index];
+        let velocity = &mut velocities[object_index];
+        let radius = radii[object_index];
+        // let initial_velocity = *velocity;
+        if position.x - radius < cb.topleft.x {
+            position.x = cb.topleft.x + radius;
+            velocity.x *= -1.0;
+        } else if position.x + radius > cb.bottomright.x {
+            position.x = cb.bottomright.x - radius;
+            velocity.x *= -1.0;
+        }
+        if position.y - radius < cb.topleft.y {
+            position.y = cb.topleft.y + radius;
+            velocity.y *= -1.0;
+        } else if position.y + radius > cb.bottomright.y {
+            position.y = cb.bottomright.y - radius;
+            velocity.y *= -1.0;
+        }
+
+        // if *velocity != initial_velocity {
+        //     *velocity *= self.restitution_coefficient;
+        // }
     }
 
     // fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f64) {
@@ -307,51 +393,6 @@ impl PhysicsEngine {
     //             .unwrap();
     //     }
     // }
-
-    fn update_object_leapfrog_yoshida(
-        object_index: usize,
-        positions: &[Vector2<f64>],
-        velocity: Vector2<f64>,
-        dt: f64,
-        global_gravity: Vector2<f64>,
-        planet_masses: &[f64],
-    ) -> ObjectUpdate {
-        use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
-        let x0 = positions[object_index];
-        let v0 = velocity;
-        let x1 = x0 + v0 * (C1 * dt);
-        let a1 = Self::gravity_acceleration(object_index, x1, positions, global_gravity, planet_masses);
-        let v1 = v0 + a1 * (D1 * dt);
-        let x2 = x0 + v1 * (C2 * dt);
-        let a2 = Self::gravity_acceleration(object_index, x2, positions, global_gravity, planet_masses);
-        let v2 = v0 + a2 * (D2 * dt);
-        let x3 = x0 + v2 * (C3 * dt);
-        let a3 = Self::gravity_acceleration(object_index, x3, positions, global_gravity, planet_masses);
-        let v3 = v0 + a3 * (D3 * dt);
-        ObjectUpdate {
-            position: x0 + v3 * (C4 * dt),
-            velocity: v3,
-        }
-    }
-
-    fn gravity_acceleration(
-        object_index: usize,
-        position: Vector2<f64>,
-        positions: &[Vector2<f64>],
-        global_gravity: Vector2<f64>,
-        planet_masses: &[f64],
-    ) -> Vector2<f64> {
-        let mut gravity = global_gravity;
-        for planet_index in 0..planet_masses.len() {
-            if planet_index != object_index {
-                let to_planet = positions[planet_index] - position;
-                let direction = to_planet.normalize();
-                gravity += direction
-                    * (Self::GRAVITATIONAL_CONSTANT * planet_masses[planet_index] / to_planet.magnitude_squared());
-            }
-        }
-        gravity
-    }
 }
 
 #[derive(Clone, Copy)]
