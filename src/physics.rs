@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use grid::Grid;
+use grid::{cell_at, CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 
 use crate::{
@@ -25,6 +25,8 @@ pub struct PhysicsEngine {
     stats: Stats,
     // restitution_coefficient: f64,
     global_gravity: Vector2<f64>,
+    gravitational_constant: f64,
+    proximity_force_constant: f64,
     // gpu: Gpu,
     // yoshida_kernel: Kernel,
     // yoshida_kernel_no_planets: Kernel,
@@ -34,8 +36,6 @@ pub struct PhysicsEngine {
 }
 
 impl PhysicsEngine {
-    const GRAVITATIONAL_CONSTANT: f64 = 10000.0;
-
     pub fn new() -> anyhow::Result<Self> {
         let config = config();
         let constraints = ConstraintBox::new(
@@ -56,6 +56,8 @@ impl PhysicsEngine {
             stats: Stats::default(),
             // restitution_coefficient: config.simulation.restitution_coefficient,
             global_gravity: Vector2::from(config.simulation.gravity),
+            gravitational_constant: config.simulation.gravitational_constant,
+            proximity_force_constant: config.simulation.proximity_force_constant,
             // gpu,
             // yoshida_kernel,
             // yoshida_kernel_no_planets,
@@ -139,8 +141,12 @@ impl PhysicsEngine {
                             object_index,
                             position,
                             &self.objects.positions,
+                            &self.objects.radii,
                             self.global_gravity,
+                            self.gravitational_constant,
+                            self.proximity_force_constant,
                             &self.objects.masses[..self.objects.planet_count],
+                            &self.grid,
                         )
                         .magnitude_squared();
                         if force_acceleration > max_force_acceleration {
@@ -160,6 +166,8 @@ impl PhysicsEngine {
         self.update(dt);
 
         self.stats.total_duration.update(start.elapsed());
+        self.stats.sim_time = self.time;
+        self.stats.object_count = self.objects.len();
     }
 
     fn update(&mut self, dt: f64) {
@@ -176,8 +184,12 @@ impl PhysicsEngine {
                 dt,
                 &mut self.objects.positions,
                 &mut self.objects.velocities,
+                &self.objects.radii,
                 self.global_gravity,
+                self.gravitational_constant,
+                self.proximity_force_constant,
                 &self.objects.masses[..self.objects.planet_count],
+                &self.grid,
             );
         }
         for object_index in 0..self.objects.positions.len() {
@@ -197,20 +209,54 @@ impl PhysicsEngine {
         dt: f64,
         positions: &mut [Vector2<f64>],
         velocities: &mut [Vector2<f64>],
+        radii: &[f64],
         global_gravity: Vector2<f64>,
+        gravitational_constant: f64,
+        proximity_force_constant: f64,
         planet_masses: &[f64],
+        grid: &Grid,
     ) {
         use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
         let x0 = positions[object_index];
         let v0 = velocities[object_index];
         let x1 = x0 + v0 * (C1 * dt);
-        let a1 = Self::force_acceleration(object_index, x1, positions, global_gravity, planet_masses);
+        let a1 = Self::force_acceleration(
+            object_index,
+            x1,
+            positions,
+            radii,
+            global_gravity,
+            gravitational_constant,
+            proximity_force_constant,
+            planet_masses,
+            grid,
+        );
         let v1 = v0 + a1 * (D1 * dt);
         let x2 = x0 + v1 * (C2 * dt);
-        let a2 = Self::force_acceleration(object_index, x2, positions, global_gravity, planet_masses);
+        let a2 = Self::force_acceleration(
+            object_index,
+            x2,
+            positions,
+            radii,
+            global_gravity,
+            gravitational_constant,
+            proximity_force_constant,
+            planet_masses,
+            grid,
+        );
         let v2 = v0 + a2 * (D2 * dt);
         let x3 = x0 + v2 * (C3 * dt);
-        let a3 = Self::force_acceleration(object_index, x3, positions, global_gravity, planet_masses);
+        let a3 = Self::force_acceleration(
+            object_index,
+            x3,
+            positions,
+            radii,
+            global_gravity,
+            gravitational_constant,
+            proximity_force_constant,
+            planet_masses,
+            grid,
+        );
         let v3 = v0 + a3 * (D3 * dt);
         positions[object_index] = x0 + v3 * (C4 * dt);
         velocities[object_index] = v3;
@@ -220,10 +266,29 @@ impl PhysicsEngine {
         object_index: usize,
         object_position: Vector2<f64>,
         positions: &[Vector2<f64>],
+        radii: &[f64],
         global_gravity: Vector2<f64>,
+        gravitational_constant: f64,
+        proximity_force_constant: f64,
         planet_masses: &[f64],
+        grid: &Grid,
     ) -> Vector2<f64> {
-        global_gravity + Self::planetary_gravity_acceleration(object_index, object_position, positions, planet_masses)
+        global_gravity
+            + Self::planetary_gravity_acceleration(
+                object_index,
+                object_position,
+                positions,
+                planet_masses,
+                gravitational_constant,
+            )
+            + Self::proximity_force(
+                object_index,
+                object_position,
+                positions,
+                radii,
+                grid,
+                proximity_force_constant,
+            )
     }
 
     fn planetary_gravity_acceleration(
@@ -231,17 +296,73 @@ impl PhysicsEngine {
         object_position: Vector2<f64>,
         positions: &[Vector2<f64>],
         planet_masses: &[f64],
+        gravitational_constant: f64,
     ) -> Vector2<f64> {
         let mut gravity = Vector2::default();
         for planet_index in 0..planet_masses.len() {
             if planet_index != object_index {
                 let to_planet = positions[planet_index] - object_position;
                 let direction = to_planet.normalize();
-                gravity += direction
-                    * (Self::GRAVITATIONAL_CONSTANT * planet_masses[planet_index] / to_planet.magnitude_squared());
+                gravity +=
+                    direction * (gravitational_constant * planet_masses[planet_index] / to_planet.magnitude_squared());
             }
         }
         gravity
+    }
+
+    fn proximity_force(
+        object_index: usize,
+        object_position: Vector2<f64>,
+        positions: &[Vector2<f64>],
+        radii: &[f64],
+        grid: &Grid,
+        proximity_force_constant: f64,
+    ) -> Vector2<f64> {
+        let mut force = Vector2::default();
+        let (x, y) = cell_at(object_position, grid.position(), grid.cell_size());
+        const CELL_OFFSETS: [(isize, isize); 9] = [
+            // Sorted by x because that's how grid cell records are sorted
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+            (0, -1),
+            (0, 0),
+            (0, 1),
+            (1, -1),
+            (1, 0),
+            (1, 1),
+        ];
+        // let radius = radii[object_index];
+        for (dx, dy) in CELL_OFFSETS {
+            let neighbor_cell_x = x.wrapping_add_signed(dx);
+            let other_y = y.wrapping_add_signed(dy);
+            if neighbor_cell_x < grid.size().x && other_y < grid.size().y {
+                if let Some((records_start, records_end)) = grid.coords_to_cells[(neighbor_cell_x, other_y)] {
+                    for &CellRecord {
+                        object_index: other_object_index,
+                        ..
+                    } in &grid.cell_records[records_start..records_end]
+                    {
+                        if other_object_index != object_index {
+                            let from_other = positions[other_object_index] - object_position;
+                            let distance_squared = from_other.magnitude_squared();
+                            // let other_radius = radii[other_object_index];
+                            let distance = distance_squared.sqrt();
+                            let direction = from_other / distance;
+                            // let touching_distance = (radius + other_radius) * 0.5;
+                            // if object_index == 0 {
+                            //     println!("Distance to {other_object_index}: {distance}");
+                            // }
+                            force += direction * proximity_force_constant / distance_squared;
+                        }
+                    }
+                }
+            }
+        }
+        // if object_index == 0 {
+        //     println!("Proximity force: {:?}", force);
+        // }
+        force
     }
 
     fn apply_constraints(
@@ -394,6 +515,7 @@ impl ConstraintBox {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct DurationStat {
     pub current: Duration,
     pub lowest: Duration,
@@ -418,8 +540,10 @@ impl Default for DurationStat {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Stats {
+    pub sim_time: f64,
+    pub object_count: usize,
     pub updates_duration: DurationStat,
     pub grid_duration: DurationStat,
     pub total_duration: DurationStat,

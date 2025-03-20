@@ -2,7 +2,8 @@ use core::f64;
 use std::{
     iter::zip,
     num::NonZero,
-    sync::Arc,
+    sync::{mpsc, Arc, Mutex},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -10,7 +11,7 @@ use anyhow::{anyhow, Ok};
 use collision::{
     app_config::{config, config_mut, ColorSource, TimeLimitAction},
     fps::FpsCalculator,
-    physics::{DurationStat, PhysicsEngine},
+    physics::{DurationStat, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
 };
@@ -36,49 +37,148 @@ mod demo;
 
 pub fn main() -> anyhow::Result<()> {
     enable_floating_point_exceptions();
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::with_user_event().build()?;
     let render_context = RenderContext::new();
     let renderers: Vec<Option<Renderer>> = vec![];
     let render_state = None::<RenderState<'_>>;
     let config = config();
     let mut physics = PhysicsEngine::new()?;
     create_demo(&mut physics);
-    let advance_time = config.simulation.time_limit.is_some();
+    let physics = Arc::new(Mutex::new(physics));
+    let app_physics = physics.clone();
+    let (physics_thread_sender, physics_event_receiver) = mpsc::channel();
+    let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
+    let sim_total_duration_outer = sim_total_duration.clone();
+    {
+        let event_loop_proxy = event_loop.create_proxy();
+        let mut advance_time = config.simulation.time_limit.is_some();
+        let mut time_limit_action_executed = false;
+        let mut jerk_applied = false;
+        let mut last_redraw = Instant::now();
+        let mut waiting_for_redraw = false;
+        let mut x: usize = 0;
+        thread::spawn(move || loop {
+            let mut physics_guard = physics.lock().unwrap();
+            let physics = &mut *physics_guard;
+            while let Result::Ok(event) = physics_event_receiver.try_recv() {
+                match event {
+                    PhysicsThreadEvent::ToggleAdvanceTime => {
+                        advance_time = !advance_time;
+                    }
+                    PhysicsThreadEvent::UnidirectionalKick {
+                        mouse_position,
+                        mouse_influence_radius,
+                    } => {
+                        let objects = physics.objects_mut();
+                        for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
+                            let from_mouse_to_object = position - mouse_position;
+                            if (from_mouse_to_object).magnitude() < mouse_influence_radius {
+                                *velocity += from_mouse_to_object.normalize() * 2000.0;
+                            }
+                        }
+                        event_loop_proxy.send_event(AppEvent::RequestRedraw).unwrap();
+                    }
+                    PhysicsThreadEvent::RedrawComplete => {
+                        waiting_for_redraw = false;
+                    }
+                }
+            }
+            if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit) && !time_limit_action_executed {
+                time_limit_action_executed = true;
+                match config.simulation.time_limit_action {
+                    TimeLimitAction::Exit => {
+                        event_loop_proxy.send_event(AppEvent::Exit).unwrap();
+                    }
+                    TimeLimitAction::Pause => {
+                        advance_time = false;
+                        event_loop_proxy.send_event(AppEvent::RequestRedraw).unwrap();
+                    }
+                }
+            }
+
+            let now = Instant::now();
+            if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
+                last_redraw = Instant::now();
+                event_loop_proxy.send_event(AppEvent::RequestRedrawPhysics).unwrap();
+                waiting_for_redraw = true;
+                println!("Waiting for redraw ({x})");
+                x += 1;
+            }
+
+            if advance_time && !waiting_for_redraw {
+                let start = Instant::now();
+                physics.advance(config.simulation.speed_factor);
+                *sim_total_duration.lock().unwrap() += start.elapsed();
+                if config
+                    .simulation
+                    .jerk_at
+                    .is_some_and(|jerk_at| physics.time() >= jerk_at)
+                    && !jerk_applied
+                {
+                    jerk_applied = true;
+                    let first_non_planet = physics.planet_count();
+                    physics.objects_mut().velocities[first_non_planet] += Vector2::new(1000.0, 1000.0);
+                }
+                event_loop_proxy
+                    .send_event(AppEvent::StatsUpdated(*physics.stats()))
+                    .unwrap();
+            }
+        });
+    }
+
     let mut app = VelloApp {
         context: render_context,
         renderers,
         state: render_state,
         cached_window: None,
         scene: Scene::new(),
+        physics_scene: Scene::new(),
         frame_count: 0,
         fps_calculator: FpsCalculator::default(),
         last_fps: 0,
         min_fps: usize::MAX,
-        physics,
-        advance_time,
         mouse_position: Vector2::new(0.0, 0.0),
         mouse_influence_radius: 50.0,
         draw_grid: false,
         draw_ids: false,
         text: SimpleText::new(),
-        last_redraw: Instant::now(),
-        time_limit_action_executed: false,
-        jerk_applied: false,
-        sim_total_duration: Duration::ZERO,
+        physics: app_physics,
+        physics_thread_sender,
+        redraw_physics: true,
+        stats: Stats::default(),
     };
-
     event_loop.run_app(&mut app).expect("run to completion");
 
     let mut stats_buffer = String::new();
-    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), &app.physics)?;
+    let physics_guard = app.physics.lock().unwrap();
+    let physics = &*physics_guard;
+    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), physics.stats())?;
     print!("{}", stats_buffer);
-    println!("total simulation duration: {:?}", app.sim_total_duration);
+    let sim_total_duration_guard = sim_total_duration_outer.lock().unwrap();
+    println!("total simulation duration: {:?}", *sim_total_duration_guard);
     println!(
         "relative speed: {}",
-        app.physics.time() / app.sim_total_duration.as_secs_f64()
+        physics.time() / sim_total_duration_guard.as_secs_f64()
     );
 
     Ok(())
+}
+
+#[derive(Debug)]
+enum AppEvent {
+    RequestRedraw,
+    RequestRedrawPhysics,
+    StatsUpdated(Stats),
+    Exit,
+}
+
+enum PhysicsThreadEvent {
+    ToggleAdvanceTime,
+    UnidirectionalKick {
+        mouse_position: Vector2<f64>,
+        mouse_influence_radius: f64,
+    },
+    RedrawComplete,
 }
 
 fn enable_floating_point_exceptions() {
@@ -105,24 +205,23 @@ struct VelloApp<'s> {
     // If render_state exists, we must store the window in it, to maintain drop order
     cached_window: Option<Arc<Window>>,
     scene: Scene,
+    physics_scene: Scene,
     frame_count: usize,
     fps_calculator: FpsCalculator,
     last_fps: usize,
     min_fps: usize,
-    physics: PhysicsEngine,
-    advance_time: bool,
     mouse_position: Vector2<f64>,
     mouse_influence_radius: f64,
     draw_grid: bool,
     draw_ids: bool,
     text: SimpleText,
-    last_redraw: Instant,
-    time_limit_action_executed: bool,
-    jerk_applied: bool,
-    sim_total_duration: Duration,
+    physics: Arc<Mutex<PhysicsEngine>>,
+    physics_thread_sender: mpsc::Sender<PhysicsThreadEvent>,
+    redraw_physics: bool,
+    stats: Stats,
 }
 
-impl ApplicationHandler<()> for VelloApp<'_> {
+impl ApplicationHandler<AppEvent> for VelloApp<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_some() {
             return;
@@ -180,8 +279,9 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                     match event.logical_key.as_ref() {
                         Key::Named(NamedKey::Escape) => event_loop.exit(),
                         Key::Named(NamedKey::Space) => {
-                            self.advance_time = !self.advance_time;
-                            request_redraw(&self.state);
+                            self.physics_thread_sender
+                                .send(PhysicsThreadEvent::ToggleAdvanceTime)
+                                .unwrap();
                         }
                         Key::Character("a") => {
                             config_mut().simulation.enable_gpu = !config().simulation.enable_gpu;
@@ -219,33 +319,39 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                         self.last_fps = fps;
                         self.min_fps = self.min_fps.min(fps);
                     }
-
-                    let now = Instant::now();
-                    if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
-                        self.last_redraw = now;
-                        self.scene.reset();
-                        draw_physics(&self.physics, &mut self.scene, DrawIds(self.draw_ids));
-                        draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
-                        if self.draw_grid && self.physics.grid().cell_size() > 0.0 {
+                    if self.redraw_physics {
+                        self.redraw_physics = false;
+                        let guard = self.physics.lock().unwrap();
+                        let physics = &*guard;
+                        self.physics_scene.reset();
+                        draw_physics(physics, &mut self.physics_scene, DrawIds(self.draw_ids));
+                        if self.draw_grid && physics.grid().cell_size() > 0.0 {
                             draw_grid(
-                                &mut self.scene,
-                                self.physics.constraints().topleft,
-                                self.physics.constraints().bottomright,
-                                self.physics.grid().cell_size(),
+                                &mut self.physics_scene,
+                                physics.constraints().topleft,
+                                physics.constraints().bottomright,
+                                physics.grid().cell_size(),
                             );
                         }
-                        draw_stats(
-                            &mut self.scene,
-                            &mut self.text,
-                            (self.last_fps, self.min_fps),
-                            &self.physics,
-                        )
-                        .expect("failed to draw stats");
-                        let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
-                        let device_handle = &self.context.devices[surface.dev_id];
-                        render_scene(&self.scene, surface, renderer, device_handle);
-                        self.frame_count += 1;
                     }
+                    self.scene.reset();
+                    self.scene.append(&self.physics_scene, None);
+                    draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
+                    draw_stats(
+                        &mut self.scene,
+                        &mut self.text,
+                        (self.last_fps, self.min_fps),
+                        &self.stats,
+                    )
+                    .expect("failed to draw stats");
+
+                    let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
+                    let device_handle = &self.context.devices[surface.dev_id];
+                    render_scene(&self.scene, surface, renderer, device_handle);
+                    self.frame_count += 1;
+                    self.physics_thread_sender
+                        .send(PhysicsThreadEvent::RedrawComplete)
+                        .unwrap();
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -255,14 +361,12 @@ impl ApplicationHandler<()> for VelloApp<'_> {
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
                     if let MouseButton::Left = button {
-                        let objects = self.physics.objects_mut();
-                        for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
-                            let from_mouse_to_object = position - self.mouse_position;
-                            if (from_mouse_to_object).magnitude() < self.mouse_influence_radius {
-                                *velocity += from_mouse_to_object.normalize() * 2000.0;
-                            }
-                        }
-                        request_redraw(&self.state);
+                        self.physics_thread_sender
+                            .send(PhysicsThreadEvent::UnidirectionalKick {
+                                mouse_position: self.mouse_position,
+                                mouse_influence_radius: self.mouse_influence_radius,
+                            })
+                            .unwrap();
                     }
                 }
             }
@@ -277,47 +381,24 @@ impl ApplicationHandler<()> for VelloApp<'_> {
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let config = config();
-        if config
-            .simulation
-            .time_limit
-            .is_some_and(|limit| self.physics.time() > limit)
-            && !self.time_limit_action_executed
-        {
-            self.time_limit_action_executed = true;
-            match config.simulation.time_limit_action {
-                TimeLimitAction::Exit => event_loop.exit(),
-                TimeLimitAction::Pause => {
-                    self.advance_time = false;
-                    request_redraw(&self.state);
-                }
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        match event {
+            AppEvent::RequestRedraw => {
+                request_redraw(&self.state);
             }
-        }
-
-        if self.advance_time {
-            let start = Instant::now();
-            self.physics.advance(config.simulation.speed_factor);
-            self.sim_total_duration += start.elapsed();
-            if config
-                .simulation
-                .jerk_at
-                .is_some_and(|jerk_at| self.physics.time() >= jerk_at)
-                && !self.jerk_applied
-            {
-                self.jerk_applied = true;
-                let first_non_planet = self.physics.planet_count();
-                self.physics.objects_mut().velocities[first_non_planet] += Vector2::new(1000.0, 1000.0);
+            AppEvent::RequestRedrawPhysics => {
+                self.redraw_physics = true;
+                request_redraw(&self.state);
             }
-            request_redraw(&self.state);
-        }
-        let now = Instant::now();
-        if (now - self.last_redraw).as_secs_f64() > 1.0 / 60.0 {
-            request_redraw(&self.state);
+            AppEvent::StatsUpdated(stats) => {
+                self.stats = stats;
+                request_redraw(&self.state);
+            }
+            AppEvent::Exit => event_loop.exit(),
         }
     }
 
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn suspended(&mut self, _: &ActiveEventLoop) {
         // When we suspend, we need to remove the `wgpu` Surface
         if let Some(render_state) = self.state.take() {
             self.cached_window = Some(render_state.window);
@@ -418,12 +499,7 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
         transform,
         css::WHITE,
         None,
-        &Rect::new(
-            topleft.x,
-            topleft.y,
-            bottomright.x,
-            bottomright.y,
-        ),
+        &Rect::new(topleft.x, topleft.y, bottomright.x, bottomright.y),
     );
 }
 
@@ -470,10 +546,10 @@ fn draw_stats(
     scene: &mut Scene,
     text: &mut SimpleText,
     (fps, min_fps): (usize, usize),
-    physics: &PhysicsEngine,
+    stats: &Stats,
 ) -> anyhow::Result<()> {
     let buffer = &mut String::new();
-    write_stats(buffer, (fps, min_fps), physics)?;
+    write_stats(buffer, (fps, min_fps), stats)?;
 
     const TEXT_SIZE: f32 = 16.0;
     text.add(
@@ -487,10 +563,10 @@ fn draw_stats(
     Ok(())
 }
 
-fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &PhysicsEngine) -> anyhow::Result<()> {
+fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), stats: &Stats) -> anyhow::Result<()> {
     let config = config();
     writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps)?;
-    write!(buffer, "sim time: {}", physics.time())?;
+    write!(buffer, "sim time: {}", stats.sim_time)?;
     if let Some(time_limit) = config.simulation.time_limit {
         let action = config.simulation.time_limit_action.to_string();
         write!(buffer, " ({action} at {time_limit})")?;
@@ -505,8 +581,7 @@ fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &Ph
             "disabled"
         }
     )?;
-    writeln!(buffer, "objects: {}", physics.objects().len())?;
-    let stats = physics.stats();
+    writeln!(buffer, "objects: {}", stats.object_count)?;
     write_duration_stat(buffer, "updates", &stats.updates_duration)?;
     write_duration_stat(buffer, "grid", &stats.grid_duration)?;
     Ok(())

@@ -35,11 +35,11 @@ impl Grid {
                 self.cell_records.resize(objects.len(), CellRecord::EMPTY);
             }
             for (object_index, &position) in objects.positions.iter().enumerate() {
-                let cell = cell_at(position, self.position, self.cell_size);
+                let (x, y) = cell_at(position, self.position, self.cell_size);
                 self.cell_records[object_index] = CellRecord {
                     object_index,
-                    cell_coords: cell,
-                    radix_key: ((cell.0 << (CellRadixKey::BITS / 2)) | cell.1).try_into().unwrap(),
+                    cell_coords: (x, y),
+                    radix_key: ((y << (CellRadixKey::BITS / 2)) | x).try_into().unwrap(),
                 }
             }
 
