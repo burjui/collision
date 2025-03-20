@@ -3,23 +3,23 @@ width = 1600
 height = 800
 
 [simulation]
-dt = { fixed = 0.0001 }
+dt = { fixed = 0.00001 }
 speed_factor = 1
 enable_gpu = false
 restitution_coefficient = 0.995
-gravity = [0, 1000]
+gravity = [0, 0]
 gravitational_constant = 10000
-proximity_force_constant = 0
+proximity_force_constant = 10000
 # time_limit = 20
 # time_limit_action = "pause"
 # jerk_at = 1.86
 
 [demo]
-object_radius = 10
+object_radius = 100
 # enable_planets = true
 enable_brick = true
 # enable_ball = true
 # randomize_positions = true
 
 [rendering] # enable_ball = true
-color_source = "velocity"
+color_source = "demo"

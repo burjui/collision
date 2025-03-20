@@ -1,9 +1,11 @@
 use core::f64;
 use std::{
+    fmt::Write as _,
+    io::{stdout, Write as _},
     iter::zip,
     num::NonZero,
     sync::{mpsc, Arc, Mutex},
-    thread,
+    thread::{self, yield_now},
     time::{Duration, Instant},
 };
 
@@ -49,15 +51,24 @@ pub fn main() -> anyhow::Result<()> {
     let (physics_thread_sender, physics_event_receiver) = mpsc::channel();
     let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
     let sim_total_duration_outer = sim_total_duration.clone();
-    {
+    let physics_thread = {
         let event_loop_proxy = event_loop.create_proxy();
         let mut advance_time = config.simulation.time_limit.is_some();
         let mut time_limit_action_executed = false;
         let mut jerk_applied = false;
         let mut last_redraw = Instant::now();
         let mut waiting_for_redraw = false;
-        let mut x: usize = 0;
-        thread::spawn(move || loop {
+        let mut wait_for_exit = false;
+        thread::spawn(move || 'main_loop: loop {
+            if wait_for_exit {
+                loop {
+                    if let Result::Ok(PhysicsThreadEvent::Exit) = physics_event_receiver.try_recv() {
+                        break 'main_loop;
+                    }
+                    yield_now();
+                }
+            }
+
             let mut physics_guard = physics.lock().unwrap();
             let physics = &mut *physics_guard;
             while let Result::Ok(event) = physics_event_receiver.try_recv() {
@@ -81,8 +92,11 @@ pub fn main() -> anyhow::Result<()> {
                     PhysicsThreadEvent::RedrawComplete => {
                         waiting_for_redraw = false;
                     }
+                    PhysicsThreadEvent::WaitForExit => wait_for_exit = true,
+                    PhysicsThreadEvent::Exit => (),
                 }
             }
+
             if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit) && !time_limit_action_executed {
                 time_limit_action_executed = true;
                 match config.simulation.time_limit_action {
@@ -98,11 +112,9 @@ pub fn main() -> anyhow::Result<()> {
 
             let now = Instant::now();
             if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
-                last_redraw = Instant::now();
+                last_redraw = now;
                 event_loop_proxy.send_event(AppEvent::RequestRedrawPhysics).unwrap();
                 waiting_for_redraw = true;
-                println!("Waiting for redraw ({x})");
-                x += 1;
             }
 
             if advance_time && !waiting_for_redraw {
@@ -123,8 +135,8 @@ pub fn main() -> anyhow::Result<()> {
                     .send_event(AppEvent::StatsUpdated(*physics.stats()))
                     .unwrap();
             }
-        });
-    }
+        })
+    };
 
     let mut app = VelloApp {
         context: render_context,
@@ -148,6 +160,7 @@ pub fn main() -> anyhow::Result<()> {
         stats: Stats::default(),
     };
     event_loop.run_app(&mut app).expect("run to completion");
+    stdout().flush().unwrap();
 
     let mut stats_buffer = String::new();
     let physics_guard = app.physics.lock().unwrap();
@@ -156,10 +169,17 @@ pub fn main() -> anyhow::Result<()> {
     print!("{}", stats_buffer);
     let sim_total_duration_guard = sim_total_duration_outer.lock().unwrap();
     println!("total simulation duration: {:?}", *sim_total_duration_guard);
-    println!(
-        "relative speed: {}",
-        physics.time() / sim_total_duration_guard.as_secs_f64()
-    );
+    if *sim_total_duration_guard > Duration::ZERO {
+        println!(
+            "relative speed: {}",
+            physics.time() / sim_total_duration_guard.as_secs_f64()
+        );
+    }
+    stdout().flush().unwrap();
+    app.physics_thread_sender
+        .send(PhysicsThreadEvent::Exit)
+        .expect("failed to send exit event to physics thread");
+    physics_thread.join().expect("failed to join physics thread");
 
     Ok(())
 }
@@ -179,6 +199,8 @@ enum PhysicsThreadEvent {
         mouse_influence_radius: f64,
     },
     RedrawComplete,
+    WaitForExit,
+    Exit,
 }
 
 fn enable_floating_point_exceptions() {
@@ -277,7 +299,12 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
-                        Key::Named(NamedKey::Escape) => event_loop.exit(),
+                        Key::Named(NamedKey::Escape) => {
+                            self.physics_thread_sender
+                                .send(PhysicsThreadEvent::WaitForExit)
+                                .unwrap();
+                            event_loop.exit();
+                        }
                         Key::Named(NamedKey::Space) => {
                             self.physics_thread_sender
                                 .send(PhysicsThreadEvent::ToggleAdvanceTime)
@@ -539,8 +566,6 @@ fn draw_grid(scene: &mut Scene, topleft: Vector2<f64>, bottomright: Vector2<f64>
         )
     }
 }
-
-use std::fmt::Write;
 
 fn draw_stats(
     scene: &mut Scene,

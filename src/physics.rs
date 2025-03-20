@@ -19,6 +19,7 @@ pub mod object;
 pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     objects: ObjectSoa,
+    object_updates: Vec<ObjectUpdate>,
     grid: Grid,
     time: f64,
     constraints: ConstraintBox,
@@ -50,6 +51,7 @@ impl PhysicsEngine {
         Ok(Self {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
+            object_updates: Vec::default(),
             grid: Grid::default(),
             time: 0.0,
             constraints,
@@ -178,8 +180,11 @@ impl PhysicsEngine {
         self.stats.grid_duration.update(start.elapsed());
 
         let start = Instant::now();
+        if self.object_updates.len() != self.objects.len() {
+            self.object_updates.resize(self.objects.len(), ObjectUpdate::default());
+        }
         for object_index in 0..self.objects.positions.len() {
-            Self::update_object_leapfrog_yoshida_cpu(
+            self.object_updates[object_index] = Self::update_object_leapfrog_yoshida_cpu(
                 object_index,
                 dt,
                 &mut self.objects.positions,
@@ -191,6 +196,10 @@ impl PhysicsEngine {
                 &self.objects.masses[..self.objects.planet_count],
                 &self.grid,
             );
+        }
+        for object_index in 0..self.objects.positions.len() {
+            self.objects.positions[object_index] = self.object_updates[object_index].position;
+            self.objects.velocities[object_index] = self.object_updates[object_index].velocity;
         }
         for object_index in 0..self.objects.positions.len() {
             Self::apply_constraints(
@@ -215,7 +224,7 @@ impl PhysicsEngine {
         proximity_force_constant: f64,
         planet_masses: &[f64],
         grid: &Grid,
-    ) {
+    ) -> ObjectUpdate {
         use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
         let x0 = positions[object_index];
         let v0 = velocities[object_index];
@@ -258,8 +267,10 @@ impl PhysicsEngine {
             grid,
         );
         let v3 = v0 + a3 * (D3 * dt);
-        positions[object_index] = x0 + v3 * (C4 * dt);
-        velocities[object_index] = v3;
+        ObjectUpdate {
+            position: x0 + v3 * (C4 * dt),
+            velocity: v3,
+        }
     }
 
     fn force_acceleration(
@@ -332,7 +343,7 @@ impl PhysicsEngine {
             (1, 0),
             (1, 1),
         ];
-        // let radius = radii[object_index];
+        let radius = radii[object_index];
         for (dx, dy) in CELL_OFFSETS {
             let neighbor_cell_x = x.wrapping_add_signed(dx);
             let other_y = y.wrapping_add_signed(dy);
@@ -344,24 +355,26 @@ impl PhysicsEngine {
                     } in &grid.cell_records[records_start..records_end]
                     {
                         if other_object_index != object_index {
-                            let from_other = positions[other_object_index] - object_position;
-                            let distance_squared = from_other.magnitude_squared();
-                            // let other_radius = radii[other_object_index];
+                            let to_other = positions[other_object_index] - object_position;
+                            let distance_squared = to_other.magnitude_squared();
                             let distance = distance_squared.sqrt();
-                            let direction = from_other / distance;
-                            // let touching_distance = (radius + other_radius) * 0.5;
-                            // if object_index == 0 {
-                            //     println!("Distance to {other_object_index}: {distance}");
-                            // }
-                            force += direction * proximity_force_constant / distance_squared;
+                            let towards_other = to_other / distance;
+                            let touch_distance = radius + radii[other_object_index];
+                            let distance_divisor = touch_distance - distance;
+                            if object_index == 0 {
+                                println!("touch_distance: {touch_distance}");
+                                println!("distance_squared: {distance_squared}");
+                                println!("distance_divisor: {distance_divisor}");
+                            }
+                            force += -towards_other * proximity_force_constant / distance_divisor;
                         }
                     }
                 }
             }
         }
-        // if object_index == 0 {
-        //     println!("Proximity force: {:?}", force);
-        // }
+        if object_index == 0 {
+            println!("Proximity force: {:?}", force);
+        }
         force
     }
 
@@ -513,6 +526,12 @@ impl ConstraintBox {
     pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
         Self { topleft, bottomright }
     }
+}
+
+#[derive(Default, Clone, Copy)]
+struct ObjectUpdate {
+    position: Vector2<f64>,
+    velocity: Vector2<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
