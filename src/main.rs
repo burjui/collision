@@ -249,7 +249,7 @@ impl ApplicationHandler<()> for VelloApp<'_> {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_position = Vector2::new(position.x as f64, position.y as f64);
+                self.mouse_position = Vector2::new(position.x, position.y);
                 request_redraw(&self.state);
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -373,14 +373,14 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
                                 transform,
                                 color.unwrap_or(css::GRAY),
                                 None,
-                                &Circle::new((particle_position.x, particle_position.y), particle_radius.into()),
+                                &Circle::new((particle_position.x, particle_position.y), particle_radius),
                             );
                             if draw_ids {
                                 text.add(
                                     &mut scene,
                                     10.0,
                                     None,
-                                    Affine::translate((particle_position.x as f64, particle_position.y as f64)),
+                                    Affine::translate((particle_position.x, particle_position.y)),
                                     &format!("{}", object_index),
                                 );
                             }
@@ -407,7 +407,7 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
             transform,
             color.unwrap_or(css::WHITE),
             None,
-            &Circle::new((planet_position.x, planet_position.y), planet_radius.into()),
+            &Circle::new((planet_position.x, planet_position.y), planet_radius),
         );
     }
 
@@ -419,10 +419,10 @@ fn draw_physics(physics: &PhysicsEngine, scene: &mut Scene, DrawIds(draw_ids): D
         css::WHITE,
         None,
         &Rect::new(
-            topleft.x as f64,
-            topleft.y as f64,
-            bottomright.x as f64,
-            bottomright.y as f64,
+            topleft.x,
+            topleft.y,
+            bottomright.x,
+            bottomright.y,
         ),
     );
 }
@@ -433,7 +433,7 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_i
         Affine::IDENTITY,
         Color::new([1.0, 1.0, 1.0, 0.3]),
         None,
-        &Circle::new((mouse_position.x, mouse_position.y), mouse_influence_radius as f64),
+        &Circle::new((mouse_position.x, mouse_position.y), mouse_influence_radius),
     );
 }
 
@@ -509,9 +509,6 @@ fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), physics: &Ph
     let stats = physics.stats();
     write_duration_stat(buffer, "updates", &stats.updates_duration)?;
     write_duration_stat(buffer, "grid", &stats.grid_duration)?;
-    write_duration_stat(buffer, "collisions", &stats.collisions_duration)?;
-    write_duration_stat(buffer, "constraints", &stats.constraints_duration)?;
-    write_duration_stat(buffer, "total", &stats.total_duration)?;
     Ok(())
 }
 

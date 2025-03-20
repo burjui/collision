@@ -4,15 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Context;
-use grid::{CellRecord, Grid};
+use grid::Grid;
 use object::{ObjectPrototype, ObjectSoa, ObjectUpdate};
-use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
     app_config::{config, DtSource},
-    fixed_vec::FixedVec,
-    gpu::{Gpu, GpuBufferAccess, GpuDeviceBuffer},
     vector2::Vector2,
 };
 
@@ -27,14 +23,14 @@ pub struct PhysicsEngine {
     time: f64,
     constraints: ConstraintBox,
     stats: Stats,
-    restitution_coefficient: f64,
+    // restitution_coefficient: f64,
     global_gravity: Vector2<f64>,
-    gpu: Gpu,
-    yoshida_kernel: Kernel,
-    yoshida_kernel_no_planets: Kernel,
-    yoshida_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    yoshida_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    yoshida_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
+    // gpu: Gpu,
+    // yoshida_kernel: Kernel,
+    // yoshida_kernel_no_planets: Kernel,
+    // yoshida_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    // yoshida_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    // yoshida_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
 }
 
 impl PhysicsEngine {
@@ -46,11 +42,11 @@ impl PhysicsEngine {
             Vector2::new(0.0, 0.0),
             Vector2::new(config.window.width as f64, config.window.height as f64),
         );
-        let gpu = Gpu::default(10)?;
-        let yoshida_program = gpu.build_program("src/yoshida.cl")?;
-        let yoshida_kernel = Kernel::create(&yoshida_program, "yoshida").context("Failed to create kernel")?;
-        let yoshida_kernel_no_planets =
-            Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
+        // let gpu = Gpu::default(10)?;
+        // let yoshida_program = gpu.build_program("src/yoshida.cl")?;
+        // let yoshida_kernel = Kernel::create(&yoshida_program, "yoshida").context("Failed to create kernel")?;
+        // let yoshida_kernel_no_planets =
+        //     Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
         Ok(Self {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
@@ -58,14 +54,14 @@ impl PhysicsEngine {
             time: 0.0,
             constraints,
             stats: Stats::default(),
-            restitution_coefficient: config.simulation.restitution_coefficient,
+            // restitution_coefficient: config.simulation.restitution_coefficient,
             global_gravity: Vector2::from(config.simulation.gravity),
-            gpu,
-            yoshida_kernel,
-            yoshida_kernel_no_planets,
-            yoshida_position_buffer: None,
-            yoshida_velocity_buffer: None,
-            yoshida_planet_mass_buffer: None,
+            // gpu,
+            // yoshida_kernel,
+            // yoshida_kernel_no_planets,
+            // yoshida_position_buffer: None,
+            // yoshida_velocity_buffer: None,
+            // yoshida_planet_mass_buffer: None,
         })
     }
 
@@ -145,8 +141,8 @@ impl PhysicsEngine {
                     },
                 );
                 // Experimentally derived
-                let gravity_factor = max_gravity_squared.sqrt().sqrt() * 80.0 / min_object_size.sqrt();
-                speed_factor / 2.0 * (1.0 / velocity_factor.max(gravity_factor).max(1.0))
+                let force_factor = max_gravity_squared.sqrt().sqrt() * 80.0 / min_object_size.sqrt();
+                speed_factor / 2.0 * (1.0 / velocity_factor.max(force_factor).max(1.0))
             }
             DtSource::Fixed(dt) => dt,
         };
@@ -170,28 +166,20 @@ impl PhysicsEngine {
         self.time += dt;
 
         let start = Instant::now();
-        self.update_objects(dt);
-        self.stats.updates_duration.update(start.elapsed());
-
-        let start = Instant::now();
         self.grid.update(&self.objects);
         self.stats.grid_duration.update(start.elapsed());
 
         let start = Instant::now();
-        self.process_collisions();
-        self.stats.collisions_duration.update(start.elapsed());
-
-        let start = Instant::now();
-        self.apply_constraints();
-        self.stats.constraints_duration.update(start.elapsed());
+        self.update_objects(dt);
+        self.stats.updates_duration.update(start.elapsed());
     }
 
     fn update_objects(&mut self, dt: f64) {
-        if config().simulation.enable_gpu {
-            self.update_objects_leapfrog_yoshida_gpu(dt);
-        } else {
-            self.update_object_leapfrog_yoshida_cpu(dt)
-        }
+        // if config().simulation.enable_gpu {
+        //     self.update_objects_leapfrog_yoshida_gpu(dt);
+        // } else {
+        self.update_object_leapfrog_yoshida_cpu(dt)
+        // }
     }
 
     fn update_object_leapfrog_yoshida_cpu(&mut self, dt: f64) {
@@ -209,116 +197,116 @@ impl PhysicsEngine {
         }
     }
 
-    fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f64) {
-        if self.yoshida_gpu_buffers_are_outdated() {
-            self.allocate_yoshida_gpu_buffers();
-        }
-        self.update_yoshida_gpu_buffers();
-        if self.objects.planet_count > 0 {
-            self.execute_yoshida_gpu_kernel(dt);
-        } else {
-            self.execute_yoshida_no_planets_gpu_kernel(dt);
-        }
-    }
+    // fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f64) {
+    //     if self.yoshida_gpu_buffers_are_outdated() {
+    //         self.allocate_yoshida_gpu_buffers();
+    //     }
+    //     self.update_yoshida_gpu_buffers();
+    //     if self.objects.planet_count > 0 {
+    //         self.execute_yoshida_gpu_kernel(dt);
+    //     } else {
+    //         self.execute_yoshida_no_planets_gpu_kernel(dt);
+    //     }
+    // }
 
-    fn execute_yoshida_gpu_kernel(&mut self, dt: f64) {
-        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
-        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel);
-        kernel.set_global_work_size(self.objects.len());
-        unsafe {
-            kernel.set_arg(position_buffer.buffer());
-            kernel.set_arg(velocity_buffer.buffer());
-            kernel.set_arg(&dt);
-            kernel.set_arg(&self.global_gravity);
-            kernel.set_arg(planet_mass_buffer.buffer());
-            kernel.set_arg(&self.objects.planet_count);
-            kernel.set_arg(&Self::GRAVITATIONAL_CONSTANT);
-        }
-        self.gpu
-            .enqueue_execute_kernel(&mut kernel)
-            .context("Failed to execute kernel")
-            .unwrap();
-        self.gpu
-            .enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
-            .unwrap();
-        self.gpu
-            .enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
-            .unwrap();
-        self.gpu.submit_queue().unwrap();
-    }
+    // fn execute_yoshida_gpu_kernel(&mut self, dt: f64) {
+    //     let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
+    //     let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
+    //     let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
+    //     let mut kernel = ExecuteKernel::new(&self.yoshida_kernel);
+    //     kernel.set_global_work_size(self.objects.len());
+    //     unsafe {
+    //         kernel.set_arg(position_buffer.buffer());
+    //         kernel.set_arg(velocity_buffer.buffer());
+    //         kernel.set_arg(&dt);
+    //         kernel.set_arg(&self.global_gravity);
+    //         kernel.set_arg(planet_mass_buffer.buffer());
+    //         kernel.set_arg(&self.objects.planet_count);
+    //         kernel.set_arg(&Self::GRAVITATIONAL_CONSTANT);
+    //     }
+    //     self.gpu
+    //         .enqueue_execute_kernel(&mut kernel)
+    //         .context("Failed to execute kernel")
+    //         .unwrap();
+    //     self.gpu
+    //         .enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
+    //         .unwrap();
+    //     self.gpu
+    //         .enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
+    //         .unwrap();
+    //     self.gpu.submit_queue().unwrap();
+    // }
 
-    fn execute_yoshida_no_planets_gpu_kernel(&mut self, dt: f64) {
-        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
-        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel_no_planets);
-        kernel.set_global_work_size(self.objects.len());
-        unsafe {
-            kernel.set_arg(position_buffer.buffer());
-            kernel.set_arg(velocity_buffer.buffer());
-            kernel.set_arg(&dt);
-            kernel.set_arg(&self.global_gravity);
-        }
-        self.gpu
-            .enqueue_execute_kernel(&mut kernel)
-            .context("Failed to execute kernel")
-            .unwrap();
-        self.gpu
-            .enqueue_read_device_buffer(position_buffer, self.objects.positions.as_mut_slice())
-            .unwrap();
-        self.gpu
-            .enqueue_read_device_buffer(velocity_buffer, self.objects.velocities.as_mut_slice())
-            .unwrap();
-        self.gpu.submit_queue().unwrap();
-    }
+    // fn execute_yoshida_no_planets_gpu_kernel(&mut self, dt: f64) {
+    //     let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
+    //     let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
+    //     let mut kernel = ExecuteKernel::new(&self.yoshida_kernel_no_planets);
+    //     kernel.set_global_work_size(self.objects.len());
+    //     unsafe {
+    //         kernel.set_arg(position_buffer.buffer());
+    //         kernel.set_arg(velocity_buffer.buffer());
+    //         kernel.set_arg(&dt);
+    //         kernel.set_arg(&self.global_gravity);
+    //     }
+    //     self.gpu
+    //         .enqueue_execute_kernel(&mut kernel)
+    //         .context("Failed to execute kernel")
+    //         .unwrap();
+    //     self.gpu
+    //         .enqueue_read_device_buffer(position_buffer, self.objects.positions.as_mut_slice())
+    //         .unwrap();
+    //     self.gpu
+    //         .enqueue_read_device_buffer(velocity_buffer, self.objects.velocities.as_mut_slice())
+    //         .unwrap();
+    //     self.gpu.submit_queue().unwrap();
+    // }
 
-    fn yoshida_gpu_buffers_are_outdated(&mut self) -> bool {
-        self.yoshida_position_buffer
-            .as_ref()
-            .is_none_or(|b| b.len() != self.objects.len() * 2)
-    }
+    // fn yoshida_gpu_buffers_are_outdated(&mut self) -> bool {
+    //     self.yoshida_position_buffer
+    //         .as_ref()
+    //         .is_none_or(|b| b.len() != self.objects.len() * 2)
+    // }
 
-    fn allocate_yoshida_gpu_buffers(&mut self) {
-        let position_buffer = self
-            .gpu
-            .create_device_buffer(self.objects.positions.len(), GpuBufferAccess::ReadWrite)
-            .context("Failed to create position buffer")
-            .unwrap();
-        let velocity_buffer = self
-            .gpu
-            .create_device_buffer(self.objects.velocities.len(), GpuBufferAccess::ReadWrite)
-            .context("Failed to create velocity buffer")
-            .unwrap();
-        self.yoshida_position_buffer.replace(position_buffer);
-        self.yoshida_velocity_buffer.replace(velocity_buffer);
+    // fn allocate_yoshida_gpu_buffers(&mut self) {
+    //     let position_buffer = self
+    //         .gpu
+    //         .create_device_buffer(self.objects.positions.len(), GpuBufferAccess::ReadWrite)
+    //         .context("Failed to create position buffer")
+    //         .unwrap();
+    //     let velocity_buffer = self
+    //         .gpu
+    //         .create_device_buffer(self.objects.velocities.len(), GpuBufferAccess::ReadWrite)
+    //         .context("Failed to create velocity buffer")
+    //         .unwrap();
+    //     self.yoshida_position_buffer.replace(position_buffer);
+    //     self.yoshida_velocity_buffer.replace(velocity_buffer);
 
-        if self.objects.planet_count > 0 {
-            self.yoshida_planet_mass_buffer.replace(
-                self.gpu
-                    .create_device_buffer(self.objects.planet_count, GpuBufferAccess::ReadOnly)
-                    .context("Failed to create planet mass buffer")
-                    .unwrap(),
-            );
-        }
-    }
+    //     if self.objects.planet_count > 0 {
+    //         self.yoshida_planet_mass_buffer.replace(
+    //             self.gpu
+    //                 .create_device_buffer(self.objects.planet_count, GpuBufferAccess::ReadOnly)
+    //                 .context("Failed to create planet mass buffer")
+    //                 .unwrap(),
+    //         );
+    //     }
+    // }
 
-    fn update_yoshida_gpu_buffers(&mut self) {
-        self.gpu
-            .enqueue_write_buffer(self.yoshida_position_buffer.as_mut().unwrap(), &self.objects.positions)
-            .unwrap();
-        self.gpu
-            .enqueue_write_buffer(self.yoshida_velocity_buffer.as_mut().unwrap(), &self.objects.velocities)
-            .unwrap();
-        if self.objects.planet_count > 0 {
-            self.gpu
-                .enqueue_write_buffer(
-                    self.yoshida_planet_mass_buffer.as_mut().unwrap(),
-                    &self.objects.masses[..self.objects.planet_count],
-                )
-                .unwrap();
-        }
-    }
+    // fn update_yoshida_gpu_buffers(&mut self) {
+    //     self.gpu
+    //         .enqueue_write_buffer(self.yoshida_position_buffer.as_mut().unwrap(), &self.objects.positions)
+    //         .unwrap();
+    //     self.gpu
+    //         .enqueue_write_buffer(self.yoshida_velocity_buffer.as_mut().unwrap(), &self.objects.velocities)
+    //         .unwrap();
+    //     if self.objects.planet_count > 0 {
+    //         self.gpu
+    //             .enqueue_write_buffer(
+    //                 self.yoshida_planet_mass_buffer.as_mut().unwrap(),
+    //                 &self.objects.masses[..self.objects.planet_count],
+    //             )
+    //             .unwrap();
+    //     }
+    // }
 
     fn update_object_leapfrog_yoshida(
         object_index: usize,
@@ -364,113 +352,6 @@ impl PhysicsEngine {
         }
         gravity
     }
-
-    fn process_collisions(&mut self) {
-        for range in self.grid.cell_iter() {
-            let cell_records = &self.grid.cell_records[range];
-            let (x, y) = cell_records[0].cell_coords;
-            for &CellRecord { object_index, .. } in cell_records {
-                const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
-                    // Objects in the same cell are the closest
-                    (0, 0),
-                    // Checking only these neighboring cells to avoid duplicate collisions
-                    (-1, 1),
-                    (0, 1),
-                    (1, 1),
-                    (1, 0),
-                ];
-                for (ox, oy) in AREA_CELL_OFFSETS {
-                    let x = x.wrapping_add_signed(ox);
-                    let y = y.wrapping_add_signed(oy);
-                    if x < self.grid.size().x && y < self.grid.size().y {
-                        if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
-                            let candidate_area = self.grid.cell_records[start..end]
-                                .iter()
-                                .copied()
-                                .collect::<FixedVec<_, 4>>();
-                            Self::process_object_with_cell_collisions(
-                                object_index,
-                                &candidate_area,
-                                self.restitution_coefficient,
-                                &mut self.objects.positions,
-                                &mut self.objects.velocities,
-                                &self.objects.radii,
-                                &self.objects.masses,
-                                &self.objects.is_planet,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn process_object_with_cell_collisions(
-        object1_index: usize,
-        candidate_area: &[CellRecord],
-        restitution_coefficient: f64,
-        positions: &mut [Vector2<f64>],
-        velocities: &mut [Vector2<f64>],
-        radii: &[f64],
-        masses: &[f64],
-        is_planet: &[bool],
-    ) {
-        for &CellRecord {
-            object_index: object2_index,
-            ..
-        } in candidate_area
-        {
-            if object1_index != object2_index {
-                process_object_collision(
-                    object1_index,
-                    object2_index,
-                    restitution_coefficient,
-                    positions,
-                    velocities,
-                    radii,
-                    masses,
-                    is_planet,
-                );
-            }
-        }
-    }
-
-    fn apply_constraints(&mut self) {
-        let cb = self.constraints;
-        for ((position, velocity), radius) in zip(
-            zip(&mut self.objects.positions, &mut self.objects.velocities),
-            &self.objects.radii,
-        ) {
-            let initial_velocity = *velocity;
-            if position.x - radius < cb.topleft.x {
-                position.x = cb.topleft.x + radius;
-                if self.enable_constraint_bouncing {
-                    velocity.x *= -1.0;
-                }
-            } else if position.x + radius > cb.bottomright.x {
-                position.x = cb.bottomright.x - radius;
-                if self.enable_constraint_bouncing {
-                    velocity.x *= -1.0;
-                }
-            }
-
-            if position.y - radius < cb.topleft.y {
-                position.y = cb.topleft.y + radius;
-                if self.enable_constraint_bouncing {
-                    velocity.y *= -1.0;
-                }
-            } else if position.y + radius > cb.bottomright.y {
-                position.y = cb.bottomright.y - radius;
-                if self.enable_constraint_bouncing {
-                    velocity.y *= -1.0;
-                }
-            }
-
-            if *velocity != initial_velocity {
-                *velocity *= self.restitution_coefficient;
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -514,53 +395,5 @@ impl Default for DurationStat {
 pub struct Stats {
     pub updates_duration: DurationStat,
     pub grid_duration: DurationStat,
-    pub collisions_duration: DurationStat,
-    pub constraints_duration: DurationStat,
     pub total_duration: DurationStat,
-}
-
-fn process_object_collision(
-    object1_index: usize,
-    object2_index: usize,
-    restitution_coefficient: f64,
-    positions: &mut [Vector2<f64>],
-    velocities: &mut [Vector2<f64>],
-    radii: &[f64],
-    masses: &[f64],
-    is_planet: &[bool],
-) {
-    let collision_distance = radii[object1_index] + radii[object2_index];
-    let from_1_to_2 = positions[object1_index] - positions[object2_index];
-    if from_1_to_2.magnitude_squared() <= collision_distance * collision_distance {
-        let mass1 = masses[object1_index];
-        let mass2 = masses[object2_index];
-        let total_mass = mass1 + mass2;
-        let mut velocity1 = velocities[object1_index];
-        let mut velocity2 = velocities[object2_index];
-        let distance = from_1_to_2.magnitude();
-        {
-            let divisor = (total_mass * distance * distance).max(f64::EPSILON);
-            let velocity_diff = velocity1 - velocity2;
-            velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
-            velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
-        }
-        let intersection_depth = collision_distance - distance;
-        let momentum1 = mass1 * velocity1.magnitude();
-        let momentum2 = mass2 * velocity2.magnitude();
-        let total_momentum = momentum1 + momentum2;
-        let position_adjustment_base =
-            from_1_to_2.normalize() * (intersection_depth / total_momentum.max(f64::EPSILON));
-        positions[object1_index] += position_adjustment_base * momentum2;
-        positions[object2_index] -= position_adjustment_base * momentum1;
-
-        if !is_planet[object1_index] {
-            velocity1 *= restitution_coefficient;
-        }
-        if !is_planet[object2_index] {
-            velocity2 *= restitution_coefficient;
-        }
-
-        velocities[object1_index] = velocity1;
-        velocities[object2_index] = velocity2;
-    }
 }
