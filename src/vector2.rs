@@ -156,6 +156,16 @@ where
     }
 }
 
+impl<T> MulAssign<Vector2<T>> for Vector2<T>
+where
+    T: MulAssign + Copy,
+{
+    fn mul_assign(&mut self, rhs: Vector2<T>) {
+        self.x *= rhs.x;
+        self.y *= rhs.y;
+    }
+}
+
 impl<T> Div<T> for Vector2<T>
 where
     T: Div<Output = T> + Copy,

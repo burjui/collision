@@ -95,6 +95,16 @@ impl PhysicsEngine {
         &self.stats
     }
 
+    #[must_use]
+    pub fn constraints(&self) -> &ConstraintBox {
+        &self.constraints
+    }
+
+    #[must_use]
+    pub fn time(&self) -> f64 {
+        self.time
+    }
+
     pub fn advance(&mut self, speed_factor: f64) {
         let start = Instant::now();
         let dt = match config().simulation.dt {
@@ -152,16 +162,6 @@ impl PhysicsEngine {
         self.stats.total_duration.update(start.elapsed());
     }
 
-    #[must_use]
-    pub fn constraints(&self) -> &ConstraintBox {
-        &self.constraints
-    }
-
-    #[must_use]
-    pub fn time(&self) -> f64 {
-        self.time
-    }
-
     fn update(&mut self, dt: f64) {
         self.time += dt;
 
@@ -170,14 +170,6 @@ impl PhysicsEngine {
         self.stats.grid_duration.update(start.elapsed());
 
         let start = Instant::now();
-        self.update_objects(dt);
-        self.stats.updates_duration.update(start.elapsed());
-    }
-
-    fn update_objects(&mut self, dt: f64) {
-        // if config().simulation.enable_gpu {
-        //     self.update_objects_leapfrog_yoshida_gpu(dt);
-        // } else {
         for object_index in 0..self.objects.positions.len() {
             Self::update_object_leapfrog_yoshida_cpu(
                 object_index,
@@ -197,7 +189,7 @@ impl PhysicsEngine {
                 &self.constraints,
             );
         }
-        // }
+        self.stats.updates_duration.update(start.elapsed());
     }
 
     fn update_object_leapfrog_yoshida_cpu(
@@ -226,12 +218,12 @@ impl PhysicsEngine {
 
     fn force_acceleration(
         object_index: usize,
-        position: Vector2<f64>,
+        object_position: Vector2<f64>,
         positions: &[Vector2<f64>],
         global_gravity: Vector2<f64>,
         planet_masses: &[f64],
     ) -> Vector2<f64> {
-        global_gravity + Self::planetary_gravity_acceleration(object_index, position, positions, planet_masses)
+        global_gravity + Self::planetary_gravity_acceleration(object_index, object_position, positions, planet_masses)
     }
 
     fn planetary_gravity_acceleration(
@@ -262,21 +254,15 @@ impl PhysicsEngine {
         let position = &mut positions[object_index];
         let velocity = &mut velocities[object_index];
         let radius = radii[object_index];
-        // let initial_velocity = *velocity;
-        if position.x - radius < cb.topleft.x {
-            position.x = cb.topleft.x + radius;
-            velocity.x *= -1.0;
-        } else if position.x + radius > cb.bottomright.x {
-            position.x = cb.bottomright.x - radius;
-            velocity.x *= -1.0;
-        }
-        if position.y - radius < cb.topleft.y {
-            position.y = cb.topleft.y + radius;
-            velocity.y *= -1.0;
-        } else if position.y + radius > cb.bottomright.y {
-            position.y = cb.bottomright.y - radius;
-            velocity.y *= -1.0;
-        }
+        let crossed_horizontally = position.x - radius < cb.topleft.x || position.x + radius > cb.bottomright.x;
+        let crossed_vertically = position.y - radius < cb.topleft.y || position.y + radius > cb.bottomright.y;
+        let velocity_factor = Vector2::new(
+            -1.0 * crossed_horizontally as u64 as f64 + 1.0 * (!crossed_horizontally) as u64 as f64,
+            -1.0 * crossed_vertically as u64 as f64 + 1.0 * (!crossed_vertically) as u64 as f64,
+        );
+        *velocity *= velocity_factor;
+        position.x = position.x.clamp(cb.topleft.x + radius, cb.bottomright.x - radius);
+        position.y = position.y.clamp(cb.topleft.y + radius, cb.bottomright.y - radius);
 
         // if *velocity != initial_velocity {
         //     *velocity *= self.restitution_coefficient;

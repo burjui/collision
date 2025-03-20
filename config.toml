@@ -7,7 +7,7 @@ dt = { fixed = 0.0001 }
 speed_factor = 1
 enable_gpu = false
 restitution_coefficient = 0.995
-gravity = [0, 0]
+gravity = [0, 10000]
 # time_limit = 20
 # time_limit_action = "pause"
 # jerk_at = 1.86
