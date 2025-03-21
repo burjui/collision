@@ -9,7 +9,8 @@ enable_gpu = false
 restitution_coefficient = 1
 gravity = [0, 0]
 gravitational_constant = 10000
-# time_limit = 30
+# auto_start = true
+time_limit = 0.02
 # time_limit_action = "pause"
 # jerk_at = 1.86
 

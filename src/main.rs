@@ -53,7 +53,7 @@ pub fn main() -> anyhow::Result<()> {
 
         let sim_total_duration = sim_total_duration.clone();
         let event_loop_proxy = event_loop.create_proxy();
-        let mut advance_time = config.simulation.time_limit.is_some();
+        let mut advance_time = config.simulation.auto_start;
         let mut time_limit_action_executed = false;
         let mut jerk_applied = false;
         let mut last_redraw = Instant::now();
@@ -116,6 +116,7 @@ pub fn main() -> anyhow::Result<()> {
                 if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit)
                     && !time_limit_action_executed
                 {
+                    println!("Time limit reached");
                     time_limit_action_executed = true;
                     advance_time = false;
                     match config.simulation.time_limit_action {
