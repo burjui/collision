@@ -30,7 +30,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
     event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
@@ -43,121 +43,13 @@ pub fn main() -> anyhow::Result<()> {
     let render_context = RenderContext::new();
     let renderers: Vec<Option<Renderer>> = vec![];
     let render_state = None::<RenderState<'_>>;
-    let config = config();
     let (physics_thread_sender, physics_event_receiver) = mpsc::channel();
     let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
     let physics_thread = {
-        let mut physics = PhysicsEngine::new()?;
-        create_demo(&mut physics);
-        println!("{} objects", physics.objects().len());
-
         let sim_total_duration = sim_total_duration.clone();
         let event_loop_proxy = event_loop.create_proxy();
-        let mut advance_time = config.simulation.auto_start;
-        let mut time_limit_action_executed = false;
-        let mut last_redraw = Instant::now();
-        let mut waiting_for_redraw = false;
-        let mut show_grid = false;
-        let mut show_ids = false;
-        let mut waiting_for_exit = false;
-        thread::spawn(move || {
-            'main_loop: loop {
-                fn send_event(event_loop_proxy: &winit::event_loop::EventLoopProxy<AppEvent>, mut event: AppEvent) {
-                    let _ = event_loop_proxy
-                        .send_event(event.take())
-                        .map_err(|e| eprintln!("Failed to send event {event:?}: {}", &e));
-                }
-
-                if waiting_for_exit {
-                    if let Result::Ok(PhysicsThreadEvent::Exit) = physics_event_receiver.try_recv() {
-                        break 'main_loop;
-                    } else {
-                        continue;
-                    }
-                }
-
-                while let Result::Ok(event) = physics_event_receiver.try_recv() {
-                    match event {
-                        PhysicsThreadEvent::ToggleAdvanceTime => {
-                            advance_time = !advance_time;
-                        }
-                        PhysicsThreadEvent::ToggleShowIds => {
-                            show_ids = !show_ids;
-                        }
-                        PhysicsThreadEvent::ToggleShowGrid => {
-                            show_grid = !show_grid;
-                        }
-                        PhysicsThreadEvent::UnidirectionalKick {
-                            mouse_position,
-                            mouse_influence_radius,
-                        } => {
-                            let objects = physics.objects_mut();
-                            for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
-                                let from_mouse_to_object = position - mouse_position;
-                                if (from_mouse_to_object).magnitude() < mouse_influence_radius {
-                                    *velocity += from_mouse_to_object.normalize() * 2000.0;
-                                }
-                            }
-                            send_event(&event_loop_proxy, AppEvent::RequestRedraw);
-                        }
-                        PhysicsThreadEvent::RedrawComplete => {
-                            waiting_for_redraw = false;
-                        }
-                        PhysicsThreadEvent::WaitForExit => {
-                            waiting_for_exit = true;
-                            send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
-                            continue 'main_loop;
-                        }
-                        PhysicsThreadEvent::Exit => break 'main_loop,
-                    }
-                }
-
-                if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit)
-                    && !time_limit_action_executed
-                {
-                    println!("Time limit reached");
-                    time_limit_action_executed = true;
-                    advance_time = false;
-                    match config.simulation.time_limit_action {
-                        TimeLimitAction::Exit => {
-                            waiting_for_exit = true;
-                            send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
-                            continue;
-                        }
-                        TimeLimitAction::Pause => send_event(&event_loop_proxy, AppEvent::RequestRedraw),
-                    }
-                }
-
-                let now = Instant::now();
-                if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 && !waiting_for_redraw {
-                    last_redraw = now;
-                    let mut scenes = draw_physics(&physics, DrawIds(show_ids));
-                    let mut scene = scenes.remove(0);
-                    for subscene in scenes {
-                        scene.append(&subscene, None);
-                    }
-                    if show_grid && physics.grid().cell_size() > 0.0 {
-                        draw_grid(
-                            &mut scene,
-                            physics.constraints().topleft,
-                            physics.constraints().bottomright,
-                            physics.grid().cell_size(),
-                        );
-                    }
-                    send_event(&event_loop_proxy, AppEvent::RequestRedrawPhysics(scene));
-                }
-
-                if advance_time {
-                    let start = Instant::now();
-                    physics.advance(config.simulation.speed_factor);
-                    *sim_total_duration.lock().unwrap() += start.elapsed();
-                    send_event(&event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
-                }
-            }
-            physics
-        })
+        thread::spawn(move || physics_thread(sim_total_duration, event_loop_proxy, physics_event_receiver))
     };
-
     let mut app = VelloApp {
         context: render_context,
         renderers,
@@ -177,10 +69,10 @@ pub fn main() -> anyhow::Result<()> {
         stats: Stats::default(),
     };
     event_loop.run_app(&mut app).expect("run to completion");
-
     app.physics_thread_sender
         .send(PhysicsThreadEvent::Exit)
         .expect("failed to send exit event to physics thread");
+
     let physics = physics_thread.join().expect("failed to join physics thread");
     let mut stats_buffer = String::new();
     write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), physics.stats())?;
@@ -195,6 +87,126 @@ pub fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn enable_floating_point_exceptions() {
+    unsafe extern "C" {
+        fn feenableexcept(excepts: i32) -> i32;
+    }
+    unsafe {
+        feenableexcept(1);
+    }
+}
+
+fn physics_thread(
+    sim_total_duration: Arc<Mutex<Duration>>,
+    event_loop_proxy: EventLoopProxy<AppEvent>,
+    physics_event_receiver: mpsc::Receiver<PhysicsThreadEvent>,
+) -> PhysicsEngine {
+    let config = config();
+    let mut advance_time = config.simulation.auto_start;
+    let mut time_limit_action_executed = false;
+    let mut last_redraw = Instant::now();
+    let mut waiting_for_redraw = false;
+    let mut show_grid = false;
+    let mut show_ids = false;
+    let mut waiting_for_exit = false;
+    let mut physics = PhysicsEngine::new().unwrap();
+    create_demo(&mut physics);
+    println!("{} objects", physics.objects().len());
+    'main_loop: loop {
+        fn send_event(event_loop_proxy: &EventLoopProxy<AppEvent>, mut event: AppEvent) {
+            let _ = event_loop_proxy
+                .send_event(event.take())
+                .map_err(|e| eprintln!("Failed to send event {event:?}: {}", &e));
+        }
+
+        if waiting_for_exit {
+            if let Result::Ok(PhysicsThreadEvent::Exit) = physics_event_receiver.try_recv() {
+                break 'main_loop;
+            } else {
+                continue;
+            }
+        }
+
+        while let Result::Ok(event) = physics_event_receiver.try_recv() {
+            match event {
+                PhysicsThreadEvent::ToggleAdvanceTime => {
+                    advance_time = !advance_time;
+                }
+                PhysicsThreadEvent::ToggleShowIds => {
+                    show_ids = !show_ids;
+                }
+                PhysicsThreadEvent::ToggleShowGrid => {
+                    show_grid = !show_grid;
+                }
+                PhysicsThreadEvent::UnidirectionalKick {
+                    mouse_position,
+                    mouse_influence_radius,
+                } => {
+                    let objects = physics.objects_mut();
+                    for (&position, velocity) in zip(&objects.positions, &mut objects.velocities) {
+                        let from_mouse_to_object = position - mouse_position;
+                        if (from_mouse_to_object).magnitude() < mouse_influence_radius {
+                            *velocity += from_mouse_to_object.normalize() * 2000.0;
+                        }
+                    }
+                    send_event(&event_loop_proxy, AppEvent::RequestRedraw);
+                }
+                PhysicsThreadEvent::RedrawComplete => {
+                    waiting_for_redraw = false;
+                }
+                PhysicsThreadEvent::WaitForExit => {
+                    waiting_for_exit = true;
+                    send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
+                    continue 'main_loop;
+                }
+                PhysicsThreadEvent::Exit => break 'main_loop,
+            }
+        }
+
+        if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit) && !time_limit_action_executed {
+            println!("Time limit reached");
+            time_limit_action_executed = true;
+            advance_time = false;
+            match config.simulation.time_limit_action {
+                TimeLimitAction::Exit => {
+                    waiting_for_exit = true;
+                    send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
+                    continue;
+                }
+                TimeLimitAction::Pause => send_event(&event_loop_proxy, AppEvent::RequestRedraw),
+            }
+        }
+
+        let now = Instant::now();
+        if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 && !waiting_for_redraw {
+            last_redraw = now;
+            let mut scenes = draw_physics(&physics, DrawIds(show_ids));
+            let mut scene = scenes.remove(0);
+            for subscene in scenes {
+                scene.append(&subscene, None);
+            }
+            if show_grid && physics.grid().cell_size() > 0.0 {
+                draw_grid(
+                    &mut scene,
+                    physics.constraints().topleft,
+                    physics.constraints().bottomright,
+                    physics.grid().cell_size(),
+                );
+            }
+            send_event(&event_loop_proxy, AppEvent::RequestRedrawPhysics(scene));
+        }
+
+        if advance_time {
+            let start = Instant::now();
+            physics.advance(config.simulation.speed_factor);
+            *sim_total_duration.lock().unwrap() += start.elapsed();
+            send_event(&event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
+        }
+    }
+
+    physics
 }
 
 enum AppEvent {
@@ -241,22 +253,6 @@ enum PhysicsThreadEvent {
     Exit,
     ToggleShowIds,
     ToggleShowGrid,
-}
-
-fn enable_floating_point_exceptions() {
-    unsafe extern "C" {
-        fn feenableexcept(excepts: i32) -> i32;
-    }
-    unsafe {
-        feenableexcept(1);
-    }
-}
-
-struct RenderState<'s> {
-    // SAFETY: We MUST drop the surface before the `window`, so the fields
-    // must be in this order
-    surface: RenderSurface<'s>,
-    window: Arc<Window>,
 }
 
 struct VelloApp<'s> {
@@ -460,6 +456,13 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             self.cached_window = Some(render_state.window);
         }
     }
+}
+
+struct RenderState<'s> {
+    // SAFETY: We MUST drop the surface before the `window`, so the fields
+    // must be in this order
+    surface: RenderSurface<'s>,
+    window: Arc<Window>,
 }
 
 fn request_redraw(render_state: &Option<RenderState<'_>>) {
