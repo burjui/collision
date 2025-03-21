@@ -137,8 +137,12 @@ impl PhysicsEngine {
                     },
                 );
                 // Experimentally derived
-                let gravity_factor = max_gravity_squared.sqrt().sqrt() / min_object_size.sqrt();
-                speed_factor / 2.0 * (1.0 / velocity_factor.max(gravity_factor).max(1.0))
+                let gravity_factor = max_gravity_squared
+                    .sqrt()
+                    .sqrt()
+                    .max(self.global_gravity.magnitude())
+                    / min_object_size.sqrt();
+                speed_factor / 2.0 * (1.0 / (velocity_factor + gravity_factor).max(1.0))
             }
             DtSource::Fixed(dt) => dt,
         };
