@@ -57,12 +57,13 @@ pub fn main() -> anyhow::Result<()> {
         let mut jerk_applied = false;
         let mut last_redraw = Instant::now();
         let mut waiting_for_redraw = false;
-        let mut wait_for_exit = false;
+        let mut waiting_for_exit = false;
         let mut show_grid = false;
         let mut show_ids = false;
+        let mut fps = 0;
         thread::spawn(move || {
             'main_loop: loop {
-                if wait_for_exit {
+                if waiting_for_exit {
                     loop {
                         if let Result::Ok(PhysicsThreadEvent::Exit) = physics_event_receiver.try_recv() {
                             break 'main_loop;
@@ -101,8 +102,16 @@ pub fn main() -> anyhow::Result<()> {
                         PhysicsThreadEvent::RedrawComplete => {
                             waiting_for_redraw = false;
                         }
-                        PhysicsThreadEvent::WaitForExit => wait_for_exit = true,
+                        PhysicsThreadEvent::WaitForExit => {
+                            waiting_for_exit = true;
+                            event_loop_proxy
+                                .send_event(AppEvent::PhysicsThreadWaitingForExit)
+                                .map_err(|_| ())
+                                .unwrap();
+                            continue 'main_loop;
+                        }
                         PhysicsThreadEvent::Exit => (),
+                        PhysicsThreadEvent::FpsUpdated(new_fps) => fps = new_fps,
                     }
                 }
 
@@ -126,22 +135,24 @@ pub fn main() -> anyhow::Result<()> {
                 }
 
                 let now = Instant::now();
-                if (now - last_redraw).as_secs_f64() > 1.0 / 20.0 && !waiting_for_redraw {
-                    let mut scenes = draw_physics(&physics, DrawIds(show_ids));
-                    if show_grid && physics.grid().cell_size() > 0.0 {
-                        draw_grid(
-                            scenes.last_mut().unwrap(),
-                            physics.constraints().topleft,
-                            physics.constraints().bottomright,
-                            physics.grid().cell_size(),
-                        );
-                    }
+                if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 && !waiting_for_redraw {
                     last_redraw = now;
-                    event_loop_proxy
-                        .send_event(AppEvent::RequestRedrawPhysics(scenes))
-                        .map_err(|_| ())
-                        .unwrap();
-                    waiting_for_redraw = true;
+                    if fps >= 30 {
+                        let mut scenes = draw_physics(&physics, DrawIds(show_ids));
+                        if show_grid && physics.grid().cell_size() > 0.0 {
+                            draw_grid(
+                                scenes.last_mut().unwrap(),
+                                physics.constraints().topleft,
+                                physics.constraints().bottomright,
+                                physics.grid().cell_size(),
+                            );
+                        }
+                        event_loop_proxy
+                            .send_event(AppEvent::RequestRedrawPhysics(scenes))
+                            .map_err(|_| ())
+                            .unwrap();
+                        waiting_for_redraw = true;
+                    }
                 }
 
                 if advance_time && !waiting_for_redraw {
@@ -212,6 +223,7 @@ enum AppEvent {
     RequestRedraw,
     RequestRedrawPhysics(Vec<Scene>),
     StatsUpdated(Stats),
+    PhysicsThreadWaitingForExit,
     Exit,
 }
 
@@ -226,6 +238,7 @@ enum PhysicsThreadEvent {
     Exit,
     ToggleShowIds,
     ToggleShowGrid,
+    FpsUpdated(usize),
 }
 
 fn enable_floating_point_exceptions() {
@@ -325,7 +338,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                             self.physics_thread_sender
                                 .send(PhysicsThreadEvent::WaitForExit)
                                 .unwrap();
-                            event_loop.exit();
                         }
                         Key::Named(NamedKey::Space) => {
                             self.physics_thread_sender
@@ -372,6 +384,9 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                     if let Some(fps) = self.fps_calculator.update(self.frame_count) {
                         self.last_fps = fps;
                         self.min_fps = self.min_fps.min(fps);
+                        self.physics_thread_sender
+                            .send(PhysicsThreadEvent::FpsUpdated(fps))
+                            .unwrap();
                     }
                     self.scene.reset();
                     for physics_scene in &self.physics_scenes {
@@ -437,7 +452,8 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 self.stats = stats;
                 request_redraw(&self.state);
             }
-            AppEvent::Exit => event_loop.exit(),
+            AppEvent::PhysicsThreadWaitingForExit => event_loop.exit(),
+            AppEvent::Exit => self.physics_thread_sender.send(PhysicsThreadEvent::Exit).unwrap(),
         }
     }
 
