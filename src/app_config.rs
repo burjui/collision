@@ -139,6 +139,7 @@ impl Display for TimeLimitAction {
 #[serde(deny_unknown_fields)]
 pub struct DemoConfig {
     pub object_radius: f64,
+    pub object_spacing: f64,
 
     #[serde(default)]
     pub enable_planets: bool,

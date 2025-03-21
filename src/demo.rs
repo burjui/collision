@@ -33,7 +33,7 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
     if config.demo.enable_brick {
         let brick = Brick {
             particle_radius: config.demo.object_radius,
-            particle_spacing: 0.01,
+            particle_spacing: config.demo.object_spacing,
             particle_mass: 0.01,
             ..Brick::new(Vector2::new(400.0, 100.0), Vector2::new(600.0, 300.0))
         };
@@ -43,7 +43,7 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
     if config.demo.enable_ball {
         let ball = Ball {
             particle_radius: config.demo.object_radius,
-            particle_spacing: 0.01,
+            particle_spacing: config.demo.object_spacing,
             particle_mass: 0.01,
             ..Ball::new(Vector2::new(400.0, 600.0), 100.0)
         };
