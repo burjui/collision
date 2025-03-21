@@ -55,7 +55,6 @@ pub fn main() -> anyhow::Result<()> {
         let event_loop_proxy = event_loop.create_proxy();
         let mut advance_time = config.simulation.auto_start;
         let mut time_limit_action_executed = false;
-        let mut jerk_applied = false;
         let mut last_redraw = Instant::now();
         let mut waiting_for_redraw = false;
         let mut show_grid = false;
@@ -152,16 +151,6 @@ pub fn main() -> anyhow::Result<()> {
                     let start = Instant::now();
                     physics.advance(config.simulation.speed_factor);
                     *sim_total_duration.lock().unwrap() += start.elapsed();
-                    if config
-                        .simulation
-                        .jerk_at
-                        .is_some_and(|jerk_at| physics.time() >= jerk_at)
-                        && !jerk_applied
-                    {
-                        jerk_applied = true;
-                        let first_non_planet = physics.planet_count();
-                        physics.objects_mut().velocities[first_non_planet] += Vector2::new(1000.0, 1000.0);
-                    }
                     send_event(&event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
                 }
             }

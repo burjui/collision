@@ -47,9 +47,6 @@ impl AppConfig {
         if let Some(time_limit) = self.simulation.time_limit {
             validate_positive_f64(time_limit, "simulation.time_limit")?
         }
-        if let Some(jerk_at) = self.simulation.jerk_at {
-            validate_positive_f64(jerk_at, "simulation.jerk_at")?
-        }
         validate_restitution_coefficient(
             self.simulation.restitution_coefficient,
             "simulation.restitution_coefficient",
@@ -105,7 +102,6 @@ pub struct SimulationConfig {
     pub time_limit: Option<f64>,
     #[serde(default)]
     pub time_limit_action: TimeLimitAction,
-    pub jerk_at: Option<f64>,
 }
 
 fn default_speed_factor() -> f64 {
