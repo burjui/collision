@@ -439,7 +439,7 @@ impl PhysicsEngine {
         } in candidate_area
         {
             if object1_index != object2_index {
-                process_object_collision(
+                Self::process_object_collision(
                     object1_index,
                     object2_index,
                     restitution_coefficient,
@@ -450,6 +450,52 @@ impl PhysicsEngine {
                     is_planet,
                 );
             }
+        }
+    }
+
+    fn process_object_collision(
+        object1_index: usize,
+        object2_index: usize,
+        restitution_coefficient: f64,
+        positions: &mut [Vector2<f64>],
+        velocities: &mut [Vector2<f64>],
+        radii: &[f64],
+        masses: &[f64],
+        is_planet: &[bool],
+    ) {
+        let collision_distance = radii[object1_index] + radii[object2_index];
+        let from_1_to_2 = positions[object1_index] - positions[object2_index];
+        if from_1_to_2.magnitude_squared() <= collision_distance * collision_distance {
+            let mass1 = masses[object1_index];
+            let mass2 = masses[object2_index];
+            let total_mass = mass1 + mass2;
+            let mut velocity1 = velocities[object1_index];
+            let mut velocity2 = velocities[object2_index];
+            let distance = from_1_to_2.magnitude();
+            {
+                let divisor = (total_mass * distance * distance).max(f64::EPSILON);
+                let velocity_diff = velocity1 - velocity2;
+                velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
+                velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
+            }
+            let intersection_depth = collision_distance - distance;
+            let momentum1 = mass1 * velocity1.magnitude();
+            let momentum2 = mass2 * velocity2.magnitude();
+            let total_momentum = momentum1 + momentum2;
+            let position_adjustment_base =
+                from_1_to_2.normalize() * (intersection_depth / total_momentum.max(f64::EPSILON));
+            positions[object1_index] += position_adjustment_base * momentum2;
+            positions[object2_index] -= position_adjustment_base * momentum1;
+
+            if !is_planet[object1_index] {
+                velocity1 *= restitution_coefficient;
+            }
+            if !is_planet[object2_index] {
+                velocity2 *= restitution_coefficient;
+            }
+
+            velocities[object1_index] = velocity1;
+            velocities[object2_index] = velocity2;
         }
     }
 
@@ -544,50 +590,4 @@ pub struct Stats {
     pub collisions_duration: DurationStat,
     pub constraints_duration: DurationStat,
     pub total_duration: DurationStat,
-}
-
-fn process_object_collision(
-    object1_index: usize,
-    object2_index: usize,
-    restitution_coefficient: f64,
-    positions: &mut [Vector2<f64>],
-    velocities: &mut [Vector2<f64>],
-    radii: &[f64],
-    masses: &[f64],
-    is_planet: &[bool],
-) {
-    let collision_distance = radii[object1_index] + radii[object2_index];
-    let from_1_to_2 = positions[object1_index] - positions[object2_index];
-    if from_1_to_2.magnitude_squared() <= collision_distance * collision_distance {
-        let mass1 = masses[object1_index];
-        let mass2 = masses[object2_index];
-        let total_mass = mass1 + mass2;
-        let mut velocity1 = velocities[object1_index];
-        let mut velocity2 = velocities[object2_index];
-        let distance = from_1_to_2.magnitude();
-        {
-            let divisor = (total_mass * distance * distance).max(f64::EPSILON);
-            let velocity_diff = velocity1 - velocity2;
-            velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
-            velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
-        }
-        let intersection_depth = collision_distance - distance;
-        let momentum1 = mass1 * velocity1.magnitude();
-        let momentum2 = mass2 * velocity2.magnitude();
-        let total_momentum = momentum1 + momentum2;
-        let position_adjustment_base =
-            from_1_to_2.normalize() * (intersection_depth / total_momentum.max(f64::EPSILON));
-        positions[object1_index] += position_adjustment_base * momentum2;
-        positions[object2_index] -= position_adjustment_base * momentum1;
-
-        if !is_planet[object1_index] {
-            velocity1 *= restitution_coefficient;
-        }
-        if !is_planet[object2_index] {
-            velocity2 *= restitution_coefficient;
-        }
-
-        velocities[object1_index] = velocity1;
-        velocities[object2_index] = velocity2;
-    }
 }
