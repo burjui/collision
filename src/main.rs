@@ -105,8 +105,8 @@ pub fn main() -> anyhow::Result<()> {
                             waiting_for_redraw = false;
                         }
                         PhysicsThreadEvent::WaitForExit => {
-                            send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
                             waiting_for_exit = true;
+                            send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
                             continue 'main_loop;
                         }
                         PhysicsThreadEvent::Exit => break 'main_loop,
@@ -119,7 +119,11 @@ pub fn main() -> anyhow::Result<()> {
                     time_limit_action_executed = true;
                     advance_time = false;
                     match config.simulation.time_limit_action {
-                        TimeLimitAction::Exit => send_event(&event_loop_proxy, AppEvent::Exit),
+                        TimeLimitAction::Exit => {
+                            waiting_for_exit = true;
+                            send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
+                            continue;
+                        }
                         TimeLimitAction::Pause => send_event(&event_loop_proxy, AppEvent::RequestRedraw),
                     }
                 }
