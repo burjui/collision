@@ -60,7 +60,6 @@ pub fn main() -> anyhow::Result<()> {
         let mut waiting_for_exit = false;
         let mut show_grid = false;
         let mut show_ids = false;
-        let mut fps = 0;
         thread::spawn(move || {
             'main_loop: loop {
                 if waiting_for_exit {
@@ -111,11 +110,9 @@ pub fn main() -> anyhow::Result<()> {
                             continue 'main_loop;
                         }
                         PhysicsThreadEvent::Exit => (),
-                        PhysicsThreadEvent::FpsUpdated(new_fps) => fps = new_fps,
                     }
                 }
 
-                // println!("physics thread: checking time limit");
                 if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit)
                     && !time_limit_action_executed
                 {
@@ -137,26 +134,22 @@ pub fn main() -> anyhow::Result<()> {
                 let now = Instant::now();
                 if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 && !waiting_for_redraw {
                     last_redraw = now;
-                    if fps >= 30 {
-                        let mut scenes = draw_physics(&physics, DrawIds(show_ids));
-                        if show_grid && physics.grid().cell_size() > 0.0 {
-                            draw_grid(
-                                scenes.last_mut().unwrap(),
-                                physics.constraints().topleft,
-                                physics.constraints().bottomright,
-                                physics.grid().cell_size(),
-                            );
-                        }
-                        event_loop_proxy
-                            .send_event(AppEvent::RequestRedrawPhysics(scenes))
-                            .map_err(|_| ())
-                            .unwrap();
-                        waiting_for_redraw = true;
+                    let mut scenes = draw_physics(&physics, DrawIds(show_ids));
+                    if show_grid && physics.grid().cell_size() > 0.0 {
+                        draw_grid(
+                            scenes.last_mut().unwrap(),
+                            physics.constraints().topleft,
+                            physics.constraints().bottomright,
+                            physics.grid().cell_size(),
+                        );
                     }
+                    event_loop_proxy
+                        .send_event(AppEvent::RequestRedrawPhysics(scenes))
+                        .map_err(|_| ())
+                        .unwrap();
                 }
 
-                if advance_time && !waiting_for_redraw {
-                    println!("physics thread: sim step");
+                if advance_time {
                     let start = Instant::now();
                     physics.advance(config.simulation.speed_factor);
                     *sim_total_duration.lock().unwrap() += start.elapsed();
@@ -238,7 +231,6 @@ enum PhysicsThreadEvent {
     Exit,
     ToggleShowIds,
     ToggleShowGrid,
-    FpsUpdated(usize),
 }
 
 fn enable_floating_point_exceptions() {
@@ -379,14 +371,10 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 }
             }
             WindowEvent::RedrawRequested => {
-                println!("redraw requested");
                 if let Some(RenderState { surface, .. }) = &self.state {
                     if let Some(fps) = self.fps_calculator.update(self.frame_count) {
                         self.last_fps = fps;
                         self.min_fps = self.min_fps.min(fps);
-                        self.physics_thread_sender
-                            .send(PhysicsThreadEvent::FpsUpdated(fps))
-                            .unwrap();
                     }
                     self.scene.reset();
                     for physics_scene in &self.physics_scenes {
