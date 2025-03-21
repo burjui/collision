@@ -99,7 +99,6 @@ pub struct SimulationConfig {
     pub restitution_coefficient: f64,
     pub gravity: (f64, f64),
     pub gravitational_constant: f64,
-    pub proximity_force_constant: f64,
     pub time_limit: Option<f64>,
     #[serde(default)]
     pub time_limit_action: TimeLimitAction,
