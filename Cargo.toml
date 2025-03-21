@@ -15,7 +15,7 @@ vello = "0.4.1"
 winit = "0.30.9"
 pollster = "0.4.0"
 rdst = "0.20.14"
-skrifa = "0.29.0"
+skrifa = "0.29.1"
 bytemuck = "1.22.0"
 rand = "0.9.0"
 

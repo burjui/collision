@@ -106,17 +106,12 @@ impl PhysicsEngine {
                 // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
                 let (max_velocity_squared, min_object_size) =
                     zip(self.objects.velocities.iter(), self.objects.radii.iter()).fold(
-                        (0.0, f64::MAX),
-                        |(mut max_velocity_squared, mut min_object_size), (velocity, radius)| {
-                            let velocity_squared = velocity.magnitude_squared();
-                            if velocity_squared > max_velocity_squared {
-                                max_velocity_squared = velocity_squared;
-                            }
-                            let object_size = radius * 2.0;
-                            if object_size < min_object_size {
-                                min_object_size = object_size;
-                            }
-                            (max_velocity_squared, min_object_size)
+                        (0.0_f64, f64::MAX),
+                        |(max_velocity_squared, min_object_size), (velocity, radius)| {
+                            (
+                                max_velocity_squared.max(velocity.magnitude_squared()),
+                                min_object_size.min(radius * 2.0),
+                            )
                         },
                     );
                 let velocity_factor = if min_object_size == f64::MAX {
@@ -127,7 +122,7 @@ impl PhysicsEngine {
                     current_velocity * 2.0 / min_object_size
                 };
                 let max_gravity_squared = self.objects.positions.iter().enumerate().fold(
-                    0.0,
+                    0.0_f64,
                     |max_gravity_squared, (object_index, &position)| {
                         let gravity_squared = Self::gravity_acceleration(
                             object_index,
@@ -138,11 +133,7 @@ impl PhysicsEngine {
                             &self.objects.masses[..self.objects.planet_count],
                         )
                         .magnitude_squared();
-                        if gravity_squared > max_gravity_squared {
-                            gravity_squared
-                        } else {
-                            max_gravity_squared
-                        }
+                        max_gravity_squared.max(gravity_squared)
                     },
                 );
                 // Experimentally derived
