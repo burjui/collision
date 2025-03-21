@@ -135,16 +135,20 @@ pub fn main() -> anyhow::Result<()> {
                 if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 && !waiting_for_redraw {
                     last_redraw = now;
                     let mut scenes = draw_physics(&physics, DrawIds(show_ids));
+                    let mut scene = scenes.remove(0);
+                    for subscene in scenes {
+                        scene.append(&subscene, None);
+                    }
                     if show_grid && physics.grid().cell_size() > 0.0 {
                         draw_grid(
-                            scenes.last_mut().unwrap(),
+                            &mut scene,
                             physics.constraints().topleft,
                             physics.constraints().bottomright,
                             physics.grid().cell_size(),
                         );
                     }
                     event_loop_proxy
-                        .send_event(AppEvent::RequestRedrawPhysics(scenes))
+                        .send_event(AppEvent::RequestRedrawPhysics(scene))
                         .map_err(|_| ())
                         .unwrap();
                 }
@@ -179,7 +183,7 @@ pub fn main() -> anyhow::Result<()> {
         state: render_state,
         cached_window: None,
         scene: Scene::new(),
-        physics_scenes: Vec::default(),
+        physics_scene: Scene::new(),
         frame_count: 0,
         fps_calculator: FpsCalculator::default(),
         last_fps: 0,
@@ -214,7 +218,7 @@ pub fn main() -> anyhow::Result<()> {
 
 enum AppEvent {
     RequestRedraw,
-    RequestRedrawPhysics(Vec<Scene>),
+    RequestRedrawPhysics(Scene),
     StatsUpdated(Stats),
     PhysicsThreadWaitingForExit,
     Exit,
@@ -257,7 +261,7 @@ struct VelloApp<'s> {
     // If render_state exists, we must store the window in it, to maintain drop order
     cached_window: Option<Arc<Window>>,
     scene: Scene,
-    physics_scenes: Vec<Scene>,
+    physics_scene: Scene,
     frame_count: usize,
     fps_calculator: FpsCalculator,
     last_fps: usize,
@@ -377,9 +381,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         self.min_fps = self.min_fps.min(fps);
                     }
                     self.scene.reset();
-                    for physics_scene in &self.physics_scenes {
-                        self.scene.append(physics_scene, None);
-                    }
+                    self.scene.append(&self.physics_scene, None);
                     draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                     draw_stats(
                         &mut self.scene,
@@ -431,9 +433,9 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             AppEvent::RequestRedraw => {
                 request_redraw(&self.state);
             }
-            AppEvent::RequestRedrawPhysics(scenes) => {
+            AppEvent::RequestRedrawPhysics(scene) => {
                 self.redraw_physics = true;
-                self.physics_scenes = scenes;
+                self.physics_scene = scene;
                 request_redraw(&self.state);
             }
             AppEvent::StatsUpdated(stats) => {
