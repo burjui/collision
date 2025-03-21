@@ -10,7 +10,7 @@ use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
-    app_config::{config, DtSource},
+    app_config::{DtSource, config},
     fixed_vec::FixedVec,
     gpu::{Gpu, GpuBufferAccess, GpuDeviceBuffer},
     vector2::Vector2,
@@ -385,42 +385,55 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
+        // const N_THREADS: usize = 8;
+        // let records_by_worker
+        // for i in 0..N_THREADS {
+
+        // }
+
         for range in self.grid.cell_iter() {
             let cell_records = &self.grid.cell_records[range];
             let (x, y) = cell_records[0].cell_coords;
-            for &CellRecord { object_index, .. } in cell_records {
-                const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
-                    // // Objects in the same cell are the closest
-                    (0, 0),
-                    // // Checking only these neighboring cells to avoid duplicate collisions
-                    (-1, 1),
-                    (0, 1),
-                    (1, 1),
-                    (1, 0),
-                ];
-                for (ox, oy) in AREA_CELL_OFFSETS {
-                    for (ox, oy) in [(ox.wrapping_neg(), oy.wrapping_neg()), (ox, oy)] {
-                        let x = x.wrapping_add_signed(ox);
-                        let y = y.wrapping_add_signed(oy);
-                        if x < self.grid.size().x && y < self.grid.size().y {
-                            if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
-                                let candidate_area = self.grid.cell_records[start..end]
-                                    .iter()
-                                    .copied()
-                                    .collect::<FixedVec<_, 4>>();
-                                Self::process_object_with_cell_collisions(
-                                    object_index,
-                                    &candidate_area,
-                                    self.restitution_coefficient,
-                                    &mut self.objects.positions,
-                                    &mut self.objects.velocities,
-                                    &self.objects.radii,
-                                    &self.objects.masses,
-                                    &self.objects.is_planet,
-                                );
-                            }
-                        }
+            const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
+                // // Objects in the same cell are the closest
+                (0, 0),
+                // // Checking only these neighboring cells to avoid duplicate collisions
+                (-1, 1),
+                (0, 1),
+                (1, 1),
+                (1, 0),
+            ];
+            let mut process_collisions = |object_index, ox, oy| {
+                let x = x.wrapping_add_signed(ox);
+                let y = y.wrapping_add_signed(oy);
+                if x < self.grid.size().x && y < self.grid.size().y {
+                    if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
+                        let candidate_area = self.grid.cell_records[start..end]
+                            .iter()
+                            .copied()
+                            .collect::<FixedVec<_, 4>>();
+                        Self::process_object_with_cell_collisions(
+                            object_index,
+                            &candidate_area,
+                            self.restitution_coefficient,
+                            &mut self.objects.positions,
+                            &mut self.objects.velocities,
+                            &self.objects.radii,
+                            &self.objects.masses,
+                            &self.objects.is_planet,
+                        );
                     }
+                }
+            };
+            for &CellRecord { object_index, .. } in cell_records {
+                for (ox, oy) in AREA_CELL_OFFSETS {
+                    let (ox, oy) = (ox.wrapping_neg(), oy.wrapping_neg());
+                    process_collisions(object_index, ox, oy);
+                }
+            }
+            for &CellRecord { object_index, .. } in cell_records {
+                for (ox, oy) in AREA_CELL_OFFSETS {
+                    process_collisions(object_index, ox, oy);
                 }
             }
         }
@@ -477,9 +490,9 @@ impl PhysicsEngine {
             let distance = from_1_to_2.magnitude();
             {
                 let divisor = (total_mass * distance * distance).max(f64::EPSILON);
-                let velocity_diff = velocity1 - velocity2;
-                velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
-                velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
+                let factor = 2.0 * mass1 * (velocity1 - velocity2).dot(&(from_1_to_2)) / divisor;
+                velocity2 -= -from_1_to_2 * factor;
+                velocity1 -= from_1_to_2 * factor;
             }
             let intersection_depth = collision_distance - distance;
             let momentum1 = mass1 * velocity1.magnitude();
