@@ -137,11 +137,8 @@ impl PhysicsEngine {
                     },
                 );
                 // Experimentally derived
-                let gravity_factor = max_gravity_squared
-                    .sqrt()
-                    .sqrt()
-                    .max(self.global_gravity.magnitude())
-                    / min_object_size.sqrt();
+                let gravity_factor =
+                    max_gravity_squared.sqrt().sqrt().max(self.global_gravity.magnitude()) / min_object_size.sqrt();
                 speed_factor / 2.0 * (1.0 / (velocity_factor + gravity_factor).max(1.0))
             }
             DtSource::Fixed(dt) => dt,
@@ -393,33 +390,35 @@ impl PhysicsEngine {
             let (x, y) = cell_records[0].cell_coords;
             for &CellRecord { object_index, .. } in cell_records {
                 const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
-                    // Objects in the same cell are the closest
+                    // // Objects in the same cell are the closest
                     (0, 0),
-                    // Checking only these neighboring cells to avoid duplicate collisions
+                    // // Checking only these neighboring cells to avoid duplicate collisions
                     (-1, 1),
                     (0, 1),
                     (1, 1),
                     (1, 0),
                 ];
                 for (ox, oy) in AREA_CELL_OFFSETS {
-                    let x = x.wrapping_add_signed(ox);
-                    let y = y.wrapping_add_signed(oy);
-                    if x < self.grid.size().x && y < self.grid.size().y {
-                        if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
-                            let candidate_area = self.grid.cell_records[start..end]
-                                .iter()
-                                .copied()
-                                .collect::<FixedVec<_, 4>>();
-                            Self::process_object_with_cell_collisions(
-                                object_index,
-                                &candidate_area,
-                                self.restitution_coefficient,
-                                &mut self.objects.positions,
-                                &mut self.objects.velocities,
-                                &self.objects.radii,
-                                &self.objects.masses,
-                                &self.objects.is_planet,
-                            );
+                    for (ox, oy) in [(ox.wrapping_neg(), oy.wrapping_neg()), (ox, oy)] {
+                        let x = x.wrapping_add_signed(ox);
+                        let y = y.wrapping_add_signed(oy);
+                        if x < self.grid.size().x && y < self.grid.size().y {
+                            if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
+                                let candidate_area = self.grid.cell_records[start..end]
+                                    .iter()
+                                    .copied()
+                                    .collect::<FixedVec<_, 4>>();
+                                Self::process_object_with_cell_collisions(
+                                    object_index,
+                                    &candidate_area,
+                                    self.restitution_coefficient,
+                                    &mut self.objects.positions,
+                                    &mut self.objects.velocities,
+                                    &self.objects.radii,
+                                    &self.objects.masses,
+                                    &self.objects.is_planet,
+                                );
+                            }
                         }
                     }
                 }
