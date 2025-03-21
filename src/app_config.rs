@@ -94,6 +94,7 @@ pub struct WindowConfig {
 pub struct SimulationConfig {
     #[serde(default)]
     pub dt: DtSource,
+    #[serde(default = "default_speed_factor")]
     pub speed_factor: f64,
     pub enable_gpu: bool,
     pub restitution_coefficient: f64,
@@ -103,6 +104,10 @@ pub struct SimulationConfig {
     #[serde(default)]
     pub time_limit_action: TimeLimitAction,
     pub jerk_at: Option<f64>,
+}
+
+fn default_speed_factor() -> f64 {
+    1.0
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
@@ -152,6 +157,7 @@ pub struct DemoConfig {
 
     #[serde(default)]
     pub randomize_positions: bool,
+    pub randomize_radius_factor: f64,
 }
 
 #[derive(Deserialize, Clone, Copy)]

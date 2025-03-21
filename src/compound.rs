@@ -49,8 +49,8 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j))
                 + if config().demo.randomize_positions {
                     Vector2::new(
-                        random::<f64>() * brick.particle_radius,
-                        random::<f64>() * brick.particle_radius,
+                        random::<f64>() * brick.particle_radius * config().demo.randomize_radius_factor,
+                        random::<f64>() * brick.particle_radius * config().demo.randomize_radius_factor,
                     )
                 } else {
                     Vector2::default()
@@ -110,8 +110,8 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
             let position = Vector2::new(x, y)
                 + if config().demo.randomize_positions {
                     Vector2::new(
-                        random::<f64>() * ball.particle_radius,
-                        random::<f64>() * ball.particle_radius,
+                        random::<f64>() * ball.particle_radius * config().demo.randomize_radius_factor,
+                        random::<f64>() * ball.particle_radius * config().demo.randomize_radius_factor,
                     )
                 } else {
                     Vector2::default()
