@@ -6,21 +6,21 @@ height = 800
 # dt = { fixed = 0.001 }
 # speed_factor = 0.3
 enable_gpu = false
-restitution_coefficient = 0.998
-gravity = [0, 1000]
+restitution_coefficient = 1
+gravity = [0, 0]
 gravitational_constant = 10000
 # auto_start = true
-# time_limit = 0.02
+time_limit = 0.02
 # time_limit_action = "pause"
 
 [demo]
-object_radius = 10
+object_radius = 0.8
 object_spacing = 0.01
 # enable_planets = true
 enable_brick = true
 # enable_ball = true
 randomize_positions = true
-randomize_radius_factor = 0.1
+randomize_radius_factor = 1
 
 [rendering]
 color_source = "velocity"
