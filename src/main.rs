@@ -2,7 +2,7 @@ use core::f64;
 use std::{
     fmt::{Debug, Write as _},
     iter::zip,
-    mem::replace,
+    mem::take,
     num::NonZero,
     sync::{Arc, Barrier, Mutex, mpsc},
     thread::{self},
@@ -213,8 +213,8 @@ impl AppEvent {
     fn take(&mut self) -> AppEvent {
         match self {
             Self::RequestRedraw => AppEvent::RequestRedraw,
-            Self::SceneUpdated(scene) => AppEvent::SceneUpdated(replace(scene, Scene::new())),
-            Self::StatsUpdated(stats) => AppEvent::StatsUpdated(replace(stats, Stats::default())),
+            Self::SceneUpdated(scene) => AppEvent::SceneUpdated(take(scene)),
+            Self::StatsUpdated(stats) => AppEvent::StatsUpdated(take(stats)),
             Self::Exit => AppEvent::Exit,
         }
     }
@@ -625,7 +625,9 @@ fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), stats: &Stat
     )?;
     writeln!(buffer, "objects: {}", stats.object_count)?;
     write_duration_stat(buffer, "updates", &stats.updates_duration)?;
+    write_duration_stat(buffer, "collision", &stats.collisions_duration)?;
     write_duration_stat(buffer, "grid", &stats.grid_duration)?;
+    write_duration_stat(buffer, "constraints", &stats.constraints_duration)?;
     Ok(())
 }
 
