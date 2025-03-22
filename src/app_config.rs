@@ -34,7 +34,7 @@ impl AppConfig {
         validate_positive_u32(self.window.height, "window.height")?;
         validate_positive_f64(self.simulation.speed_factor, "simulation.base_dt")?;
         if let Some(time_limit) = self.simulation.time_limit {
-            validate_positive_f64(time_limit, "simulation.time_limit")?
+            validate_positive_f64(time_limit, "simulation.time_limit")?;
         }
         validate_restitution_coefficient(
             self.simulation.restitution_coefficient,

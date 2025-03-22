@@ -1,3 +1,5 @@
+#![allow(clippy::unreadable_literal)]
+
 pub const C1: f64 = 0.675603595979829;
 pub const C2: f64 = -0.1756035959798291;
 pub const C3: f64 = -0.1756035959798291;

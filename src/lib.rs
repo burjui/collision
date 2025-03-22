@@ -1,4 +1,7 @@
 #![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 #![feature(random)]
 #![feature(impl_trait_in_bindings)]
 #![feature(array_repeat)]

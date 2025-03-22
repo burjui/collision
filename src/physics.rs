@@ -42,13 +42,13 @@ impl PhysicsEngine {
     pub fn new() -> anyhow::Result<Self> {
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
-            Vector2::new(CONFIG.window.width as f64, CONFIG.window.height as f64),
+            Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
         );
         let gpu = Gpu::default(10)?;
-        let yoshida_program = gpu.build_program("src/yoshida.cl")?;
-        let yoshida_kernel = Kernel::create(&yoshida_program, "yoshida").context("Failed to create kernel")?;
+        let yoshida_program = gpu.build_program("src/leapfrog_yoshida.cl")?;
+        let yoshida_kernel = Kernel::create(&yoshida_program, "leapfrog_yoshida").context("Failed to create kernel")?;
         let yoshida_kernel_no_planets =
-            Kernel::create(&yoshida_program, "yoshida_no_planets").context("Failed to create kernel")?;
+            Kernel::create(&yoshida_program, "leapfrog_yoshida").context("Failed to create kernel")?;
         Ok(Self {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
@@ -184,7 +184,7 @@ impl PhysicsEngine {
         if gpu_compute_options.integration {
             self.update_objects_leapfrog_yoshida_gpu(dt);
         } else {
-            self.update_object_leapfrog_yoshida_cpu(dt)
+            self.update_object_leapfrog_yoshida_cpu(dt);
         }
     }
 
@@ -391,8 +391,6 @@ impl PhysicsEngine {
         // }
 
         for range in self.grid.cell_iter() {
-            let cell_records = &self.grid.cell_records[range];
-            let (x, y) = cell_records[0].cell_coords;
             const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
                 // // Objects in the same cell are the closest
                 (0, 0),
@@ -402,6 +400,8 @@ impl PhysicsEngine {
                 (1, 1),
                 (1, 0),
             ];
+            let cell_records = &self.grid.cell_records[range];
+            let (x, y) = cell_records[0].cell_coords;
             let mut process_collisions = |object_index, ox, oy| {
                 let x = x.wrapping_add_signed(ox);
                 let y = y.wrapping_add_signed(oy);

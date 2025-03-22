@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_lines)]
+
 use std::{
     fmt::{Debug, Write as _},
     iter::zip,
@@ -54,10 +56,10 @@ pub fn main() -> anyhow::Result<()> {
         let wait_for_exit_barrier = wait_for_exit_barrier.clone();
         thread::spawn(move || -> PhysicsEngine {
             physics_thread(
-                sim_total_duration,
-                event_loop_proxy,
-                physics_event_receiver,
-                wait_for_exit_barrier,
+                &sim_total_duration,
+                &event_loop_proxy,
+                &physics_event_receiver,
+                &wait_for_exit_barrier,
                 gpu_compute_options,
             )
         })
@@ -92,7 +94,7 @@ pub fn main() -> anyhow::Result<()> {
         physics.stats(),
         app.gpu_compute_options,
     )?;
-    print!("{}", stats_buffer);
+    print!("{stats_buffer}");
     let sim_total_duration_guard = sim_total_duration.lock().unwrap();
     println!("total simulation duration: {:?}", *sim_total_duration_guard);
     if *sim_total_duration_guard > Duration::ZERO {
@@ -115,10 +117,10 @@ fn enable_floating_point_exceptions() {
 }
 
 fn physics_thread(
-    sim_total_duration: Arc<Mutex<Duration>>,
-    event_loop_proxy: EventLoopProxy<AppEvent>,
-    physics_event_receiver: mpsc::Receiver<PhysicsThreadEvent>,
-    wait_for_exit_barrier: Arc<Barrier>,
+    sim_total_duration: &Arc<Mutex<Duration>>,
+    event_loop_proxy: &EventLoopProxy<AppEvent>,
+    physics_event_receiver: &mpsc::Receiver<PhysicsThreadEvent>,
+    wait_for_exit_barrier: &Arc<Barrier>,
     mut gpu_compute_options: GpuComputeOptions,
 ) -> PhysicsEngine {
     let mut advance_time = CONFIG.simulation.auto_start;
@@ -174,11 +176,11 @@ fn physics_thread(
             advance_time = false;
             match CONFIG.simulation.time_limit_action {
                 TimeLimitAction::Exit => {
-                    send_event(&event_loop_proxy, AppEvent::Exit);
+                    send_event(event_loop_proxy, AppEvent::Exit);
                     wait_for_exit_barrier.wait();
                     break 'main_loop;
                 }
-                TimeLimitAction::Pause => send_event(&event_loop_proxy, AppEvent::RequestRedraw),
+                TimeLimitAction::Pause => send_event(event_loop_proxy, AppEvent::RequestRedraw),
             }
         }
 
@@ -198,14 +200,14 @@ fn physics_thread(
                     physics.grid().cell_size(),
                 );
             }
-            send_event(&event_loop_proxy, AppEvent::SceneUpdated(scene));
+            send_event(event_loop_proxy, AppEvent::SceneUpdated(scene));
         }
 
         if advance_time {
             let start = Instant::now();
             physics.advance(CONFIG.simulation.speed_factor, gpu_compute_options);
             *sim_total_duration.lock().unwrap() += start.elapsed();
-            send_event(&event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
+            send_event(event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
         }
     }
 
@@ -402,7 +404,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Vector2::new(position.x, position.y);
-                request_redraw(&self.state);
+                request_redraw(self.state.as_ref());
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
@@ -420,8 +422,8 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 delta: MouseScrollDelta::LineDelta(_, dy),
                 ..
             } => {
-                self.mouse_influence_radius = (self.mouse_influence_radius + dy as f64 * 3.0).max(0.0);
-                request_redraw(&self.state);
+                self.mouse_influence_radius = (self.mouse_influence_radius + f64::from(dy) * 3.0).max(0.0);
+                request_redraw(self.state.as_ref());
             }
             _ => {}
         }
@@ -430,16 +432,16 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::RequestRedraw => {
-                request_redraw(&self.state);
+                request_redraw(self.state.as_ref());
             }
             AppEvent::SceneUpdated(scene) => {
                 self.redraw_physics = true;
                 self.physics_scene = scene;
-                request_redraw(&self.state);
+                request_redraw(self.state.as_ref());
             }
             AppEvent::StatsUpdated(stats) => {
                 self.stats = stats;
-                request_redraw(&self.state);
+                request_redraw(self.state.as_ref());
             }
             AppEvent::Exit => {
                 self.wait_for_exit_barrier.wait();
@@ -463,7 +465,7 @@ struct RenderState<'s> {
     window: Arc<Window>,
 }
 
-fn request_redraw(render_state: &Option<RenderState<'_>>) {
+fn request_redraw(render_state: Option<&RenderState<'_>>) {
     if let Some(render_state) = render_state {
         render_state.window.request_redraw();
     }
@@ -479,7 +481,7 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
             color,
             None,
             &Circle::new((position.x, position.y), radius.max(1.0)),
-        )
+        );
     }
 
     fn draw_text(scene: &mut Scene, transform: Affine, text: &mut SimpleText, position: Vector2<f64>, s: &str) {
@@ -502,7 +504,7 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
             physics.objects().len()
         })
         .into_iter()
-        .map(|chunk| chunk.collect_vec())
+        .map(Itertools::collect_vec)
         .collect_vec();
     let mut scenes = std::thread::scope(|scope| {
         chunks
@@ -520,6 +522,7 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
                                 ColorSource::Velocity => {
                                     const SCALE_FACTOR: f64 = 0.0004;
                                     let velocity = objects.velocities[object_index];
+                                    #[allow(clippy::cast_possible_truncation)]
                                     let spectrum_position =
                                         (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
                                     Some(spectrum(spectrum_position))
@@ -539,7 +542,7 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
                                     transform,
                                     &mut text,
                                     particle_position,
-                                    &format!("{}", object_index),
+                                    &format!("{object_index}"),
                                 );
                             }
                         }
@@ -570,13 +573,7 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
             color.unwrap_or(css::WHITE),
         );
         if draw_ids {
-            draw_text(
-                scene,
-                transform,
-                &mut text,
-                planet_position,
-                &format!("{}", object_index),
-            );
+            draw_text(scene, transform, &mut text, planet_position, &format!("{object_index}"));
         }
     }
 
@@ -604,7 +601,11 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_i
 }
 
 fn draw_grid(scene: &mut Scene, topleft: Vector2<f64>, bottomright: Vector2<f64>, cell_size: f64) {
-    for i in 0..((bottomright.x - topleft.x) / cell_size) as usize + 1 {
+    #![allow(clippy::cast_possible_truncation)]
+    #![allow(clippy::cast_precision_loss)]
+    #![allow(clippy::cast_sign_loss)]
+    assert!(bottomright.x >= topleft.x);
+    for i in 0..=((bottomright.x - topleft.x) / cell_size) as usize {
         scene.stroke(
             &Stroke::default(),
             Affine::IDENTITY,
@@ -616,7 +617,8 @@ fn draw_grid(scene: &mut Scene, topleft: Vector2<f64>, bottomright: Vector2<f64>
             ),
         );
     }
-    for j in 0..((bottomright.y - topleft.y) / cell_size) as usize + 1 {
+    assert!(bottomright.y >= topleft.y);
+    for j in 0..=((bottomright.y - topleft.y) / cell_size) as usize {
         scene.stroke(
             &Stroke::default(),
             Affine::IDENTITY,
@@ -626,7 +628,7 @@ fn draw_grid(scene: &mut Scene, topleft: Vector2<f64>, bottomright: Vector2<f64>
                 (topleft.x, topleft.y + j as f64 * cell_size),
                 (bottomright.x, topleft.y + j as f64 * cell_size),
             ),
-        )
+        );
     }
 }
 
@@ -637,15 +639,15 @@ fn draw_stats(
     stats: &Stats,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
+    const TEXT_SIZE: f32 = 16.0;
+
     let buffer = &mut String::new();
     write_stats(buffer, (fps, min_fps), stats, gpu_compute_options)?;
-
-    const TEXT_SIZE: f32 = 16.0;
     text.add(
         scene,
         TEXT_SIZE,
         None,
-        Affine::translate((0.0, TEXT_SIZE as f64)),
+        Affine::translate((0.0, f64::from(TEXT_SIZE))),
         buffer,
     );
 
@@ -658,7 +660,7 @@ fn write_stats(
     stats: &Stats,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
-    writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps)?;
+    writeln!(buffer, "FPS: {fps} (min {min_fps})")?;
     write!(buffer, "sim time: {}", stats.sim_time)?;
     if let Some(time_limit) = CONFIG.simulation.time_limit {
         let action = CONFIG.simulation.time_limit_action.to_string();
