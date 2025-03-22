@@ -79,9 +79,6 @@ pub fn main() -> anyhow::Result<()> {
         wait_for_exit_barrier,
     };
     event_loop.run_app(&mut app).expect("run to completion");
-    app.physics_thread_sender
-        .send(PhysicsThreadEvent::Exit)
-        .expect("failed to send exit event to physics thread");
 
     let physics = physics_thread.join().expect("failed to join physics thread");
     let mut stats_buffer = String::new();
@@ -118,7 +115,6 @@ fn physics_thread(
     let mut advance_time = config.simulation.auto_start;
     let mut time_limit_action_executed = false;
     let mut last_redraw = Instant::now();
-    let mut waiting_for_redraw = false;
     let mut show_grid = false;
     let mut show_ids = false;
     let mut physics = PhysicsEngine::new().unwrap();
@@ -155,14 +151,10 @@ fn physics_thread(
                     }
                     send_event(&event_loop_proxy, AppEvent::RequestRedraw);
                 }
-                PhysicsThreadEvent::RedrawComplete => {
-                    waiting_for_redraw = false;
-                }
-                PhysicsThreadEvent::WaitForExit => {
+                PhysicsThreadEvent::Exit => {
                     wait_for_exit_barrier.wait();
-                    continue 'main_loop;
+                    break 'main_loop;
                 }
-                PhysicsThreadEvent::Exit => break 'main_loop,
             }
         }
 
@@ -172,16 +164,16 @@ fn physics_thread(
             advance_time = false;
             match config.simulation.time_limit_action {
                 TimeLimitAction::Exit => {
-                    send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
+                    send_event(&event_loop_proxy, AppEvent::Exit);
                     wait_for_exit_barrier.wait();
-                    continue;
+                    break 'main_loop;
                 }
                 TimeLimitAction::Pause => send_event(&event_loop_proxy, AppEvent::RequestRedraw),
             }
         }
 
         let now = Instant::now();
-        if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 && !waiting_for_redraw {
+        if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
             last_redraw = now;
             let mut scenes = draw_physics(&physics, DrawIds(show_ids));
             let mut scene = scenes.remove(0);
@@ -196,7 +188,7 @@ fn physics_thread(
                     physics.grid().cell_size(),
                 );
             }
-            send_event(&event_loop_proxy, AppEvent::RequestRedrawPhysics(scene));
+            send_event(&event_loop_proxy, AppEvent::SceneUpdated(scene));
         }
 
         if advance_time {
@@ -212,9 +204,8 @@ fn physics_thread(
 
 enum AppEvent {
     RequestRedraw,
-    RequestRedrawPhysics(Scene),
+    SceneUpdated(Scene),
     StatsUpdated(Stats),
-    PhysicsThreadWaitingForExit,
     Exit,
 }
 
@@ -222,9 +213,8 @@ impl AppEvent {
     fn take(&mut self) -> AppEvent {
         match self {
             Self::RequestRedraw => AppEvent::RequestRedraw,
-            Self::RequestRedrawPhysics(scene) => AppEvent::RequestRedrawPhysics(replace(scene, Scene::new())),
+            Self::SceneUpdated(scene) => AppEvent::SceneUpdated(replace(scene, Scene::new())),
             Self::StatsUpdated(stats) => AppEvent::StatsUpdated(replace(stats, Stats::default())),
-            Self::PhysicsThreadWaitingForExit => AppEvent::PhysicsThreadWaitingForExit,
             Self::Exit => AppEvent::Exit,
         }
     }
@@ -235,9 +225,8 @@ impl Debug for AppEvent {
         write!(f, "AppEvent::")?;
         match self {
             Self::RequestRedraw => write!(f, "RequestRedraw"),
-            Self::RequestRedrawPhysics(_) => write!(f, "RequestRedrawPhysics"),
+            Self::SceneUpdated(_) => write!(f, "RequestRedrawPhysics"),
             Self::StatsUpdated(_) => write!(f, "StatsUpdated"),
-            Self::PhysicsThreadWaitingForExit => write!(f, "PhysicsThreadWaitingForExit"),
             Self::Exit => write!(f, "Exit"),
         }
     }
@@ -249,8 +238,6 @@ enum PhysicsThreadEvent {
         mouse_position: Vector2<f64>,
         mouse_influence_radius: f64,
     },
-    RedrawComplete,
-    WaitForExit,
     Exit,
     ToggleShowIds,
     ToggleShowGrid,
@@ -335,9 +322,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
                         Key::Named(NamedKey::Escape) => {
-                            self.physics_thread_sender
-                                .send(PhysicsThreadEvent::WaitForExit)
-                                .unwrap();
+                            self.physics_thread_sender.send(PhysicsThreadEvent::Exit).unwrap();
                             self.wait_for_exit_barrier.wait();
                             event_loop.exit();
                         }
@@ -398,12 +383,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                     let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
                     let device_handle = &self.context.devices[surface.dev_id];
                     render_scene(&self.scene, surface, renderer, device_handle);
-
                     self.frame_count += 1;
-                    let _ = self
-                        .physics_thread_sender
-                        .send(PhysicsThreadEvent::RedrawComplete)
-                        .map_err(|e| eprintln!("Failed to send redraw complete: {e}"));
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -438,7 +418,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             AppEvent::RequestRedraw => {
                 request_redraw(&self.state);
             }
-            AppEvent::RequestRedrawPhysics(scene) => {
+            AppEvent::SceneUpdated(scene) => {
                 self.redraw_physics = true;
                 self.physics_scene = scene;
                 request_redraw(&self.state);
@@ -447,11 +427,10 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 self.stats = stats;
                 request_redraw(&self.state);
             }
-            AppEvent::PhysicsThreadWaitingForExit => {
+            AppEvent::Exit => {
                 self.wait_for_exit_barrier.wait();
                 event_loop.exit();
             }
-            AppEvent::Exit => self.physics_thread_sender.send(PhysicsThreadEvent::Exit).unwrap(),
         }
     }
 
