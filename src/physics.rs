@@ -490,9 +490,9 @@ impl PhysicsEngine {
             let distance = from_1_to_2.magnitude();
             {
                 let divisor = (total_mass * distance * distance).max(f64::EPSILON);
-                let factor = 2.0 * mass1 * (velocity1 - velocity2).dot(&(from_1_to_2)) / divisor;
-                velocity2 -= -from_1_to_2 * factor;
-                velocity1 -= from_1_to_2 * factor;
+                let velocity_diff = velocity1 - velocity2;
+                velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
+                velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
             }
             let intersection_depth = collision_distance - distance;
             let momentum1 = mass1 * velocity1.magnitude();
