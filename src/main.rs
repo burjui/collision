@@ -4,14 +4,14 @@ use std::{
     iter::zip,
     mem::replace,
     num::NonZero,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Barrier, Mutex, mpsc},
     thread::{self},
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Ok};
+use anyhow::{Ok, anyhow};
 use collision::{
-    app_config::{config, config_mut, ColorSource, TimeLimitAction},
+    app_config::{ColorSource, TimeLimitAction, config, config_mut},
     fps::FpsCalculator,
     physics::{DurationStat, PhysicsEngine, Stats},
     simple_text::SimpleText,
@@ -20,11 +20,11 @@ use collision::{
 use demo::create_demo;
 use itertools::Itertools;
 use vello::{
+    AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
     kurbo::{Affine, Circle, Line, Rect, Stroke},
-    peniko::{color::palette::css, Color, Fill},
+    peniko::{Color, Fill, color::palette::css},
     util::{DeviceHandle, RenderContext, RenderSurface},
     wgpu::{Maintain, PresentMode},
-    AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
 };
 use winit::{
     application::ApplicationHandler,
@@ -45,10 +45,19 @@ pub fn main() -> anyhow::Result<()> {
     let render_state = None::<RenderState<'_>>;
     let (physics_thread_sender, physics_event_receiver) = mpsc::channel();
     let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
+    let wait_for_exit_barrier = Arc::new(Barrier::new(2));
     let physics_thread = {
         let sim_total_duration = sim_total_duration.clone();
         let event_loop_proxy = event_loop.create_proxy();
-        thread::spawn(move || physics_thread(sim_total_duration, event_loop_proxy, physics_event_receiver))
+        let wait_for_exit_barrier = wait_for_exit_barrier.clone();
+        thread::spawn(move || -> PhysicsEngine {
+            physics_thread(
+                sim_total_duration,
+                event_loop_proxy,
+                physics_event_receiver,
+                wait_for_exit_barrier,
+            )
+        })
     };
     let mut app = VelloApp {
         context: render_context,
@@ -67,6 +76,7 @@ pub fn main() -> anyhow::Result<()> {
         physics_thread_sender,
         redraw_physics: true,
         stats: Stats::default(),
+        wait_for_exit_barrier,
     };
     event_loop.run_app(&mut app).expect("run to completion");
     app.physics_thread_sender
@@ -102,6 +112,7 @@ fn physics_thread(
     sim_total_duration: Arc<Mutex<Duration>>,
     event_loop_proxy: EventLoopProxy<AppEvent>,
     physics_event_receiver: mpsc::Receiver<PhysicsThreadEvent>,
+    wait_for_exit_barrier: Arc<Barrier>,
 ) -> PhysicsEngine {
     let config = config();
     let mut advance_time = config.simulation.auto_start;
@@ -110,7 +121,6 @@ fn physics_thread(
     let mut waiting_for_redraw = false;
     let mut show_grid = false;
     let mut show_ids = false;
-    let mut waiting_for_exit = false;
     let mut physics = PhysicsEngine::new().unwrap();
     create_demo(&mut physics);
     println!("{} objects", physics.objects().len());
@@ -119,14 +129,6 @@ fn physics_thread(
             let _ = event_loop_proxy
                 .send_event(event.take())
                 .map_err(|e| eprintln!("Failed to send event {event:?}: {}", &e));
-        }
-
-        if waiting_for_exit {
-            if let Result::Ok(PhysicsThreadEvent::Exit) = physics_event_receiver.try_recv() {
-                break 'main_loop;
-            } else {
-                continue;
-            }
         }
 
         while let Result::Ok(event) = physics_event_receiver.try_recv() {
@@ -157,8 +159,7 @@ fn physics_thread(
                     waiting_for_redraw = false;
                 }
                 PhysicsThreadEvent::WaitForExit => {
-                    waiting_for_exit = true;
-                    send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
+                    wait_for_exit_barrier.wait();
                     continue 'main_loop;
                 }
                 PhysicsThreadEvent::Exit => break 'main_loop,
@@ -171,8 +172,8 @@ fn physics_thread(
             advance_time = false;
             match config.simulation.time_limit_action {
                 TimeLimitAction::Exit => {
-                    waiting_for_exit = true;
                     send_event(&event_loop_proxy, AppEvent::PhysicsThreadWaitingForExit);
+                    wait_for_exit_barrier.wait();
                     continue;
                 }
                 TimeLimitAction::Pause => send_event(&event_loop_proxy, AppEvent::RequestRedraw),
@@ -274,6 +275,7 @@ struct VelloApp<'s> {
     physics_thread_sender: mpsc::Sender<PhysicsThreadEvent>,
     redraw_physics: bool,
     stats: Stats,
+    wait_for_exit_barrier: Arc<Barrier>,
 }
 
 impl ApplicationHandler<AppEvent> for VelloApp<'_> {
@@ -336,6 +338,8 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                             self.physics_thread_sender
                                 .send(PhysicsThreadEvent::WaitForExit)
                                 .unwrap();
+                            self.wait_for_exit_barrier.wait();
+                            event_loop.exit();
                         }
                         Key::Named(NamedKey::Space) => {
                             self.physics_thread_sender
@@ -350,13 +354,11 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                             self.physics_thread_sender
                                 .send(PhysicsThreadEvent::ToggleShowGrid)
                                 .unwrap();
-                            // request_redraw(&self.state);
                         }
                         Key::Character("i") => {
                             self.physics_thread_sender
                                 .send(PhysicsThreadEvent::ToggleShowIds)
                                 .unwrap();
-                            // request_redraw(&self.state);
                         }
                         Key::Character("v") => {
                             config_mut().rendering.color_source =
@@ -445,7 +447,10 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 self.stats = stats;
                 request_redraw(&self.state);
             }
-            AppEvent::PhysicsThreadWaitingForExit => event_loop.exit(),
+            AppEvent::PhysicsThreadWaitingForExit => {
+                self.wait_for_exit_barrier.wait();
+                event_loop.exit();
+            }
             AppEvent::Exit => self.physics_thread_sender.send(PhysicsThreadEvent::Exit).unwrap(),
         }
     }
