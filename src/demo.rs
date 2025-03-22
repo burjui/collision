@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 use collision::{
-    app_config::{self, CONFIG, AppConfig},
+    app_config::{self, AppConfig, CONFIG},
     compound::{Ball, Brick, generate_ball, generate_brick},
     physics::{PhysicsEngine, object::ObjectPrototype},
     vector2::Vector2,

@@ -1,16 +1,16 @@
 use std::{path::Path, ptr::null_mut};
 
-use anyhow::{anyhow, Context as _, Ok};
+use anyhow::{Context as _, Ok, anyhow};
 use opencl3::{
     command_queue::CommandQueue,
     context::Context,
-    device::{Device, CL_DEVICE_TYPE_GPU},
+    device::{CL_DEVICE_TYPE_GPU, Device},
     event::Event,
     kernel::ExecuteKernel,
     memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_USE_HOST_PTR, CL_MEM_WRITE_ONLY},
     platform::get_platforms,
     program::Program,
-    types::{cl_mem_flags, CL_TRUE},
+    types::{CL_TRUE, cl_mem_flags},
 };
 
 pub struct Gpu {

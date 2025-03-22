@@ -4,13 +4,13 @@
 use std::sync::Arc;
 
 use skrifa::{
-    raw::{FileRef, FontRef},
     MetadataProvider,
+    raw::{FileRef, FontRef},
 };
 use vello::{
-    kurbo::Affine,
-    peniko::{color::palette, Blob, Brush, BrushRef, Fill, Font, StyleRef},
     Glyph, Scene,
+    kurbo::Affine,
+    peniko::{Blob, Brush, BrushRef, Fill, Font, StyleRef, color::palette},
 };
 
 // This is very much a hack to get things working.

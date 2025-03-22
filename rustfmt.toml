@@ -1,3 +1,4 @@
+style_edition = "2024"
 imports_layout = "Mixed"
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
