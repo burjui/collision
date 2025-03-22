@@ -1,9 +1,9 @@
+#![allow(clippy::too_many_arguments)]
 #![feature(random)]
 #![feature(impl_trait_in_bindings)]
 #![feature(array_repeat)]
 #![feature(array_windows)]
 #![feature(more_float_constants)]
-#![allow(clippy::too_many_arguments)]
 #![feature(lazy_get)]
 
 pub mod app_config;

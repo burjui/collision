@@ -10,7 +10,7 @@ use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
-    app_config::{DtSource, config},
+    app_config::{CONFIG, DtSource},
     fixed_vec::FixedVec,
     gpu::{Gpu, GpuBufferAccess, GpuDeviceBuffer},
     vector2::Vector2,
@@ -40,10 +40,9 @@ pub struct PhysicsEngine {
 
 impl PhysicsEngine {
     pub fn new() -> anyhow::Result<Self> {
-        let config = config();
         let constraints = ConstraintBox::new(
             Vector2::new(0.0, 0.0),
-            Vector2::new(config.window.width as f64, config.window.height as f64),
+            Vector2::new(CONFIG.window.width as f64, CONFIG.window.height as f64),
         );
         let gpu = Gpu::default(10)?;
         let yoshida_program = gpu.build_program("src/yoshida.cl")?;
@@ -57,9 +56,9 @@ impl PhysicsEngine {
             time: 0.0,
             constraints,
             stats: Stats::default(),
-            restitution_coefficient: config.simulation.restitution_coefficient,
-            global_gravity: Vector2::from(config.simulation.gravity),
-            gravitational_constant: config.simulation.gravitational_constant,
+            restitution_coefficient: CONFIG.simulation.restitution_coefficient,
+            global_gravity: Vector2::from(CONFIG.simulation.gravity),
+            gravitational_constant: CONFIG.simulation.gravitational_constant,
             gpu,
             yoshida_kernel,
             yoshida_kernel_no_planets,
@@ -99,9 +98,9 @@ impl PhysicsEngine {
         &self.stats
     }
 
-    pub fn advance(&mut self, speed_factor: f64) {
+    pub fn advance(&mut self, speed_factor: f64, gpu_compute_options: GpuComputeOptions) {
         let start = Instant::now();
-        let dt = match config().simulation.dt {
+        let dt = match CONFIG.simulation.dt {
             DtSource::Auto => {
                 // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
                 let (max_velocity_squared, min_object_size) =
@@ -144,7 +143,7 @@ impl PhysicsEngine {
             DtSource::Fixed(dt) => dt,
         };
         self.time += dt;
-        self.update(dt);
+        self.update(dt, gpu_compute_options);
 
         self.stats.total_duration.update(start.elapsed());
         self.stats.sim_time = self.time;
@@ -161,12 +160,12 @@ impl PhysicsEngine {
         self.time
     }
 
-    fn update(&mut self, dt: f64) {
+    fn update(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
         self.time += dt;
 
         let start = Instant::now();
-        self.update_objects(dt);
-        self.stats.updates_duration.update(start.elapsed());
+        self.integrate(dt, gpu_compute_options);
+        self.stats.integration_duration.update(start.elapsed());
 
         let start = Instant::now();
         self.grid.update(&self.objects);
@@ -181,8 +180,8 @@ impl PhysicsEngine {
         self.stats.constraints_duration.update(start.elapsed());
     }
 
-    fn update_objects(&mut self, dt: f64) {
-        if config().simulation.enable_gpu {
+    fn integrate(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
+        if gpu_compute_options.integration {
             self.update_objects_leapfrog_yoshida_gpu(dt);
         } else {
             self.update_object_leapfrog_yoshida_cpu(dt)
@@ -411,7 +410,7 @@ impl PhysicsEngine {
                         let candidate_area = self.grid.cell_records[start..end]
                             .iter()
                             .copied()
-                            .collect::<FixedVec<_, 4>>();
+                            .collect::<FixedVec<_, 32>>();
                         Self::process_object_with_cell_collisions(
                             object_index,
                             &candidate_area,
@@ -553,6 +552,11 @@ impl PhysicsEngine {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GpuComputeOptions {
+    pub integration: bool,
+}
+
 #[derive(Clone, Copy)]
 struct ObjectUpdate {
     position: Vector2<f64>,
@@ -601,7 +605,7 @@ impl Default for DurationStat {
 pub struct Stats {
     pub sim_time: f64,
     pub object_count: usize,
-    pub updates_duration: DurationStat,
+    pub integration_duration: DurationStat,
     pub grid_duration: DurationStat,
     pub collisions_duration: DurationStat,
     pub constraints_duration: DurationStat,

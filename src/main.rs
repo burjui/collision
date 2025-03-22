@@ -1,19 +1,18 @@
-use core::f64;
 use std::{
     fmt::{Debug, Write as _},
     iter::zip,
     mem::take,
     num::NonZero,
     sync::{Arc, Barrier, Mutex, mpsc},
-    thread::{self},
+    thread,
     time::{Duration, Instant},
 };
 
-use anyhow::{Ok, anyhow};
+use anyhow::anyhow;
 use collision::{
-    app_config::{ColorSource, TimeLimitAction, config, config_mut},
+    app_config::{CONFIG, ColorSource, TimeLimitAction},
     fps::FpsCalculator,
-    physics::{DurationStat, PhysicsEngine, Stats},
+    physics::{DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
 };
@@ -46,6 +45,9 @@ pub fn main() -> anyhow::Result<()> {
     let (physics_thread_sender, physics_event_receiver) = mpsc::channel();
     let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
     let wait_for_exit_barrier = Arc::new(Barrier::new(2));
+    let gpu_compute_options = GpuComputeOptions {
+        integration: CONFIG.simulation.gpu_integration,
+    };
     let physics_thread = {
         let sim_total_duration = sim_total_duration.clone();
         let event_loop_proxy = event_loop.create_proxy();
@@ -56,6 +58,7 @@ pub fn main() -> anyhow::Result<()> {
                 event_loop_proxy,
                 physics_event_receiver,
                 wait_for_exit_barrier,
+                gpu_compute_options,
             )
         })
     };
@@ -77,12 +80,18 @@ pub fn main() -> anyhow::Result<()> {
         redraw_physics: true,
         stats: Stats::default(),
         wait_for_exit_barrier,
+        gpu_compute_options,
     };
     event_loop.run_app(&mut app).expect("run to completion");
 
     let physics = physics_thread.join().expect("failed to join physics thread");
     let mut stats_buffer = String::new();
-    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), physics.stats())?;
+    write_stats(
+        &mut stats_buffer,
+        (app.last_fps, app.min_fps),
+        physics.stats(),
+        app.gpu_compute_options,
+    )?;
     print!("{}", stats_buffer);
     let sim_total_duration_guard = sim_total_duration.lock().unwrap();
     println!("total simulation duration: {:?}", *sim_total_duration_guard);
@@ -110,14 +119,15 @@ fn physics_thread(
     event_loop_proxy: EventLoopProxy<AppEvent>,
     physics_event_receiver: mpsc::Receiver<PhysicsThreadEvent>,
     wait_for_exit_barrier: Arc<Barrier>,
+    mut gpu_compute_options: GpuComputeOptions,
 ) -> PhysicsEngine {
-    let config = config();
-    let mut advance_time = config.simulation.auto_start;
+    let mut advance_time = CONFIG.simulation.auto_start;
     let mut time_limit_action_executed = false;
     let mut last_redraw = Instant::now();
     let mut show_grid = false;
     let mut show_ids = false;
     let mut physics = PhysicsEngine::new().unwrap();
+    let mut color_source = ColorSource::Velocity;
     create_demo(&mut physics);
     println!("{} objects", physics.objects().len());
     'main_loop: loop {
@@ -129,15 +139,20 @@ fn physics_thread(
 
         while let Result::Ok(event) = physics_event_receiver.try_recv() {
             match event {
-                PhysicsThreadEvent::ToggleAdvanceTime => {
-                    advance_time = !advance_time;
+                PhysicsThreadEvent::Exit => {
+                    wait_for_exit_barrier.wait();
+                    break 'main_loop;
                 }
-                PhysicsThreadEvent::ToggleShowIds => {
-                    show_ids = !show_ids;
+                PhysicsThreadEvent::ToggleAdvanceTime => advance_time = !advance_time,
+                PhysicsThreadEvent::ToggleShowIds => show_ids = !show_ids,
+                PhysicsThreadEvent::ToggleShowGrid => show_grid = !show_grid,
+                PhysicsThreadEvent::ToggleColorSource => {
+                    color_source = match color_source {
+                        ColorSource::Demo => ColorSource::Velocity,
+                        ColorSource::Velocity => ColorSource::Demo,
+                    }
                 }
-                PhysicsThreadEvent::ToggleShowGrid => {
-                    show_grid = !show_grid;
-                }
+                PhysicsThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
                 PhysicsThreadEvent::UnidirectionalKick {
                     mouse_position,
                     mouse_influence_radius,
@@ -149,20 +164,15 @@ fn physics_thread(
                             *velocity += from_mouse_to_object.normalize() * 2000.0;
                         }
                     }
-                    send_event(&event_loop_proxy, AppEvent::RequestRedraw);
-                }
-                PhysicsThreadEvent::Exit => {
-                    wait_for_exit_barrier.wait();
-                    break 'main_loop;
                 }
             }
         }
 
-        if config.simulation.time_limit.is_some_and(|limit| physics.time() > limit) && !time_limit_action_executed {
+        if CONFIG.simulation.time_limit.is_some_and(|limit| physics.time() > limit) && !time_limit_action_executed {
             println!("Time limit reached");
             time_limit_action_executed = true;
             advance_time = false;
-            match config.simulation.time_limit_action {
+            match CONFIG.simulation.time_limit_action {
                 TimeLimitAction::Exit => {
                     send_event(&event_loop_proxy, AppEvent::Exit);
                     wait_for_exit_barrier.wait();
@@ -175,7 +185,7 @@ fn physics_thread(
         let now = Instant::now();
         if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
             last_redraw = now;
-            let mut scenes = draw_physics(&physics, DrawIds(show_ids));
+            let mut scenes = draw_physics(&physics, color_source, DrawIds(show_ids));
             let mut scene = scenes.remove(0);
             for subscene in scenes {
                 scene.append(&subscene, None);
@@ -193,7 +203,7 @@ fn physics_thread(
 
         if advance_time {
             let start = Instant::now();
-            physics.advance(config.simulation.speed_factor);
+            physics.advance(CONFIG.simulation.speed_factor, gpu_compute_options);
             *sim_total_duration.lock().unwrap() += start.elapsed();
             send_event(&event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
         }
@@ -232,15 +242,18 @@ impl Debug for AppEvent {
     }
 }
 
+#[derive(Debug)]
 enum PhysicsThreadEvent {
+    Exit,
     ToggleAdvanceTime,
+    ToggleShowIds,
+    ToggleShowGrid,
+    ToggleColorSource,
+    SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
         mouse_position: Vector2<f64>,
         mouse_influence_radius: f64,
     },
-    Exit,
-    ToggleShowIds,
-    ToggleShowGrid,
 }
 
 struct VelloApp<'s> {
@@ -263,6 +276,7 @@ struct VelloApp<'s> {
     redraw_physics: bool,
     stats: Stats,
     wait_for_exit_barrier: Arc<Barrier>,
+    gpu_compute_options: GpuComputeOptions,
 }
 
 impl ApplicationHandler<AppEvent> for VelloApp<'_> {
@@ -275,7 +289,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_inner_size(PhysicalSize::new(config().window.width, config().window.height))
+                            .with_inner_size(PhysicalSize::new(CONFIG.window.width, CONFIG.window.height))
                             .with_resizable(false)
                             .with_title(format!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))),
                     )
@@ -331,10 +345,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(PhysicsThreadEvent::ToggleAdvanceTime)
                                 .unwrap();
                         }
-                        Key::Character("a") => {
-                            config_mut().simulation.enable_gpu = !config().simulation.enable_gpu;
-                            request_redraw(&self.state);
-                        }
                         Key::Character("g") => {
                             self.physics_thread_sender
                                 .send(PhysicsThreadEvent::ToggleShowGrid)
@@ -346,12 +356,15 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .unwrap();
                         }
                         Key::Character("v") => {
-                            config_mut().rendering.color_source =
-                                Some(match config().rendering.color_source.unwrap_or_default() {
-                                    ColorSource::Demo => ColorSource::Velocity,
-                                    ColorSource::Velocity => ColorSource::Demo,
-                                });
-                            request_redraw(&self.state);
+                            self.physics_thread_sender
+                                .send(PhysicsThreadEvent::ToggleColorSource)
+                                .unwrap();
+                        }
+                        Key::Character("a") => {
+                            self.gpu_compute_options.integration = !self.gpu_compute_options.integration;
+                            self.physics_thread_sender
+                                .send(PhysicsThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
+                                .unwrap();
                         }
                         _ => {}
                     }
@@ -377,6 +390,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         &mut self.text,
                         (self.last_fps, self.min_fps),
                         &self.stats,
+                        self.gpu_compute_options,
                     )
                     .expect("failed to draw stats");
 
@@ -457,8 +471,27 @@ fn request_redraw(render_state: &Option<RenderState<'_>>) {
 
 struct DrawIds(bool);
 
-fn draw_physics(physics: &PhysicsEngine, DrawIds(draw_ids): DrawIds) -> Vec<Scene> {
-    let config = config();
+fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw_ids): DrawIds) -> Vec<Scene> {
+    fn draw_circle(scene: &mut Scene, transform: Affine, position: Vector2<f64>, radius: f64, color: Color) {
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            color,
+            None,
+            &Circle::new((position.x, position.y), radius.max(1.0)),
+        )
+    }
+
+    fn draw_text(scene: &mut Scene, transform: Affine, text: &mut SimpleText, position: Vector2<f64>, s: &str) {
+        text.add(
+            scene,
+            10.0,
+            None,
+            Affine::translate((position.x, position.y)) * transform,
+            s,
+        );
+    }
+
     let transform = Affine::IDENTITY;
     let objects = physics.objects();
     let chunk_size = physics.objects().len() / 20;
@@ -482,7 +515,7 @@ fn draw_physics(physics: &PhysicsEngine, DrawIds(draw_ids): DrawIds) -> Vec<Scen
                         if !objects.is_planet[object_index] {
                             let particle_position = objects.positions[object_index];
                             let particle_radius = objects.radii[object_index];
-                            let color = match config.rendering.color_source.unwrap_or_default() {
+                            let color = match color_source {
                                 ColorSource::Demo => objects.colors[object_index],
                                 ColorSource::Velocity => {
                                     const SCALE_FACTOR: f64 = 0.0004;
@@ -491,20 +524,21 @@ fn draw_physics(physics: &PhysicsEngine, DrawIds(draw_ids): DrawIds) -> Vec<Scen
                                         (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
                                     Some(spectrum(spectrum_position))
                                 }
-                            };
-                            scene.fill(
-                                Fill::NonZero,
+                            }
+                            .unwrap_or(css::GRAY);
+                            draw_circle(
+                                &mut scene,
                                 transform,
-                                color.unwrap_or(css::GRAY),
-                                None,
-                                &Circle::new((particle_position.x, particle_position.y), particle_radius.max(1.0)),
+                                particle_position,
+                                particle_radius.max(1.0),
+                                color,
                             );
                             if draw_ids {
-                                text.add(
+                                draw_text(
                                     &mut scene,
-                                    10.0,
-                                    None,
-                                    Affine::translate((particle_position.x, particle_position.y)),
+                                    transform,
+                                    &mut text,
+                                    particle_position,
                                     &format!("{}", object_index),
                                 );
                             }
@@ -518,20 +552,32 @@ fn draw_physics(physics: &PhysicsEngine, DrawIds(draw_ids): DrawIds) -> Vec<Scen
     });
 
     let scene = scenes.last_mut().unwrap();
-    for ((&planet_position, &planet_radius), color) in zip(
+    let mut text = SimpleText::new();
+    for (object_index, ((&planet_position, &planet_radius), color)) in zip(
         zip(
             &objects.positions[..objects.planet_count],
             &objects.radii[..objects.planet_count],
         ),
         &objects.colors[..objects.planet_count],
-    ) {
-        scene.fill(
-            Fill::NonZero,
+    )
+    .enumerate()
+    {
+        draw_circle(
+            scene,
             transform,
+            planet_position,
+            planet_radius.max(1.0),
             color.unwrap_or(css::WHITE),
-            None,
-            &Circle::new((planet_position.x, planet_position.y), planet_radius.max(1.0)),
         );
+        if draw_ids {
+            draw_text(
+                scene,
+                transform,
+                &mut text,
+                planet_position,
+                &format!("{}", object_index),
+            );
+        }
     }
 
     let topleft = physics.constraints().topleft;
@@ -589,9 +635,10 @@ fn draw_stats(
     text: &mut SimpleText,
     (fps, min_fps): (usize, usize),
     stats: &Stats,
+    gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
     let buffer = &mut String::new();
-    write_stats(buffer, (fps, min_fps), stats)?;
+    write_stats(buffer, (fps, min_fps), stats, gpu_compute_options)?;
 
     const TEXT_SIZE: f32 = 16.0;
     text.add(
@@ -605,27 +652,31 @@ fn draw_stats(
     Ok(())
 }
 
-fn write_stats(buffer: &mut String, (fps, min_fps): (usize, usize), stats: &Stats) -> anyhow::Result<()> {
-    let config = config();
+fn write_stats(
+    buffer: &mut String,
+    (fps, min_fps): (usize, usize),
+    stats: &Stats,
+    gpu_compute_options: GpuComputeOptions,
+) -> anyhow::Result<()> {
     writeln!(buffer, "FPS: {:?} (min {:?})", fps, min_fps)?;
     write!(buffer, "sim time: {}", stats.sim_time)?;
-    if let Some(time_limit) = config.simulation.time_limit {
-        let action = config.simulation.time_limit_action.to_string();
+    if let Some(time_limit) = CONFIG.simulation.time_limit {
+        let action = CONFIG.simulation.time_limit_action.to_string();
         write!(buffer, " ({action} at {time_limit})")?;
     }
     writeln!(buffer)?;
     writeln!(
         buffer,
         "gpu compute: {}",
-        if config.simulation.enable_gpu {
-            "enabled"
+        if gpu_compute_options.integration {
+            "integration"
         } else {
-            "disabled"
+            "off"
         }
     )?;
     writeln!(buffer, "objects: {}", stats.object_count)?;
-    write_duration_stat(buffer, "updates", &stats.updates_duration)?;
-    write_duration_stat(buffer, "collision", &stats.collisions_duration)?;
+    write_duration_stat(buffer, "integration", &stats.integration_duration)?;
+    write_duration_stat(buffer, "collisions", &stats.collisions_duration)?;
     write_duration_stat(buffer, "grid", &stats.grid_duration)?;
     write_duration_stat(buffer, "constraints", &stats.constraints_duration)?;
     Ok(())

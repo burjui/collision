@@ -1,12 +1,12 @@
 use rand::random;
 use vello::peniko::{
-    color::{ColorSpace, Hsl, Srgb},
     Color,
+    color::{ColorSpace, Hsl, Srgb},
 };
 
 use crate::{
-    app_config::config,
-    physics::{object::ObjectPrototype, PhysicsEngine},
+    app_config::CONFIG,
+    physics::{PhysicsEngine, object::ObjectPrototype},
     vector2::Vector2,
 };
 
@@ -47,10 +47,10 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
                 position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j))
-                + if config().demo.randomize_positions {
+                + if CONFIG.demo.randomize_positions {
                     Vector2::new(
-                        random::<f64>() * brick.particle_radius * config().demo.randomize_radius_factor,
-                        random::<f64>() * brick.particle_radius * config().demo.randomize_radius_factor,
+                        random::<f64>() * brick.particle_radius * CONFIG.demo.randomize_position_factor,
+                        random::<f64>() * brick.particle_radius * CONFIG.demo.randomize_position_factor,
                     )
                 } else {
                     Vector2::default()
@@ -108,10 +108,10 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
             let x = -ball.radius + (i as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let y = -ball.radius + (j as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let position = Vector2::new(x, y)
-                + if config().demo.randomize_positions {
+                + if CONFIG.demo.randomize_positions {
                     Vector2::new(
-                        random::<f64>() * ball.particle_radius * config().demo.randomize_radius_factor,
-                        random::<f64>() * ball.particle_radius * config().demo.randomize_radius_factor,
+                        random::<f64>() * ball.particle_radius * CONFIG.demo.randomize_position_factor,
+                        random::<f64>() * ball.particle_radius * CONFIG.demo.randomize_position_factor,
                     )
                 } else {
                     Vector2::default()

@@ -1,24 +1,13 @@
 use std::{fmt::Display, fs::File, io::Read, path::Path, sync::LazyLock};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use serde_derive::Deserialize;
 
-static mut APP_CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
+pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
     AppConfig::from_file(Path::new("config.toml"))
         .context("load config")
         .unwrap()
 });
-
-#[allow(static_mut_refs)]
-pub fn config() -> &'static AppConfig {
-    unsafe { &APP_CONFIG }
-}
-
-// TODO copy mutable parameters from config instead
-#[allow(static_mut_refs)]
-pub fn config_mut() -> &'static mut AppConfig {
-    LazyLock::get_mut(unsafe { &mut APP_CONFIG }).unwrap()
-}
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
@@ -90,15 +79,16 @@ pub struct WindowConfig {
 #[serde(deny_unknown_fields)]
 pub struct SimulationConfig {
     #[serde(default)]
+    pub auto_start: bool,
+    #[serde(default)]
     pub dt: DtSource,
     #[serde(default = "default_speed_factor")]
     pub speed_factor: f64,
-    pub enable_gpu: bool,
+    #[serde(default = "default_gpu_integration")]
+    pub gpu_integration: bool,
     pub restitution_coefficient: f64,
     pub gravity: (f64, f64),
     pub gravitational_constant: f64,
-    #[serde(default)]
-    pub auto_start: bool,
     pub time_limit: Option<f64>,
     #[serde(default)]
     pub time_limit_action: TimeLimitAction,
@@ -106,6 +96,10 @@ pub struct SimulationConfig {
 
 fn default_speed_factor() -> f64 {
     1.0
+}
+
+fn default_gpu_integration() -> bool {
+    false
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
@@ -155,13 +149,18 @@ pub struct DemoConfig {
 
     #[serde(default)]
     pub randomize_positions: bool,
-    pub randomize_radius_factor: f64,
+    pub randomize_position_factor: f64,
 }
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct RenderConfig {
-    pub color_source: Option<ColorSource>,
+    #[serde(default = "default_color_source")]
+    pub color_source: ColorSource,
+}
+
+fn default_color_source() -> ColorSource {
+    ColorSource::Velocity
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]

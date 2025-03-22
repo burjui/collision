@@ -1,29 +1,26 @@
-# Works on b40a7e11bc62027e8e0a8dfe45e573aa80347f84
-
 [window]
 width = 1600
 height = 800
 
 [simulation]
-# dt = { fixed = 0.001 }
+auto_start = true
+# dt = { fixed = 0.0001 }
 # speed_factor = 0.3
-enable_gpu = false
-restitution_coefficient = 1
+# gpu_integration = true
+restitution_coefficient = 0.998
 gravity = [0, 0]
 gravitational_constant = 10000
-# auto_start = true
-# time_limit = 0.02
+# time_limit = 0.9
 # time_limit_action = "pause"
 
 [demo]
-object_radius = 2
+object_radius = 3
 object_spacing = 0.01
 enable_planets = true
 enable_brick = true
 # enable_ball = true
 # randomize_positions = true
-randomize_radius_factor = 1
+randomize_position_factor = 1
 
 [rendering]
 color_source = "velocity"
-# color_source = "demo"
