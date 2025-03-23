@@ -122,7 +122,7 @@ impl Gpu {
         unsafe { kernel.enqueue_nd_range(&self.queue) }.context("Failed to enqueue kernel")
     }
 
-    pub fn submit_queue(&self) -> anyhow::Result<()> {
+    pub fn wait_for_queue_completeion(&self) -> anyhow::Result<()> {
         self.queue.finish().context("Failed to submit queue")
     }
 }

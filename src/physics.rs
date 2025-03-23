@@ -244,7 +244,7 @@ impl PhysicsEngine {
             .enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
             .context("Failed to read velocity buffer")
             .unwrap();
-        self.gpu.submit_queue().unwrap();
+        self.gpu.wait_for_queue_completeion().unwrap();
     }
 
     fn execute_integration_no_planets_gpu_kernel(&mut self, dt: f64) {
@@ -268,7 +268,7 @@ impl PhysicsEngine {
         self.gpu
             .enqueue_read_device_buffer(velocity_buffer, self.objects.velocities.as_mut_slice())
             .unwrap();
-        self.gpu.submit_queue().unwrap();
+        self.gpu.wait_for_queue_completeion().unwrap();
     }
 
     fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
