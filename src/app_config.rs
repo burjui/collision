@@ -163,7 +163,7 @@ fn default_color_source() -> ColorSource {
     ColorSource::Velocity
 }
 
-#[derive(Deserialize, Clone, Copy, Default)]
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
 pub enum ColorSource {
     #[default]
     #[serde(rename = "demo")]

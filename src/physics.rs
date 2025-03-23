@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+use circular_buffer::CircularBuffer;
 use grid::{CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
@@ -36,6 +37,7 @@ pub struct PhysicsEngine {
     integration_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
     integration_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
     integration_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
+    gpu_compute_options: GpuComputeOptions,
 }
 
 impl PhysicsEngine {
@@ -66,6 +68,7 @@ impl PhysicsEngine {
             integration_position_buffer: None,
             integration_velocity_buffer: None,
             integration_planet_mass_buffer: None,
+            gpu_compute_options: GpuComputeOptions::default(),
         })
     }
 
@@ -99,7 +102,22 @@ impl PhysicsEngine {
         &self.stats
     }
 
+    #[must_use]
+    pub fn time(&self) -> f64 {
+        self.time
+    }
+
+    #[must_use]
+    pub fn constraints(&self) -> ConstraintBox {
+        self.constraints
+    }
+
     pub fn advance(&mut self, speed_factor: f64, gpu_compute_options: GpuComputeOptions) {
+        if gpu_compute_options != self.gpu_compute_options {
+            self.stats.integration_duration = DurationStat::default();
+        }
+        self.gpu_compute_options = gpu_compute_options;
+
         let start = Instant::now();
         let dt = match CONFIG.simulation.dt {
             DtSource::Auto => {
@@ -149,16 +167,6 @@ impl PhysicsEngine {
         self.stats.total_duration.update(start.elapsed());
         self.stats.sim_time = self.time;
         self.stats.object_count = self.objects.len();
-    }
-
-    #[must_use]
-    pub fn constraints(&self) -> &ConstraintBox {
-        &self.constraints
-    }
-
-    #[must_use]
-    pub fn time(&self) -> f64 {
-        self.time
     }
 
     fn update(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
@@ -563,7 +571,7 @@ impl PhysicsEngine {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GpuComputeOptions {
     pub integration: bool,
 }
@@ -574,7 +582,7 @@ struct ObjectUpdate {
     velocity: Vector2<f64>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct ConstraintBox {
     pub topleft: Vector2<f64>,
     pub bottomright: Vector2<f64>,
@@ -587,11 +595,12 @@ impl ConstraintBox {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct DurationStat {
     pub current: Duration,
     pub lowest: Duration,
     pub highest: Duration,
+    pub average: CircularBuffer<10, Duration>,
 }
 
 impl DurationStat {
@@ -599,6 +608,7 @@ impl DurationStat {
         self.current = duration;
         self.lowest = self.lowest.min(duration);
         self.highest = self.highest.max(duration);
+        self.average.push_back(duration);
     }
 }
 
@@ -608,11 +618,12 @@ impl Default for DurationStat {
             current: Duration::ZERO,
             lowest: Duration::MAX,
             highest: Duration::ZERO,
+            average: CircularBuffer::default(),
         }
     }
 }
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct Stats {
     pub sim_time: f64,
     pub object_count: usize,

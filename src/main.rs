@@ -1,10 +1,11 @@
 #![allow(clippy::too_many_lines)]
 
 use std::{
-    fmt::{Debug, Write as _},
+    fmt::{self, Debug, Write as _},
     iter::zip,
     mem::take,
     num::NonZero,
+    ops::Add,
     sync::{Arc, Barrier, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
@@ -14,7 +15,7 @@ use anyhow::anyhow;
 use collision::{
     app_config::{CONFIG, ColorSource, TimeLimitAction},
     fps::FpsCalculator,
-    physics::{DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
+    physics::{ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
 };
@@ -44,23 +45,42 @@ pub fn main() -> anyhow::Result<()> {
     let render_context = RenderContext::new();
     let renderers: Vec<Option<Renderer>> = vec![];
     let render_state = None::<RenderState<'_>>;
-    let (physics_thread_sender, physics_event_receiver) = mpsc::channel();
+    let (simulation_event_sender, simulation_event_receiver) = mpsc::channel();
+    let (rendering_event_sender, rendering_event_receiver) = mpsc::channel();
     let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
-    let wait_for_exit_barrier = Arc::new(Barrier::new(2));
+    let wait_for_exit_barrier = Arc::new(Barrier::new(3));
     let gpu_compute_options = GpuComputeOptions {
         integration: CONFIG.simulation.gpu_integration,
     };
-    let physics_thread = {
+    let rendering_start_barrier = Arc::new(Barrier::new(3));
+    let simulation_thread = {
         let sim_total_duration = sim_total_duration.clone();
-        let event_loop_proxy = event_loop.create_proxy();
         let wait_for_exit_barrier = wait_for_exit_barrier.clone();
+        let app_event_loop_proxy = event_loop.create_proxy();
+        let rendering_event_sender = rendering_event_sender.clone();
+        let rendering_start_barrier = rendering_start_barrier.clone();
         thread::spawn(move || -> PhysicsEngine {
-            physics_thread(
+            simulation_thread(
                 &sim_total_duration,
-                &event_loop_proxy,
-                &physics_event_receiver,
+                &app_event_loop_proxy,
+                &simulation_event_receiver,
                 &wait_for_exit_barrier,
                 gpu_compute_options,
+                &rendering_event_sender,
+                &rendering_start_barrier,
+            )
+        })
+    };
+    let rendering_thread = {
+        let app_event_loop_proxy = event_loop.create_proxy();
+        let wait_for_exit_barrier = wait_for_exit_barrier.clone();
+        let rendering_start_barrier = rendering_start_barrier.clone();
+        thread::spawn(move || {
+            rendering_thread(
+                &rendering_event_receiver,
+                &app_event_loop_proxy,
+                &wait_for_exit_barrier,
+                &rendering_start_barrier,
             )
         })
     };
@@ -70,7 +90,7 @@ pub fn main() -> anyhow::Result<()> {
         state: render_state,
         cached_window: None,
         scene: Scene::new(),
-        physics_scene: Scene::new(),
+        simulation_scene: Scene::new(),
         frame_count: 0,
         fps_calculator: FpsCalculator::default(),
         last_fps: 0,
@@ -78,16 +98,19 @@ pub fn main() -> anyhow::Result<()> {
         mouse_position: Vector2::new(0.0, 0.0),
         mouse_influence_radius: 50.0,
         text: SimpleText::new(),
-        physics_thread_sender,
-        redraw_physics: true,
+        simulation_event_sender,
+        rendering_event_sender,
         stats: Stats::default(),
         wait_for_exit_barrier,
         gpu_compute_options,
     };
+
+    rendering_start_barrier.wait();
     let start = Instant::now();
     event_loop.run_app(&mut app).expect("run to completion");
 
-    let physics = physics_thread.join().expect("failed to join physics thread");
+    rendering_thread.join().expect("failed to join rendering thread");
+    let physics = simulation_thread.join().expect("failed to join simulation thread");
     let mut stats_buffer = String::new();
     write_stats(
         &mut stats_buffer,
@@ -118,46 +141,57 @@ fn enable_floating_point_exceptions() {
     }
 }
 
-fn physics_thread(
+fn simulation_thread(
     sim_total_duration: &Arc<Mutex<Duration>>,
-    event_loop_proxy: &EventLoopProxy<AppEvent>,
-    physics_event_receiver: &mpsc::Receiver<PhysicsThreadEvent>,
+    app_event_loop_proxy: &EventLoopProxy<AppEvent>,
+    simulation_event_receiver: &mpsc::Receiver<SimulationThreadEvent>,
     wait_for_exit_barrier: &Arc<Barrier>,
     mut gpu_compute_options: GpuComputeOptions,
+    rendering_event_sender: &mpsc::Sender<RenderingThreadEvent>,
+    rendering_start_barrier: &Arc<Barrier>,
 ) -> PhysicsEngine {
     let mut advance_time = CONFIG.simulation.auto_start;
     let mut time_limit_action_executed = false;
-    let mut last_redraw = Instant::now();
-    let mut show_grid = false;
-    let mut show_ids = false;
+    let mut draw_grid = false;
+    let mut draw_ids = false;
     let mut physics = PhysicsEngine::new().unwrap();
     let mut color_source = ColorSource::Velocity;
     create_demo(&mut physics);
     println!("{} objects", physics.objects().len());
+    let mut redraw_needed = false;
+    let mut last_redraw = Instant::now();
+    rendering_start_barrier.wait();
     'main_loop: loop {
-        fn send_event(event_loop_proxy: &EventLoopProxy<AppEvent>, mut event: AppEvent) {
+        fn send_app_event(event_loop_proxy: &EventLoopProxy<AppEvent>, mut event: AppEvent) {
             let _ = event_loop_proxy
                 .send_event(event.take())
                 .map_err(|e| eprintln!("Failed to send event {event:?}: {}", &e));
         }
 
-        while let Result::Ok(event) = physics_event_receiver.try_recv() {
+        while let Result::Ok(event) = simulation_event_receiver.try_recv() {
             match event {
-                PhysicsThreadEvent::Exit => {
+                SimulationThreadEvent::Exit => {
                     wait_for_exit_barrier.wait();
                     break 'main_loop;
                 }
-                PhysicsThreadEvent::ToggleAdvanceTime => advance_time = !advance_time,
-                PhysicsThreadEvent::ToggleShowIds => show_ids = !show_ids,
-                PhysicsThreadEvent::ToggleShowGrid => show_grid = !show_grid,
-                PhysicsThreadEvent::ToggleColorSource => {
+                SimulationThreadEvent::ToggleAdvanceTime => advance_time = !advance_time,
+                SimulationThreadEvent::ToggleDrawIds => {
+                    draw_ids = !draw_ids;
+                    redraw_needed = true;
+                }
+                SimulationThreadEvent::ToggleDrawGrid => {
+                    draw_grid = !draw_grid;
+                    redraw_needed = true;
+                }
+                SimulationThreadEvent::ToggleColorSource => {
                     color_source = match color_source {
                         ColorSource::Demo => ColorSource::Velocity,
                         ColorSource::Velocity => ColorSource::Demo,
-                    }
+                    };
+                    redraw_needed = true;
                 }
-                PhysicsThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
-                PhysicsThreadEvent::UnidirectionalKick {
+                SimulationThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
+                SimulationThreadEvent::UnidirectionalKick {
                     mouse_position,
                     mouse_influence_radius,
                 } => {
@@ -168,6 +202,7 @@ fn physics_thread(
                             *velocity += from_mouse_to_object.normalize() * 2000.0;
                         }
                     }
+                    redraw_needed = true;
                 }
             }
         }
@@ -175,49 +210,99 @@ fn physics_thread(
         if CONFIG.simulation.time_limit.is_some_and(|limit| physics.time() > limit) && !time_limit_action_executed {
             println!("Time limit reached");
             time_limit_action_executed = true;
-            advance_time = false;
+
             match CONFIG.simulation.time_limit_action {
                 TimeLimitAction::Exit => {
-                    send_event(event_loop_proxy, AppEvent::Exit);
+                    send_app_event(app_event_loop_proxy, AppEvent::Exit);
+                    rendering_event_sender
+                        .send(RenderingThreadEvent::Exit)
+                        .expect("failed to send rendering thread Exit event");
                     wait_for_exit_barrier.wait();
                     break 'main_loop;
                 }
-                TimeLimitAction::Pause => send_event(event_loop_proxy, AppEvent::RequestRedraw),
+                TimeLimitAction::Pause => advance_time = false,
             }
         }
 
         let now = Instant::now();
         if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
             last_redraw = now;
-            let mut scenes = draw_physics(&physics, color_source, DrawIds(show_ids));
-            let mut scene = scenes.remove(0);
-            for subscene in scenes {
-                scene.append(&subscene, None);
-            }
-            if show_grid && physics.grid().cell_size() > 0.0 {
-                draw_grid(
-                    &mut scene,
-                    physics.constraints().topleft,
-                    physics.constraints().bottomright,
-                    physics.grid().cell_size(),
-                );
-            }
-            send_event(event_loop_proxy, AppEvent::SceneUpdated(scene));
+            redraw_needed = true;
+        }
+        if redraw_needed {
+            redraw_needed = false;
+            rendering_event_sender
+                .send(RenderingThreadEvent::Draw(RenderingData {
+                    positions: physics.objects().positions.clone(),
+                    velocities: physics.objects().velocities.clone(),
+                    radii: physics.objects().radii.clone(),
+                    colors: physics.objects().colors.clone(),
+                    planet_count: physics.objects().planet_count,
+                    color_source,
+                    draw_ids,
+                    draw_grid,
+                    grid_cell_size: physics.grid().cell_size(),
+                    constraints: physics.constraints(),
+                }))
+                .expect("failed to send rendering thread SetData event");
         }
 
         if advance_time {
             let start = Instant::now();
             physics.advance(CONFIG.simulation.speed_factor, gpu_compute_options);
             *sim_total_duration.lock().unwrap() += start.elapsed();
-            send_event(event_loop_proxy, AppEvent::StatsUpdated(*physics.stats()));
+            send_app_event(app_event_loop_proxy, AppEvent::StatsUpdated(physics.stats().clone()));
         }
     }
 
     physics
 }
 
+fn rendering_thread(
+    event_receiver: &mpsc::Receiver<RenderingThreadEvent>,
+    app_event_loop_proxy: &EventLoopProxy<AppEvent>,
+    wait_for_exit_barrier: &Arc<Barrier>,
+    rendering_start_barrier: &Arc<Barrier>,
+) {
+    let mut last_redraw = Instant::now();
+    let mut rendering_data = RenderingData::default();
+    rendering_start_barrier.wait();
+    'main_loop: loop {
+        while let Result::Ok(event) = event_receiver.try_recv() {
+            match event {
+                RenderingThreadEvent::Draw(data) => rendering_data = data,
+                RenderingThreadEvent::Exit => {
+                    wait_for_exit_barrier.wait();
+                    break 'main_loop;
+                }
+            }
+        }
+        let now = Instant::now();
+        if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
+            last_redraw = now;
+            if !rendering_data.positions.is_empty() {
+                let mut scenes = draw_physics(&rendering_data);
+                let mut scene = scenes.remove(0);
+                for subscene in scenes {
+                    scene.append(&subscene, None);
+                }
+                if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
+                    draw_grid(
+                        &mut scene,
+                        rendering_data.constraints.topleft,
+                        rendering_data.constraints.bottomright,
+                        rendering_data.grid_cell_size,
+                    );
+                }
+                app_event_loop_proxy
+                    .send_event(AppEvent::SceneUpdated(scene.clone()))
+                    .expect("failed to send");
+            }
+        }
+    }
+}
+
 enum AppEvent {
-    RequestRedraw,
     SceneUpdated(Scene),
     StatsUpdated(Stats),
     Exit,
@@ -226,7 +311,6 @@ enum AppEvent {
 impl AppEvent {
     fn take(&mut self) -> AppEvent {
         match self {
-            Self::RequestRedraw => AppEvent::RequestRedraw,
             Self::SceneUpdated(scene) => AppEvent::SceneUpdated(take(scene)),
             Self::StatsUpdated(stats) => AppEvent::StatsUpdated(take(stats)),
             Self::Exit => AppEvent::Exit,
@@ -235,29 +319,56 @@ impl AppEvent {
 }
 
 impl Debug for AppEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AppEvent::")?;
         match self {
-            Self::RequestRedraw => write!(f, "RequestRedraw"),
-            Self::SceneUpdated(_) => write!(f, "RequestRedrawPhysics"),
-            Self::StatsUpdated(_) => write!(f, "StatsUpdated"),
+            Self::SceneUpdated(_) => write!(f, "SceneUpdated(...)"),
+            Self::StatsUpdated(_) => write!(f, "StatsUpdated(...)"),
             Self::Exit => write!(f, "Exit"),
         }
     }
 }
 
 #[derive(Debug)]
-enum PhysicsThreadEvent {
+enum SimulationThreadEvent {
     Exit,
     ToggleAdvanceTime,
-    ToggleShowIds,
-    ToggleShowGrid,
+    ToggleDrawIds,
+    ToggleDrawGrid,
     ToggleColorSource,
     SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
         mouse_position: Vector2<f64>,
         mouse_influence_radius: f64,
     },
+}
+
+enum RenderingThreadEvent {
+    Draw(RenderingData),
+    Exit,
+}
+
+impl Debug for RenderingThreadEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            RenderingThreadEvent::Draw(_) => "SetData(...)",
+            RenderingThreadEvent::Exit => "Exit",
+        })
+    }
+}
+
+#[derive(Default)]
+struct RenderingData {
+    positions: Vec<Vector2<f64>>,
+    velocities: Vec<Vector2<f64>>,
+    radii: Vec<f64>,
+    colors: Vec<Option<Color>>,
+    planet_count: usize,
+    color_source: ColorSource,
+    draw_ids: bool,
+    draw_grid: bool,
+    grid_cell_size: f64,
+    constraints: ConstraintBox,
 }
 
 struct VelloApp<'s> {
@@ -268,7 +379,7 @@ struct VelloApp<'s> {
     // If render_state exists, we must store the window in it, to maintain drop order
     cached_window: Option<Arc<Window>>,
     scene: Scene,
-    physics_scene: Scene,
+    simulation_scene: Scene,
     frame_count: usize,
     fps_calculator: FpsCalculator,
     last_fps: usize,
@@ -276,8 +387,8 @@ struct VelloApp<'s> {
     mouse_position: Vector2<f64>,
     mouse_influence_radius: f64,
     text: SimpleText,
-    physics_thread_sender: mpsc::Sender<PhysicsThreadEvent>,
-    redraw_physics: bool,
+    simulation_event_sender: mpsc::Sender<SimulationThreadEvent>,
+    rendering_event_sender: mpsc::Sender<RenderingThreadEvent>,
     stats: Stats,
     wait_for_exit_barrier: Arc<Barrier>,
     gpu_compute_options: GpuComputeOptions,
@@ -305,7 +416,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             self.context
                 .create_surface(window.clone(), size.width, size.height, PresentMode::AutoNoVsync);
         // We need to block here, in case a Suspended event appeared
-        let surface = pollster::block_on(surface_future).expect("Error creating surface");
+        let surface = pollster::block_on(surface_future).expect("failed to create surface");
         self.state = {
             let render_state = RenderState { surface, window };
             self.renderers.resize_with(self.context.devices.len(), || None);
@@ -321,7 +432,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                     },
                 )
                 .map_err(|e| anyhow!("{e}"))
-                .expect("Failed to create renderer")
+                .expect("failed to create renderer")
             });
             Some(render_state)
         };
@@ -340,34 +451,39 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
                         Key::Named(NamedKey::Escape) => {
-                            self.physics_thread_sender.send(PhysicsThreadEvent::Exit).unwrap();
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::Exit)
+                                .expect("failed to send simulation thread Exit event");
+                            self.rendering_event_sender
+                                .send(RenderingThreadEvent::Exit)
+                                .expect("failed to send rendering thread Exit event");
                             self.wait_for_exit_barrier.wait();
                             event_loop.exit();
                         }
                         Key::Named(NamedKey::Space) => {
-                            self.physics_thread_sender
-                                .send(PhysicsThreadEvent::ToggleAdvanceTime)
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::ToggleAdvanceTime)
                                 .unwrap();
                         }
                         Key::Character("g") => {
-                            self.physics_thread_sender
-                                .send(PhysicsThreadEvent::ToggleShowGrid)
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::ToggleDrawGrid)
                                 .unwrap();
                         }
                         Key::Character("i") => {
-                            self.physics_thread_sender
-                                .send(PhysicsThreadEvent::ToggleShowIds)
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::ToggleDrawIds)
                                 .unwrap();
                         }
                         Key::Character("v") => {
-                            self.physics_thread_sender
-                                .send(PhysicsThreadEvent::ToggleColorSource)
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::ToggleColorSource)
                                 .unwrap();
                         }
                         Key::Character("a") => {
                             self.gpu_compute_options.integration = !self.gpu_compute_options.integration;
-                            self.physics_thread_sender
-                                .send(PhysicsThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
                                 .unwrap();
                         }
                         _ => {}
@@ -387,7 +503,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         self.min_fps = self.min_fps.min(fps);
                     }
                     self.scene.reset();
-                    self.scene.append(&self.physics_scene, None);
+                    self.scene.append(&self.simulation_scene, None);
                     draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                     draw_stats(
                         &mut self.scene,
@@ -411,8 +527,8 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
                     if let MouseButton::Left = button {
-                        self.physics_thread_sender
-                            .send(PhysicsThreadEvent::UnidirectionalKick {
+                        self.simulation_event_sender
+                            .send(SimulationThreadEvent::UnidirectionalKick {
                                 mouse_position: self.mouse_position,
                                 mouse_influence_radius: self.mouse_influence_radius,
                             })
@@ -433,12 +549,8 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::RequestRedraw => {
-                request_redraw(self.state.as_ref());
-            }
             AppEvent::SceneUpdated(scene) => {
-                self.redraw_physics = true;
-                self.physics_scene = scene;
+                self.simulation_scene = scene;
                 request_redraw(self.state.as_ref());
             }
             AppEvent::StatsUpdated(stats) => {
@@ -473,9 +585,19 @@ fn request_redraw(render_state: Option<&RenderState<'_>>) {
     }
 }
 
-struct DrawIds(bool);
-
-fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw_ids): DrawIds) -> Vec<Scene> {
+fn draw_physics(
+    RenderingData {
+        positions,
+        velocities,
+        radii,
+        colors,
+        planet_count,
+        color_source,
+        draw_ids,
+        constraints,
+        ..
+    }: &RenderingData,
+) -> Vec<Scene> {
     fn draw_circle(scene: &mut Scene, transform: Affine, position: Vector2<f64>, radius: f64, color: Color) {
         scene.fill(
             Fill::NonZero,
@@ -497,14 +619,9 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
     }
 
     let transform = Affine::IDENTITY;
-    let objects = physics.objects();
-    let chunk_size = physics.objects().len() / 20;
-    let chunks = (0..physics.objects().len())
-        .chunks(if chunk_size > 0 {
-            chunk_size
-        } else {
-            physics.objects().len()
-        })
+    let chunk_size = positions.len().div_ceil(16);
+    let chunks = (*planet_count..positions.len())
+        .chunks(if chunk_size > 0 { chunk_size } else { positions.len() })
         .into_iter()
         .map(Itertools::collect_vec)
         .collect_vec();
@@ -516,37 +633,35 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
                     let mut scene = Scene::new();
                     let mut text = SimpleText::new();
                     for &object_index in chunk {
-                        if !objects.is_planet[object_index] {
-                            let particle_position = objects.positions[object_index];
-                            let particle_radius = objects.radii[object_index];
-                            let color = match color_source {
-                                ColorSource::Demo => objects.colors[object_index],
-                                ColorSource::Velocity => {
-                                    const SCALE_FACTOR: f64 = 0.0004;
-                                    let velocity = objects.velocities[object_index];
-                                    #[allow(clippy::cast_possible_truncation)]
-                                    let spectrum_position =
-                                        (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
-                                    Some(spectrum(spectrum_position))
-                                }
+                        let particle_position = positions[object_index];
+                        let particle_radius = radii[object_index];
+                        let color = match color_source {
+                            ColorSource::Demo => colors[object_index],
+                            ColorSource::Velocity => {
+                                const SCALE_FACTOR: f64 = 0.0004;
+                                let velocity = velocities[object_index];
+                                #[allow(clippy::cast_possible_truncation)]
+                                let spectrum_position =
+                                    (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
+                                Some(spectrum(spectrum_position))
                             }
-                            .unwrap_or(css::GRAY);
-                            draw_circle(
+                        }
+                        .unwrap_or(css::GRAY);
+                        draw_circle(
+                            &mut scene,
+                            transform,
+                            particle_position,
+                            particle_radius.max(1.0),
+                            color,
+                        );
+                        if *draw_ids {
+                            draw_text(
                                 &mut scene,
                                 transform,
+                                &mut text,
                                 particle_position,
-                                particle_radius.max(1.0),
-                                color,
+                                &format!("{object_index}"),
                             );
-                            if draw_ids {
-                                draw_text(
-                                    &mut scene,
-                                    transform,
-                                    &mut text,
-                                    particle_position,
-                                    &format!("{object_index}"),
-                                );
-                            }
                         }
                     }
                     scene
@@ -559,11 +674,8 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
     let scene = scenes.last_mut().unwrap();
     let mut text = SimpleText::new();
     for (object_index, ((&planet_position, &planet_radius), color)) in zip(
-        zip(
-            &objects.positions[..objects.planet_count],
-            &objects.radii[..objects.planet_count],
-        ),
-        &objects.colors[..objects.planet_count],
+        zip(&positions[..*planet_count], &radii[..*planet_count]),
+        &colors[..*planet_count],
     )
     .enumerate()
     {
@@ -574,13 +686,13 @@ fn draw_physics(physics: &PhysicsEngine, color_source: ColorSource, DrawIds(draw
             planet_radius.max(1.0),
             color.unwrap_or(css::WHITE),
         );
-        if draw_ids {
+        if *draw_ids {
             draw_text(scene, transform, &mut text, planet_position, &format!("{object_index}"));
         }
     }
 
-    let topleft = physics.constraints().topleft;
-    let bottomright = physics.constraints().bottomright;
+    let topleft = constraints.topleft;
+    let bottomright = constraints.bottomright;
     scene.stroke(
         &Stroke::default(),
         transform,
@@ -687,10 +799,17 @@ fn write_stats(
 }
 
 fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) -> anyhow::Result<()> {
+    let average = if stat.average.is_empty() {
+        Duration::MAX
+    } else {
+        let sum = stat.average.iter().copied().fold(Duration::ZERO, Add::add);
+        let count = u32::try_from(stat.average.len()).unwrap();
+        sum / count
+    };
     writeln!(
         buffer,
-        "{}: {:?} (min {:?}, max {:?})",
-        name, stat.current, stat.lowest, stat.highest
+        "{}: {:?} (min {:?}, max {:?}, avg {:?})",
+        name, stat.current, stat.lowest, stat.highest, average
     )?;
     Ok(())
 }
