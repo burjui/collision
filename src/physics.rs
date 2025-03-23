@@ -12,7 +12,7 @@ use opencl3::kernel::{ExecuteKernel, Kernel};
 use crate::{
     app_config::{CONFIG, DtSource},
     fixed_vec::FixedVec,
-    gpu::{Gpu, GpuBufferAccess, GpuDeviceBuffer},
+    gpu::{Gpu, GpuBufferAccessMode, GpuDeviceBuffer},
     vector2::Vector2,
 };
 
@@ -280,12 +280,12 @@ impl PhysicsEngine {
     fn allocate_gpu_integration_buffers(&mut self) {
         let position_buffer = self
             .gpu
-            .create_device_buffer(self.objects.positions.len(), GpuBufferAccess::ReadWrite)
+            .create_device_buffer(self.objects.positions.len(), GpuBufferAccessMode::ReadWrite)
             .context("Failed to create position buffer")
             .unwrap();
         let velocity_buffer = self
             .gpu
-            .create_device_buffer(self.objects.velocities.len(), GpuBufferAccess::ReadWrite)
+            .create_device_buffer(self.objects.velocities.len(), GpuBufferAccessMode::ReadWrite)
             .context("Failed to create velocity buffer")
             .unwrap();
         self.integration_position_buffer.replace(position_buffer);
@@ -294,7 +294,7 @@ impl PhysicsEngine {
         if self.objects.planet_count > 0 {
             self.integration_planet_mass_buffer.replace(
                 self.gpu
-                    .create_device_buffer(self.objects.planet_count, GpuBufferAccess::ReadOnly)
+                    .create_device_buffer(self.objects.planet_count, GpuBufferAccessMode::ReadOnly)
                     .context("Failed to create planet mass buffer")
                     .unwrap(),
             );

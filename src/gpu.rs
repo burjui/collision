@@ -77,16 +77,12 @@ impl Gpu {
     pub fn create_host_buffer<T>(
         &self,
         data: Vec<T>,
-        access_mode: GpuBufferAccess,
+        access_mode: GpuBufferAccessMode,
     ) -> anyhow::Result<GpuHostBuffer<T>> {
-        self.create_host_buffer_impl(data, access_mode.cl_mem_flags())
-    }
-
-    fn create_host_buffer_impl<T>(&self, data: Vec<T>, mem_flags: cl_mem_flags) -> anyhow::Result<GpuHostBuffer<T>> {
         let buffer = unsafe {
             Buffer::create(
                 &self.context,
-                mem_flags | CL_MEM_USE_HOST_PTR,
+                access_mode.cl_mem_flags() | CL_MEM_USE_HOST_PTR,
                 data.len(),
                 data.as_ptr() as *mut _,
             )
@@ -98,17 +94,9 @@ impl Gpu {
     pub fn create_device_buffer<T>(
         &self,
         length: usize,
-        access_mode: GpuBufferAccess,
+        access_mode: GpuBufferAccessMode,
     ) -> anyhow::Result<GpuDeviceBuffer<T>> {
-        self.create_device_buffer_impl(length, access_mode.cl_mem_flags())
-    }
-
-    fn create_device_buffer_impl<T>(
-        &self,
-        length: usize,
-        mem_flags: cl_mem_flags,
-    ) -> anyhow::Result<GpuDeviceBuffer<T>> {
-        let buffer = unsafe { Buffer::create(&self.context, mem_flags, length, null_mut()) }
+        let buffer = unsafe { Buffer::create(&self.context, access_mode.cl_mem_flags(), length, null_mut()) }
             .context("Failed to create device buffer")?;
         Ok(GpuDeviceBuffer { buffer, length })
     }
@@ -119,14 +107,6 @@ impl Gpu {
                 .enqueue_write_buffer(&mut buffer.buffer, CL_FALSE, 0, data, &[])
                 .context("Failed to write device buffer")
         }
-    }
-
-    pub fn enqueue_read_host_buffer<T>(&self, buffer: &mut GpuHostBuffer<T>) -> anyhow::Result<Event> {
-        unsafe {
-            self.queue
-                .enqueue_read_buffer(&buffer.buffer, CL_FALSE, 0, &mut buffer.data, &[])
-        }
-        .context("Failed to read host buffer")
     }
 
     pub fn enqueue_read_device_buffer<T>(
@@ -148,19 +128,19 @@ impl Gpu {
 }
 
 #[derive(Copy, Clone)]
-pub enum GpuBufferAccess {
+pub enum GpuBufferAccessMode {
     ReadOnly,
     WriteOnly,
     ReadWrite,
 }
 
-impl GpuBufferAccess {
+impl GpuBufferAccessMode {
     #[must_use]
     pub fn cl_mem_flags(&self) -> cl_mem_flags {
         match self {
-            GpuBufferAccess::ReadOnly => CL_MEM_READ_ONLY,
-            GpuBufferAccess::WriteOnly => CL_MEM_WRITE_ONLY,
-            GpuBufferAccess::ReadWrite => CL_MEM_READ_WRITE,
+            GpuBufferAccessMode::ReadOnly => CL_MEM_READ_ONLY,
+            GpuBufferAccessMode::WriteOnly => CL_MEM_WRITE_ONLY,
+            GpuBufferAccessMode::ReadWrite => CL_MEM_READ_WRITE,
         }
     }
 }
@@ -183,11 +163,6 @@ impl<T> GpuHostBuffer<T> {
     #[must_use]
     pub fn buffer(&self) -> &Buffer<T> {
         &self.buffer
-    }
-
-    #[must_use]
-    pub fn take_data(self) -> Vec<T> {
-        self.data
     }
 }
 
