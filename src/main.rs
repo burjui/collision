@@ -84,6 +84,7 @@ pub fn main() -> anyhow::Result<()> {
         wait_for_exit_barrier,
         gpu_compute_options,
     };
+    let start = Instant::now();
     event_loop.run_app(&mut app).expect("run to completion");
 
     let physics = physics_thread.join().expect("failed to join physics thread");
@@ -103,6 +104,7 @@ pub fn main() -> anyhow::Result<()> {
             physics.time() / sim_total_duration_guard.as_secs_f64()
         );
     }
+    println!("Total app running duration: {:?}", start.elapsed());
 
     Ok(())
 }
