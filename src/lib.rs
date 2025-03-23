@@ -16,5 +16,6 @@ pub mod fixed_vec;
 pub mod fps;
 pub mod gpu;
 pub mod physics;
+pub mod ring_buffer;
 pub mod simple_text;
 pub mod vector2;

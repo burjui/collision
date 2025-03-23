@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::Context;
-use circular_buffer::CircularBuffer;
 use grid::{CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
@@ -14,6 +13,7 @@ use crate::{
     app_config::{CONFIG, DtSource},
     fixed_vec::FixedVec,
     gpu::{Gpu, GpuBufferAccessMode, GpuDeviceBuffer},
+    ring_buffer::RingBuffer,
     vector2::Vector2,
 };
 
@@ -600,7 +600,7 @@ pub struct DurationStat {
     pub current: Duration,
     pub lowest: Duration,
     pub highest: Duration,
-    pub average: CircularBuffer<10, Duration>,
+    pub average: RingBuffer<10, Duration>,
 }
 
 impl DurationStat {
@@ -608,7 +608,7 @@ impl DurationStat {
         self.current = duration;
         self.lowest = self.lowest.min(duration);
         self.highest = self.highest.max(duration);
-        self.average.push_back(duration);
+        self.average.push(duration);
     }
 }
 
@@ -618,7 +618,7 @@ impl Default for DurationStat {
             current: Duration::ZERO,
             lowest: Duration::MAX,
             highest: Duration::ZERO,
-            average: CircularBuffer::default(),
+            average: RingBuffer::default(),
         }
     }
 }

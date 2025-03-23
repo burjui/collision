@@ -802,7 +802,7 @@ fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) -> 
     let average = if stat.average.is_empty() {
         Duration::MAX
     } else {
-        let sum = stat.average.iter().copied().fold(Duration::ZERO, Add::add);
+        let sum = stat.average.clone().fold(Duration::ZERO, Add::add);
         let count = u32::try_from(stat.average.len()).unwrap();
         sum / count
     };
