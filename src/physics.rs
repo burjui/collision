@@ -31,11 +31,11 @@ pub struct PhysicsEngine {
     global_gravity: Vector2<f64>,
     gravitational_constant: f64,
     gpu: Gpu,
-    yoshida_kernel: Kernel,
-    yoshida_kernel_no_planets: Kernel,
-    yoshida_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    yoshida_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    yoshida_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
+    integration_kernel: Kernel,
+    integration_kernel_no_planets: Kernel,
+    integration_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    integration_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    integration_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
 }
 
 impl PhysicsEngine {
@@ -45,10 +45,11 @@ impl PhysicsEngine {
             Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
         );
         let gpu = Gpu::default(10)?;
-        let yoshida_program = gpu.build_program("src/leapfrog_yoshida.cl")?;
-        let yoshida_kernel = Kernel::create(&yoshida_program, "leapfrog_yoshida").context("Failed to create kernel")?;
-        let yoshida_kernel_no_planets =
-            Kernel::create(&yoshida_program, "leapfrog_yoshida").context("Failed to create kernel")?;
+        let integration_program = gpu.build_program("src/leapfrog_yoshida.cl")?;
+        let integration_kernel =
+            Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
+        let integration_kernel_no_planets =
+            Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
         Ok(Self {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
@@ -60,11 +61,11 @@ impl PhysicsEngine {
             global_gravity: Vector2::from(CONFIG.simulation.gravity),
             gravitational_constant: CONFIG.simulation.gravitational_constant,
             gpu,
-            yoshida_kernel,
-            yoshida_kernel_no_planets,
-            yoshida_position_buffer: None,
-            yoshida_velocity_buffer: None,
-            yoshida_planet_mass_buffer: None,
+            integration_kernel,
+            integration_kernel_no_planets,
+            integration_position_buffer: None,
+            integration_velocity_buffer: None,
+            integration_planet_mass_buffer: None,
         })
     }
 
@@ -182,15 +183,15 @@ impl PhysicsEngine {
 
     fn integrate(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
         if gpu_compute_options.integration {
-            self.update_objects_leapfrog_yoshida_gpu(dt);
+            self.integrate_gpu(dt);
         } else {
-            self.update_object_leapfrog_yoshida_cpu(dt);
+            self.integrate_cpu(dt);
         }
     }
 
-    fn update_object_leapfrog_yoshida_cpu(&mut self, dt: f64) {
+    fn integrate_cpu(&mut self, dt: f64) {
         for object_index in 0..self.objects.len() {
-            let update = Self::update_object_leapfrog_yoshida(
+            let update = Self::integrate_object_cpu(
                 object_index,
                 &self.objects.positions,
                 self.objects.velocities[object_index],
@@ -204,23 +205,23 @@ impl PhysicsEngine {
         }
     }
 
-    fn update_objects_leapfrog_yoshida_gpu(&mut self, dt: f64) {
-        if self.yoshida_gpu_buffers_are_outdated() {
-            self.allocate_yoshida_gpu_buffers();
+    fn integrate_gpu(&mut self, dt: f64) {
+        if self.integration_gpu_buffers_are_outdated() {
+            self.allocate_gpu_integration_buffers();
         }
-        self.update_yoshida_gpu_buffers();
+        self.update_integration_gpu_buffers();
         if self.objects.planet_count > 0 {
-            self.execute_yoshida_gpu_kernel(dt);
+            self.execute_integration_kernel(dt);
         } else {
-            self.execute_yoshida_no_planets_gpu_kernel(dt);
+            self.execute_integration_no_planets_gpu_kernel(dt);
         }
     }
 
-    fn execute_yoshida_gpu_kernel(&mut self, dt: f64) {
-        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.yoshida_planet_mass_buffer.as_mut().unwrap();
-        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel);
+    fn execute_integration_kernel(&mut self, dt: f64) {
+        let position_buffer = self.integration_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.integration_velocity_buffer.as_mut().unwrap();
+        let planet_mass_buffer = self.integration_planet_mass_buffer.as_mut().unwrap();
+        let mut kernel = ExecuteKernel::new(&self.integration_kernel);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
             kernel.set_arg(position_buffer.buffer());
@@ -237,17 +238,19 @@ impl PhysicsEngine {
             .unwrap();
         self.gpu
             .enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
+            .context("Failed to read position buffer")
             .unwrap();
         self.gpu
             .enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
+            .context("Failed to read velocity buffer")
             .unwrap();
         self.gpu.submit_queue().unwrap();
     }
 
-    fn execute_yoshida_no_planets_gpu_kernel(&mut self, dt: f64) {
-        let position_buffer = self.yoshida_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.yoshida_velocity_buffer.as_mut().unwrap();
-        let mut kernel = ExecuteKernel::new(&self.yoshida_kernel_no_planets);
+    fn execute_integration_no_planets_gpu_kernel(&mut self, dt: f64) {
+        let position_buffer = self.integration_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.integration_velocity_buffer.as_mut().unwrap();
+        let mut kernel = ExecuteKernel::new(&self.integration_kernel_no_planets);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
             kernel.set_arg(position_buffer.buffer());
@@ -268,13 +271,13 @@ impl PhysicsEngine {
         self.gpu.submit_queue().unwrap();
     }
 
-    fn yoshida_gpu_buffers_are_outdated(&mut self) -> bool {
-        self.yoshida_position_buffer
+    fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
+        self.integration_position_buffer
             .as_ref()
             .is_none_or(|b| b.len() != self.objects.len() * 2)
     }
 
-    fn allocate_yoshida_gpu_buffers(&mut self) {
+    fn allocate_gpu_integration_buffers(&mut self) {
         let position_buffer = self
             .gpu
             .create_device_buffer(self.objects.positions.len(), GpuBufferAccess::ReadWrite)
@@ -285,11 +288,11 @@ impl PhysicsEngine {
             .create_device_buffer(self.objects.velocities.len(), GpuBufferAccess::ReadWrite)
             .context("Failed to create velocity buffer")
             .unwrap();
-        self.yoshida_position_buffer.replace(position_buffer);
-        self.yoshida_velocity_buffer.replace(velocity_buffer);
+        self.integration_position_buffer.replace(position_buffer);
+        self.integration_velocity_buffer.replace(velocity_buffer);
 
         if self.objects.planet_count > 0 {
-            self.yoshida_planet_mass_buffer.replace(
+            self.integration_planet_mass_buffer.replace(
                 self.gpu
                     .create_device_buffer(self.objects.planet_count, GpuBufferAccess::ReadOnly)
                     .context("Failed to create planet mass buffer")
@@ -298,24 +301,32 @@ impl PhysicsEngine {
         }
     }
 
-    fn update_yoshida_gpu_buffers(&mut self) {
+    fn update_integration_gpu_buffers(&mut self) {
         self.gpu
-            .enqueue_write_buffer(self.yoshida_position_buffer.as_mut().unwrap(), &self.objects.positions)
+            .enqueue_write_device_buffer(
+                self.integration_position_buffer.as_mut().unwrap(),
+                &self.objects.positions,
+            )
+            .context("Failed to write position buffer")
             .unwrap();
         self.gpu
-            .enqueue_write_buffer(self.yoshida_velocity_buffer.as_mut().unwrap(), &self.objects.velocities)
+            .enqueue_write_device_buffer(
+                self.integration_velocity_buffer.as_mut().unwrap(),
+                &self.objects.velocities,
+            )
+            .context("Failed to write position buffer")
             .unwrap();
         if self.objects.planet_count > 0 {
             self.gpu
-                .enqueue_write_buffer(
-                    self.yoshida_planet_mass_buffer.as_mut().unwrap(),
+                .enqueue_write_device_buffer(
+                    self.integration_planet_mass_buffer.as_mut().unwrap(),
                     &self.objects.masses[..self.objects.planet_count],
                 )
                 .unwrap();
         }
     }
 
-    fn update_object_leapfrog_yoshida(
+    fn integrate_object_cpu(
         object_index: usize,
         positions: &[Vector2<f64>],
         velocity: Vector2<f64>,

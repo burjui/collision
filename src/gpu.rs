@@ -10,7 +10,7 @@ use opencl3::{
     memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_USE_HOST_PTR, CL_MEM_WRITE_ONLY},
     platform::get_platforms,
     program::Program,
-    types::{CL_TRUE, cl_mem_flags},
+    types::{CL_FALSE, cl_mem_flags},
 };
 
 pub struct Gpu {
@@ -113,10 +113,10 @@ impl Gpu {
         Ok(GpuDeviceBuffer { buffer, length })
     }
 
-    pub fn enqueue_write_buffer<T>(&self, buffer: &mut GpuDeviceBuffer<T>, data: &[T]) -> anyhow::Result<Event> {
+    pub fn enqueue_write_device_buffer<T>(&self, buffer: &mut GpuDeviceBuffer<T>, data: &[T]) -> anyhow::Result<Event> {
         unsafe {
             self.queue
-                .enqueue_write_buffer(&mut buffer.buffer, CL_TRUE, 0, data, &[])
+                .enqueue_write_buffer(&mut buffer.buffer, CL_FALSE, 0, data, &[])
                 .context("Failed to write device buffer")
         }
     }
@@ -124,7 +124,7 @@ impl Gpu {
     pub fn enqueue_read_host_buffer<T>(&self, buffer: &mut GpuHostBuffer<T>) -> anyhow::Result<Event> {
         unsafe {
             self.queue
-                .enqueue_read_buffer(&buffer.buffer, CL_TRUE, 0, &mut buffer.data, &[])
+                .enqueue_read_buffer(&buffer.buffer, CL_FALSE, 0, &mut buffer.data, &[])
         }
         .context("Failed to read host buffer")
     }
@@ -134,7 +134,7 @@ impl Gpu {
         buffer: &mut GpuDeviceBuffer<T>,
         dst: &mut [T],
     ) -> anyhow::Result<Event> {
-        unsafe { self.queue.enqueue_read_buffer(&buffer.buffer, CL_TRUE, 0, dst, &[]) }
+        unsafe { self.queue.enqueue_read_buffer(&buffer.buffer, CL_FALSE, 0, dst, &[]) }
             .context("Failed to read device buffer")
     }
 
