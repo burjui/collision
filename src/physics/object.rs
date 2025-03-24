@@ -1,8 +1,9 @@
+use std::ops::Range;
+
 use vello::peniko::Color;
 
 use crate::vector2::Vector2;
 
-// TODO: FixedVec?
 #[derive(Default)]
 pub struct ObjectSoa {
     pub positions: Vec<Vector2<f64>>,
@@ -48,15 +49,12 @@ impl ObjectSoa {
         self.is_planet.resize(size, false);
     }
 
-    pub fn planets(&self) -> ObjectSoaRef {
-        ObjectSoaRef {
-            positions: &self.positions[..self.planet_count],
-            velocities: &self.velocities[..self.planet_count],
-            radii: &self.radii[..self.planet_count],
-            masses: &self.masses[..self.planet_count],
-            colors: &self.colors[..self.planet_count],
-            is_planet: &self.is_planet[..self.planet_count],
-        }
+    pub fn particle_range(&self) -> Range<usize> {
+        self.planet_count..self.positions.len()
+    }
+
+    pub fn planet_range(&self) -> Range<usize> {
+        0..self.planet_count
     }
 }
 

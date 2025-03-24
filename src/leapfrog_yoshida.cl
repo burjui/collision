@@ -29,22 +29,6 @@ double2 gravity_acceleration(size_t object_index, const double2 position,
   return gravity;
 }
 
-kernel void leapfrog_yoshida_no_planets(global double2 *positions,
-                               global double2 *velocities, const double dt,
-                               const double2 global_gravity) {
-  const int object_index = get_global_id(0);
-  const double2 x0 = positions[object_index];
-  const double2 v0 = velocities[object_index];
-  const double2 x1 = x0 + v0 * (double2)(C1 * dt, C1 * dt);
-  const double2 v1 = v0 + global_gravity * (double2)(D1 * dt, D1 * dt);
-  const double2 x2 = x0 + v1 * (double2)(C2 * dt, C2 * dt);
-  const double2 v2 = v0 + global_gravity * (double2)(D2 * dt, D2 * dt);
-  const double2 x3 = x0 + v2 * (double2)(C3 * dt, C3 * dt);
-  const double2 v3 = v0 + global_gravity * (double2)(D3 * dt, D3 * dt);
-  positions[object_index] = x0 + v3 * (double2)(C4 * dt, C4 * dt);
-  velocities[object_index] = v3;
-}
-
 kernel void leapfrog_yoshida(global double2 *positions, global double2 *velocities,
                     const double dt, const double2 global_gravity,
                     constant double *planet_masses, const size_t planet_count,

@@ -5,7 +5,7 @@ use std::{
     iter::zip,
     mem::take,
     num::NonZero,
-    ops::Add,
+    ops::{Add, Range},
     sync::{Arc, Barrier, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
@@ -237,7 +237,8 @@ fn simulation_thread(
                     velocities: physics.objects().velocities.clone(),
                     radii: physics.objects().radii.clone(),
                     colors: physics.objects().colors.clone(),
-                    planet_count: physics.objects().planet_count,
+                    particle_range: physics.objects().particle_range(),
+                    planet_range: physics.objects().planet_range(),
                     color_source,
                     draw_ids,
                     draw_grid,
@@ -258,6 +259,7 @@ fn simulation_thread(
     physics
 }
 
+// TODO energy field
 fn rendering_thread(
     event_receiver: &mpsc::Receiver<RenderingThreadEvent>,
     app_event_loop_proxy: &EventLoopProxy<AppEvent>,
@@ -302,6 +304,7 @@ fn rendering_thread(
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum AppEvent {
     SceneUpdated(Scene),
     StatsUpdated(Stats),
@@ -363,7 +366,8 @@ struct RenderingData {
     velocities: Vec<Vector2<f64>>,
     radii: Vec<f64>,
     colors: Vec<Option<Color>>,
-    planet_count: usize,
+    particle_range: Range<usize>,
+    planet_range: Range<usize>,
     color_source: ColorSource,
     draw_ids: bool,
     draw_grid: bool,
@@ -591,7 +595,8 @@ fn draw_physics(
         velocities,
         radii,
         colors,
-        planet_count,
+        particle_range,
+        planet_range,
         color_source,
         draw_ids,
         constraints,
@@ -619,8 +624,9 @@ fn draw_physics(
     }
 
     let transform = Affine::IDENTITY;
-    let chunk_size = positions.len().div_ceil(16);
-    let chunks = (*planet_count..positions.len())
+    let chunk_size = particle_range.len().div_ceil(16);
+    let chunks = particle_range
+        .clone()
         .chunks(if chunk_size > 0 { chunk_size } else { positions.len() })
         .into_iter()
         .map(Itertools::collect_vec)
@@ -634,24 +640,16 @@ fn draw_physics(
                     let mut text = SimpleText::new();
                     for &object_index in chunk {
                         let particle_position = positions[object_index];
-                        let particle_radius = radii[object_index];
                         let color = match color_source {
                             ColorSource::Demo => colors[object_index],
-                            ColorSource::Velocity => {
-                                const SCALE_FACTOR: f64 = 0.0004;
-                                let velocity = velocities[object_index];
-                                #[allow(clippy::cast_possible_truncation)]
-                                let spectrum_position =
-                                    (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
-                                Some(spectrum(spectrum_position))
-                            }
+                            ColorSource::Velocity => Some(color_from_velocity(velocities, object_index)),
                         }
                         .unwrap_or(css::GRAY);
                         draw_circle(
                             &mut scene,
                             transform,
                             particle_position,
-                            particle_radius.max(1.0),
+                            radii[object_index].max(1.0),
                             color,
                         );
                         if *draw_ids {
@@ -674,8 +672,8 @@ fn draw_physics(
     let scene = scenes.last_mut().unwrap();
     let mut text = SimpleText::new();
     for (object_index, ((&planet_position, &planet_radius), color)) in zip(
-        zip(&positions[..*planet_count], &radii[..*planet_count]),
-        &colors[..*planet_count],
+        zip(&positions[planet_range.clone()], &radii[planet_range.clone()]),
+        &colors[planet_range.clone()],
     )
     .enumerate()
     {
@@ -702,6 +700,18 @@ fn draw_physics(
     );
 
     scenes
+}
+
+fn color_from_velocity(velocities: &Vec<Vector2<f64>>, object_index: usize) -> Color {
+    const SCALE_FACTOR: f64 = 0.0004;
+    let velocity = velocities[object_index];
+    #[allow(clippy::cast_possible_truncation)]
+    let spectrum_position = (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
+    spectrum(spectrum_position)
+}
+
+fn spectrum(position: f32) -> Color {
+    Color::new([1.0 - position, (1.0 - (position - 0.5).abs() * 2.0), position, 1.0])
 }
 
 fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_influence_radius: f64) {
@@ -838,8 +848,4 @@ fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer,
         .expect("failed to render to surface");
     surface_texture.present();
     device_handle.device.poll(Maintain::Poll);
-}
-
-fn spectrum(position: f32) -> Color {
-    Color::new([1.0 - position, (1.0 - (position - 0.5).abs() * 2.0), position, 1.0])
 }
