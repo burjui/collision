@@ -378,8 +378,12 @@ impl PhysicsEngine {
                 (1, 0),
             ];
             let cell_records = &self.grid.cell_records[range];
-            let (x, y) = cell_records[0].cell_coords;
-            let mut process_collisions = |object_index, ox, oy| {
+            let CellRecord {
+                object_index,
+                cell_coords: (x, y),
+                ..
+            } = cell_records[0];
+            for (ox, oy) in AREA_CELL_OFFSETS {
                 let x = x.wrapping_add_signed(ox);
                 let y = y.wrapping_add_signed(oy);
                 if x < self.grid.size().x && y < self.grid.size().y {
@@ -399,17 +403,6 @@ impl PhysicsEngine {
                             &self.objects.is_planet,
                         );
                     }
-                }
-            };
-            for &CellRecord { object_index, .. } in cell_records {
-                for (ox, oy) in AREA_CELL_OFFSETS {
-                    let (ox, oy) = (ox.wrapping_neg(), oy.wrapping_neg());
-                    process_collisions(object_index, ox, oy);
-                }
-            }
-            for &CellRecord { object_index, .. } in cell_records {
-                for (ox, oy) in AREA_CELL_OFFSETS {
-                    process_collisions(object_index, ox, oy);
                 }
             }
         }
