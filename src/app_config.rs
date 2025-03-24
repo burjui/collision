@@ -1,3 +1,5 @@
+#![allow(clippy::struct_excessive_bools)]
+
 use std::{fmt::Display, fs::File, io::Read, path::Path, sync::LazyLock};
 
 use anyhow::{Context, anyhow};

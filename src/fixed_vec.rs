@@ -7,19 +7,16 @@ pub struct FixedVec<T, const N: usize> {
 }
 
 impl<T, const N: usize> FixedVec<T, N> {
-    #[inline(always)]
     pub fn push(&mut self, value: T) {
         assert!(self.len < N, "vector is full ({N})");
         self.inner[self.len] = value;
         self.len += 1;
     }
 
-    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
         &self.inner[..self.len]
     }

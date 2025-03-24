@@ -53,7 +53,7 @@ impl<const N: usize, T: Copy> Iterator for RingBuffer<N, T> {
 impl<const N: usize, T: Debug + Copy> Debug for RingBuffer<N, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for item in self.clone() {
-            Debug::fmt(&item, f)?
+            Debug::fmt(&item, f)?;
         }
         Ok(())
     }

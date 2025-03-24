@@ -81,7 +81,7 @@ pub fn main() -> anyhow::Result<()> {
                 &app_event_loop_proxy,
                 &wait_for_exit_barrier,
                 &rendering_start_barrier,
-            )
+            );
         })
     };
     let mut app = VelloApp {
@@ -702,7 +702,7 @@ fn draw_physics(
     scenes
 }
 
-fn color_from_velocity(velocities: &Vec<Vector2<f64>>, object_index: usize) -> Color {
+fn color_from_velocity(velocities: &[Vector2<f64>], object_index: usize) -> Color {
     const SCALE_FACTOR: f64 = 0.0004;
     let velocity = velocities[object_index];
     #[allow(clippy::cast_possible_truncation)]

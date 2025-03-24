@@ -23,6 +23,7 @@ pub struct SimpleText {
 
 impl SimpleText {
     #[allow(clippy::new_without_default)]
+    #[must_use]
     pub fn new() -> Self {
         Self {
             roboto: Font::new(Blob::new(Arc::new(ROBOTO_FONT)), 0),

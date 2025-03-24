@@ -18,7 +18,6 @@ use crate::{
 };
 
 pub mod grid;
-mod leapfrog_yoshida;
 pub mod object;
 
 pub struct PhysicsEngine {
@@ -87,10 +86,7 @@ impl PhysicsEngine {
         &mut self.objects
     }
 
-    pub fn planet_count(&self) -> usize {
-        self.objects.planet_count
-    }
-
+    #[must_use]
     pub fn stats(&self) -> &Stats {
         &self.stats
     }
@@ -270,7 +266,7 @@ impl PhysicsEngine {
             kernel.set_arg(&dt);
             kernel.set_arg(&self.global_gravity);
             kernel.set_arg(planet_mass_buffer.buffer());
-            kernel.set_arg(&(self.objects.planet_count as u32));
+            kernel.set_arg(&u32::try_from(self.objects.planet_count).unwrap());
             kernel.set_arg(&self.gravitational_constant);
         }
         GPU.enqueue_execute_kernel(&mut kernel)
@@ -294,7 +290,18 @@ impl PhysicsEngine {
         gravitational_constant: f64,
         planet_masses: &[f64],
     ) -> ObjectUpdate {
-        use leapfrog_yoshida::{C1, C2, C3, C4, D1, D2, D3};
+        #[allow(clippy::unreadable_literal)]
+        const CBRT2: f64 = 1.2599210498948732;
+        const W0: f64 = -CBRT2 / (2.0 - CBRT2);
+        const W1: f64 = 1.0 / (2.0 - CBRT2);
+        const C1: f64 = 0.5 * W1;
+        const C4: f64 = C1;
+        const C2: f64 = 0.5 * (W0 + W1);
+        const C3: f64 = C2;
+        const D1: f64 = W1;
+        const D3: f64 = D1;
+        const D2: f64 = W0;
+
         let x0 = positions[object_index];
         let v0 = velocity;
         let x1 = x0 + v0 * (C1 * dt);

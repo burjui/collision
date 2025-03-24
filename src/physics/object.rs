@@ -49,10 +49,12 @@ impl ObjectSoa {
         self.is_planet.resize(size, false);
     }
 
+    #[must_use]
     pub fn particle_range(&self) -> Range<usize> {
         self.planet_count..self.positions.len()
     }
 
+    #[must_use]
     pub fn planet_range(&self) -> Range<usize> {
         0..self.planet_count
     }
