@@ -109,7 +109,7 @@ impl PhysicsEngine {
     }
 
     pub fn advance(&mut self, speed_factor: f64, gpu_compute_options: GpuComputeOptions) {
-        if gpu_compute_options != self.gpu_compute_options {
+        if gpu_compute_options.integration != self.gpu_compute_options.integration {
             self.stats.integration_duration = DurationStat::default();
         }
         self.gpu_compute_options = gpu_compute_options;
