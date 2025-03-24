@@ -257,6 +257,8 @@ impl PhysicsEngine {
             .chain(once(0.0))
             .collect_vec();
         GPU.enqueue_write_device_buffer(planet_mass_buffer, &planet_masses)
+            .unwrap()
+            .wait()
             .unwrap();
     }
 
