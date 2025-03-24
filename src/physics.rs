@@ -214,33 +214,6 @@ impl PhysicsEngine {
         self.execute_integration_kernel(dt);
     }
 
-    fn execute_integration_kernel(&mut self, dt: f64) {
-        let position_buffer = self.integration_gpu_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.integration_gpu_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.integration_gpu_planet_mass_buffer.as_mut().unwrap();
-        let mut kernel = ExecuteKernel::new(&self.integration_kernel);
-        kernel.set_global_work_size(self.objects.len());
-        unsafe {
-            kernel.set_arg(position_buffer.buffer());
-            kernel.set_arg(velocity_buffer.buffer());
-            kernel.set_arg(&dt);
-            kernel.set_arg(&self.global_gravity);
-            kernel.set_arg(planet_mass_buffer.buffer());
-            kernel.set_arg(&self.objects.planet_count);
-            kernel.set_arg(&self.gravitational_constant);
-        }
-        GPU.enqueue_execute_kernel(&mut kernel)
-            .context("Failed to execute kernel")
-            .unwrap();
-        GPU.enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
-            .context("Failed to read position buffer")
-            .unwrap();
-        GPU.enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
-            .context("Failed to read velocity buffer")
-            .unwrap();
-        GPU.wait_for_queue_completeion().unwrap();
-    }
-
     fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
         self.integration_gpu_position_buffer
             .as_ref()
@@ -283,6 +256,33 @@ impl PhysicsEngine {
             .unwrap();
         GPU.enqueue_write_device_buffer(planet_mass_buffer, &self.objects.masses[self.objects.planet_range()])
             .unwrap();
+    }
+
+    fn execute_integration_kernel(&mut self, dt: f64) {
+        let position_buffer = self.integration_gpu_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.integration_gpu_velocity_buffer.as_mut().unwrap();
+        let planet_mass_buffer = self.integration_gpu_planet_mass_buffer.as_mut().unwrap();
+        let mut kernel = ExecuteKernel::new(&self.integration_kernel);
+        kernel.set_global_work_size(self.objects.len());
+        unsafe {
+            kernel.set_arg(position_buffer.buffer());
+            kernel.set_arg(velocity_buffer.buffer());
+            kernel.set_arg(&dt);
+            kernel.set_arg(&self.global_gravity);
+            kernel.set_arg(planet_mass_buffer.buffer());
+            kernel.set_arg(&(self.objects.planet_count as u32));
+            kernel.set_arg(&self.gravitational_constant);
+        }
+        GPU.enqueue_execute_kernel(&mut kernel)
+            .context("Failed to execute kernel")
+            .unwrap();
+        GPU.enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
+            .context("Failed to read position buffer")
+            .unwrap();
+        GPU.enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
+            .context("Failed to read velocity buffer")
+            .unwrap();
+        GPU.wait_for_queue_completeion().unwrap();
     }
 
     fn integrate_object_cpu(
