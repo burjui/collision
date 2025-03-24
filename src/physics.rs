@@ -1,11 +1,12 @@
 use core::f64;
 use std::{
-    iter::zip,
+    iter::{once, zip},
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use grid::{CellRecord, Grid};
+use itertools::Itertools;
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
@@ -250,7 +251,12 @@ impl PhysicsEngine {
         GPU.enqueue_write_device_buffer(velocity_buffer, &self.objects.velocities)
             .context("Failed to write position buffer")
             .unwrap();
-        GPU.enqueue_write_device_buffer(planet_mass_buffer, &self.objects.masses[self.objects.planet_range()])
+        let planet_masses = self.objects.masses[self.objects.planet_range()]
+            .iter()
+            .copied()
+            .chain(once(0.0))
+            .collect_vec();
+        GPU.enqueue_write_device_buffer(planet_mass_buffer, &planet_masses)
             .unwrap();
     }
 
