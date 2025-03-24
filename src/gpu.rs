@@ -1,4 +1,4 @@
-use std::{path::Path, ptr::null_mut};
+use std::{path::Path, ptr::null_mut, sync::LazyLock};
 
 use anyhow::{Context as _, Ok, anyhow};
 use opencl3::{
@@ -13,13 +13,15 @@ use opencl3::{
     types::{CL_FALSE, cl_mem_flags},
 };
 
+pub static GPU: LazyLock<Gpu> = LazyLock::new(|| Gpu::first_available(10).unwrap());
+
 pub struct Gpu {
     context: Context,
     queue: CommandQueue,
 }
 
 impl Gpu {
-    pub fn default(queue_length: u32) -> anyhow::Result<Self> {
+    pub fn first_available(queue_length: u32) -> anyhow::Result<Self> {
         let platforms = get_platforms().context("No platforms found")?;
         println!("Available OpenCLplatforms:");
         for platform in &platforms {
@@ -63,6 +65,7 @@ impl Gpu {
                 }
             }
         }
+        println!("Building OpenCL kernel: {}", path.as_ref().display());
         let source = &std::fs::read_to_string(path).context("Failed to read source: {path:?}")?;
         let program = Program::create_and_build_from_source(&self.context, source, "").map_err(|e| anyhow!("{e}"))?;
         std::fs::write(binary_path, &program.get_binaries()?[0]).context("Failed to write binary: {binary_path:?}")?;

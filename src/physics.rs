@@ -12,7 +12,7 @@ use opencl3::kernel::{ExecuteKernel, Kernel};
 use crate::{
     app_config::{CONFIG, DtSource},
     fixed_vec::FixedVec,
-    gpu::{Gpu, GpuBufferAccessMode, GpuDeviceBuffer},
+    gpu::{GPU, GpuBufferAccessMode, GpuDeviceBuffer},
     ring_buffer::RingBuffer,
     vector2::Vector2,
 };
@@ -31,7 +31,6 @@ pub struct PhysicsEngine {
     restitution_coefficient: f64,
     global_gravity: Vector2<f64>,
     gravitational_constant: f64,
-    gpu: Gpu,
     integration_kernel: Kernel,
     integration_gpu_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
     integration_gpu_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
@@ -45,8 +44,7 @@ impl PhysicsEngine {
             Vector2::new(0.0, 0.0),
             Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
         );
-        let gpu = Gpu::default(10)?;
-        let integration_program = gpu.build_program("src/leapfrog_yoshida.cl")?;
+        let integration_program = GPU.build_program("src/leapfrog_yoshida.cl")?;
         let integration_kernel =
             Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
         Ok(Self {
@@ -59,7 +57,6 @@ impl PhysicsEngine {
             restitution_coefficient: CONFIG.simulation.restitution_coefficient,
             global_gravity: Vector2::from(CONFIG.simulation.gravity),
             gravitational_constant: CONFIG.simulation.gravitational_constant,
-            gpu,
             integration_kernel,
             integration_gpu_position_buffer: None,
             integration_gpu_velocity_buffer: None,
@@ -232,19 +229,16 @@ impl PhysicsEngine {
             kernel.set_arg(&self.objects.planet_count);
             kernel.set_arg(&self.gravitational_constant);
         }
-        self.gpu
-            .enqueue_execute_kernel(&mut kernel)
+        GPU.enqueue_execute_kernel(&mut kernel)
             .context("Failed to execute kernel")
             .unwrap();
-        self.gpu
-            .enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
+        GPU.enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
             .context("Failed to read position buffer")
             .unwrap();
-        self.gpu
-            .enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
+        GPU.enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
             .context("Failed to read velocity buffer")
             .unwrap();
-        self.gpu.wait_for_queue_completeion().unwrap();
+        GPU.wait_for_queue_completeion().unwrap();
     }
 
     fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
@@ -255,25 +249,22 @@ impl PhysicsEngine {
 
     fn allocate_gpu_integration_buffers(&mut self) {
         self.integration_gpu_position_buffer.replace(
-            self.gpu
-                .create_device_buffer(self.objects.positions.len(), GpuBufferAccessMode::ReadWrite)
+            GPU.create_device_buffer(self.objects.positions.len(), GpuBufferAccessMode::ReadWrite)
                 .context("Failed to create position buffer")
                 .unwrap(),
         );
         self.integration_gpu_velocity_buffer.replace(
-            self.gpu
-                .create_device_buffer(self.objects.velocities.len(), GpuBufferAccessMode::ReadWrite)
+            GPU.create_device_buffer(self.objects.velocities.len(), GpuBufferAccessMode::ReadWrite)
                 .context("Failed to create velocity buffer")
                 .unwrap(),
         );
         self.integration_gpu_planet_mass_buffer.replace(
-            self.gpu
-                .create_device_buffer(
-                    self.objects.planet_count + 1, /* cannot create an empty buffer */
-                    GpuBufferAccessMode::ReadOnly,
-                )
-                .context("Failed to create planet mass buffer")
-                .unwrap(),
+            GPU.create_device_buffer(
+                self.objects.planet_count + 1, /* cannot create an empty buffer */
+                GpuBufferAccessMode::ReadOnly,
+            )
+            .context("Failed to create planet mass buffer")
+            .unwrap(),
         );
     }
 
@@ -284,16 +275,13 @@ impl PhysicsEngine {
         assert!(position_buffer.len() == self.objects.positions.len());
         assert!(velocity_buffer.len() == self.objects.positions.len());
         assert!(planet_mass_buffer.len() == self.objects.planet_count + 1);
-        self.gpu
-            .enqueue_write_device_buffer(position_buffer, &self.objects.positions)
+        GPU.enqueue_write_device_buffer(position_buffer, &self.objects.positions)
             .context("Failed to write position buffer")
             .unwrap();
-        self.gpu
-            .enqueue_write_device_buffer(velocity_buffer, &self.objects.velocities)
+        GPU.enqueue_write_device_buffer(velocity_buffer, &self.objects.velocities)
             .context("Failed to write position buffer")
             .unwrap();
-        self.gpu
-            .enqueue_write_device_buffer(planet_mass_buffer, &self.objects.masses[self.objects.planet_range()])
+        GPU.enqueue_write_device_buffer(planet_mass_buffer, &self.objects.masses[self.objects.planet_range()])
             .unwrap();
     }
 
