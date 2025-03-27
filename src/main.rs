@@ -224,6 +224,13 @@ fn simulation_thread(
             }
         }
 
+        if advance_time {
+            let start = Instant::now();
+            physics.advance(CONFIG.simulation.speed_factor, gpu_compute_options);
+            *sim_total_duration.lock().unwrap() += start.elapsed();
+            send_app_event(app_event_loop_proxy, AppEvent::StatsUpdated(physics.stats().clone()));
+        }
+
         let now = Instant::now();
         if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
             last_redraw = now;
@@ -242,17 +249,12 @@ fn simulation_thread(
                     color_source,
                     draw_ids,
                     draw_grid,
+                    grid_position: physics.grid().position(),
+                    grid_size: physics.grid().size(),
                     grid_cell_size: physics.grid().cell_size(),
                     constraints: physics.constraints(),
                 }))
                 .expect("failed to send rendering thread SetData event");
-        }
-
-        if advance_time {
-            let start = Instant::now();
-            physics.advance(CONFIG.simulation.speed_factor, gpu_compute_options);
-            *sim_total_duration.lock().unwrap() += start.elapsed();
-            send_app_event(app_event_loop_proxy, AppEvent::StatsUpdated(physics.stats().clone()));
         }
     }
 
@@ -291,8 +293,8 @@ fn rendering_thread(
                 if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
                     draw_grid(
                         &mut scene,
-                        rendering_data.constraints.topleft,
-                        rendering_data.constraints.bottomright,
+                        rendering_data.grid_position,
+                        rendering_data.grid_size,
                         rendering_data.grid_cell_size,
                     );
                 }
@@ -371,6 +373,8 @@ struct RenderingData {
     color_source: ColorSource,
     draw_ids: bool,
     draw_grid: bool,
+    grid_position: Vector2<f64>,
+    grid_size: Vector2<usize>,
     grid_cell_size: f64,
     constraints: ConstraintBox,
 }
@@ -724,35 +728,37 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_i
     );
 }
 
-fn draw_grid(scene: &mut Scene, topleft: Vector2<f64>, bottomright: Vector2<f64>, cell_size: f64) {
+fn draw_grid(scene: &mut Scene, grid_position: Vector2<f64>, grid_size: Vector2<usize>, cell_size: f64) {
     #![allow(clippy::cast_possible_truncation)]
     #![allow(clippy::cast_precision_loss)]
     #![allow(clippy::cast_sign_loss)]
-    assert!(bottomright.x >= topleft.x);
-    for i in 0..=((bottomright.x - topleft.x) / cell_size) as usize {
-        scene.stroke(
-            &Stroke::default(),
-            Affine::IDENTITY,
-            css::LIGHT_GRAY,
-            None,
-            &Line::new(
-                (topleft.x + i as f64 * cell_size, topleft.y),
-                (topleft.x + i as f64 * cell_size, bottomright.y),
-            ),
-        );
+    {
+        let top = grid_position.y;
+        let bottom = top + grid_size.y as f64 * cell_size;
+        for i in 0..=grid_size.x as usize {
+            let x = grid_position.x + i as f64 * cell_size;
+            scene.stroke(
+                &Stroke::default(),
+                Affine::IDENTITY,
+                css::LIGHT_GRAY,
+                None,
+                &Line::new((x, top), (x, bottom)),
+            );
+        }
     }
-    assert!(bottomright.y >= topleft.y);
-    for j in 0..=((bottomright.y - topleft.y) / cell_size) as usize {
-        scene.stroke(
-            &Stroke::default(),
-            Affine::IDENTITY,
-            css::LIGHT_GRAY,
-            None,
-            &Line::new(
-                (topleft.x, topleft.y + j as f64 * cell_size),
-                (bottomright.x, topleft.y + j as f64 * cell_size),
-            ),
-        );
+    {
+        let left = grid_position.x;
+        let right = left + grid_size.x as f64 * cell_size;
+        for j in 0..=grid_size.y as usize {
+            let y = grid_position.y + j as f64 * cell_size;
+            scene.stroke(
+                &Stroke::default(),
+                Affine::IDENTITY,
+                css::LIGHT_GRAY,
+                None,
+                &Line::new((left, y), (right, y)),
+            );
+        }
     }
 }
 

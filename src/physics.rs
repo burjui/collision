@@ -1,18 +1,16 @@
 use core::f64;
 use std::{
-    iter::{once, zip},
+    iter::zip,
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use grid::{CellRecord, Grid};
-use itertools::Itertools;
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 
 use crate::{
     app_config::{CONFIG, DtSource},
-    fixed_vec::FixedVec,
     gpu::{GPU, GpuBufferAccessMode, GpuDeviceBuffer},
     ring_buffer::RingBuffer,
     vector2::Vector2,
@@ -35,7 +33,9 @@ pub struct PhysicsEngine {
     integration_gpu_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
     integration_gpu_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
     integration_gpu_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
+    gpu_planet_masses: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
+    collision_pairs: Vec<CollisionPair>,
 }
 
 impl PhysicsEngine {
@@ -55,13 +55,15 @@ impl PhysicsEngine {
             constraints,
             stats: Stats::default(),
             restitution_coefficient: CONFIG.simulation.restitution_coefficient,
-            global_gravity: Vector2::from(CONFIG.simulation.gravity),
+            global_gravity: Vector2::from(CONFIG.simulation.global_gravity),
             gravitational_constant: CONFIG.simulation.gravitational_constant,
             integration_kernel,
             integration_gpu_position_buffer: None,
             integration_gpu_velocity_buffer: None,
             integration_gpu_planet_mass_buffer: None,
+            gpu_planet_masses: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
+            collision_pairs: Vec::default(),
         })
     }
 
@@ -207,14 +209,13 @@ impl PhysicsEngine {
         if self.integration_gpu_buffers_are_outdated() {
             self.allocate_gpu_integration_buffers();
         }
-        self.update_integration_gpu_buffers();
         self.execute_integration_kernel(dt);
     }
 
     fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
         self.integration_gpu_position_buffer
             .as_ref()
-            .is_none_or(|b| b.len() != self.objects.len() * 2)
+            .is_none_or(|b| b.len() != self.objects.len())
     }
 
     fn allocate_gpu_integration_buffers(&mut self) {
@@ -236,33 +237,11 @@ impl PhysicsEngine {
             .context("Failed to create planet mass buffer")
             .unwrap(),
         );
-    }
-
-    fn update_integration_gpu_buffers(&mut self) {
-        let position_buffer = self.integration_gpu_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.integration_gpu_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.integration_gpu_planet_mass_buffer.as_mut().unwrap();
-        assert!(position_buffer.len() == self.objects.positions.len());
-        assert!(velocity_buffer.len() == self.objects.positions.len());
-        assert!(planet_mass_buffer.len() == self.objects.planet_count + 1);
-        GPU.enqueue_write_device_buffer(position_buffer, &self.objects.positions)
-            .context("Failed to write position buffer")
-            .unwrap();
-        GPU.enqueue_write_device_buffer(velocity_buffer, &self.objects.velocities)
-            .context("Failed to write position buffer")
-            .unwrap();
-        let planet_masses = self.objects.masses[self.objects.planet_range()]
-            .iter()
-            .copied()
-            .chain(once(0.0))
-            .collect_vec();
-        GPU.enqueue_write_device_buffer(planet_mass_buffer, &planet_masses)
-            .unwrap()
-            .wait()
-            .unwrap();
+        self.gpu_planet_masses.resize(self.objects.planet_count + 1, 0.0);
     }
 
     fn execute_integration_kernel(&mut self, dt: f64) {
+        self.write_integration_gpu_buffers();
         let position_buffer = self.integration_gpu_position_buffer.as_mut().unwrap();
         let velocity_buffer = self.integration_gpu_velocity_buffer.as_mut().unwrap();
         let planet_mass_buffer = self.integration_gpu_planet_mass_buffer.as_mut().unwrap();
@@ -271,6 +250,7 @@ impl PhysicsEngine {
         unsafe {
             kernel.set_arg(position_buffer.buffer());
             kernel.set_arg(velocity_buffer.buffer());
+            kernel.set_arg(&u32::try_from(self.objects.len()).unwrap());
             kernel.set_arg(&dt);
             kernel.set_arg(&self.global_gravity);
             kernel.set_arg(planet_mass_buffer.buffer());
@@ -286,7 +266,28 @@ impl PhysicsEngine {
         GPU.enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
             .context("Failed to read velocity buffer")
             .unwrap();
-        GPU.wait_for_queue_completeion().unwrap();
+        GPU.wait_for_queue_completion().unwrap();
+    }
+
+    fn write_integration_gpu_buffers(&mut self) {
+        let position_buffer = self.integration_gpu_position_buffer.as_mut().unwrap();
+        let velocity_buffer = self.integration_gpu_velocity_buffer.as_mut().unwrap();
+        let planet_mass_buffer = self.integration_gpu_planet_mass_buffer.as_mut().unwrap();
+        assert!(position_buffer.len() == self.objects.positions.len());
+        assert!(velocity_buffer.len() == self.objects.velocities.len());
+        assert!(planet_mass_buffer.len() == self.objects.planet_count + 1);
+        assert!(self.gpu_planet_masses.len() == self.objects.planet_count + 1);
+        GPU.enqueue_write_device_buffer(position_buffer, &self.objects.positions)
+            .context("Failed to write position buffer")
+            .unwrap();
+        GPU.enqueue_write_device_buffer(velocity_buffer, &self.objects.velocities)
+            .context("Failed to write velocity buffer")
+            .unwrap();
+        self.gpu_planet_masses[..self.objects.planet_count]
+            .copy_from_slice(&self.objects.masses[self.objects.planet_range()]);
+        GPU.enqueue_write_device_buffer(planet_mass_buffer, &self.gpu_planet_masses)
+            .context("Failed to write planet mass buffer")
+            .unwrap();
     }
 
     fn integrate_object_cpu(
@@ -369,121 +370,124 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
+        const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
+            // // Objects in the same cell are the closest
+            (0, 0),
+            // // Checking only these neighboring cells to avoid duplicate collisions
+            (0, 1),
+            (1, 0),
+            (-1, 1),
+            (1, 1),
+        ];
+        self.collision_pairs.clear();
         for range in self.grid.cell_iter() {
-            const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
-                // // Objects in the same cell are the closest
-                (0, 0),
-                // // Checking only these neighboring cells to avoid duplicate collisions
-                (-1, 1),
-                (0, 1),
-                (1, 1),
-                (1, 0),
-            ];
-            let cell_records = &self.grid.cell_records[range];
-            let CellRecord {
-                object_index,
+            for &CellRecord {
+                object_index: object1_index,
                 cell_coords: (x, y),
                 ..
-            } = cell_records[0];
-            for (ox, oy) in AREA_CELL_OFFSETS {
-                let x = x.wrapping_add_signed(ox);
-                let y = y.wrapping_add_signed(oy);
-                if x < self.grid.size().x && y < self.grid.size().y {
-                    if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
-                        let candidate_area = self.grid.cell_records[start..end]
-                            .iter()
-                            .copied()
-                            .collect::<FixedVec<_, 32>>();
-                        Self::process_object_with_cell_collisions(
-                            object_index,
-                            &candidate_area,
-                            self.restitution_coefficient,
-                            &mut self.objects.positions,
-                            &mut self.objects.velocities,
-                            &self.objects.radii,
-                            &self.objects.masses,
-                            &self.objects.is_planet,
-                        );
+            } in &self.grid.cell_records[range]
+            {
+                // println!("cell ({x}, {y})");
+                for (ox, oy) in AREA_CELL_OFFSETS {
+                    let x = x.checked_add_signed(ox);
+                    let y = y.checked_add_signed(oy);
+                    if let (Some(x), Some(y)) = (x, y) {
+                        if x < self.grid.size().x && y < self.grid.size().y {
+                            if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
+                                for &CellRecord {
+                                    object_index: object2_index,
+                                    ..
+                                } in &self.grid.cell_records[start..end]
+                                {
+                                    if object1_index != object2_index {
+                                        let collision_distance =
+                                            self.objects.radii[object1_index] + self.objects.radii[object2_index];
+                                        let from_1_to_2 = self.objects.positions[object1_index]
+                                            - self.objects.positions[object2_index];
+                                        let distance_squared = from_1_to_2.magnitude_squared();
+                                        if distance_squared <= collision_distance * collision_distance {
+                                            let collision_pair = CollisionPair {
+                                                object1_index,
+                                                object2_index,
+                                                distance_squared,
+                                                collision_distance,
+                                            };
+                                            Self::process_object_collision(
+                                                collision_pair,
+                                                self.restitution_coefficient,
+                                                &mut self.objects.positions,
+                                                &mut self.objects.velocities,
+                                                &self.objects.masses,
+                                                &self.objects.is_planet,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    fn process_object_with_cell_collisions(
-        object1_index: usize,
-        candidate_area: &[CellRecord],
-        restitution_coefficient: f64,
-        positions: &mut [Vector2<f64>],
-        velocities: &mut [Vector2<f64>],
-        radii: &[f64],
-        masses: &[f64],
-        is_planet: &[bool],
-    ) {
-        for &CellRecord {
-            object_index: object2_index,
-            ..
-        } in candidate_area
-        {
-            if object1_index != object2_index {
-                Self::process_object_collision(
-                    object1_index,
-                    object2_index,
-                    restitution_coefficient,
-                    positions,
-                    velocities,
-                    radii,
-                    masses,
-                    is_planet,
-                );
-            }
-        }
-    }
-
     fn process_object_collision(
-        object1_index: usize,
-        object2_index: usize,
+        CollisionPair {
+            object1_index,
+            object2_index,
+            distance_squared,
+            collision_distance,
+        }: CollisionPair,
         restitution_coefficient: f64,
         positions: &mut [Vector2<f64>],
         velocities: &mut [Vector2<f64>],
-        radii: &[f64],
         masses: &[f64],
         is_planet: &[bool],
     ) {
-        let collision_distance = radii[object1_index] + radii[object2_index];
         let from_1_to_2 = positions[object1_index] - positions[object2_index];
-        if from_1_to_2.magnitude_squared() <= collision_distance * collision_distance {
-            let mass1 = masses[object1_index];
-            let mass2 = masses[object2_index];
-            let total_mass = mass1 + mass2;
-            let mut velocity1 = velocities[object1_index];
-            let mut velocity2 = velocities[object2_index];
-            let distance = from_1_to_2.magnitude();
-            {
-                let divisor = (total_mass * distance * distance).max(f64::EPSILON);
-                let velocity_diff = velocity1 - velocity2;
-                velocity1 -= from_1_to_2 * (2.0 * mass2 * velocity_diff.dot(&from_1_to_2) / divisor);
-                velocity2 -= -from_1_to_2 * (2.0 * mass1 * (-velocity_diff).dot(&(-from_1_to_2)) / divisor);
-            }
-            let intersection_depth = collision_distance - distance;
-            let momentum1 = mass1 * velocity1.magnitude();
-            let momentum2 = mass2 * velocity2.magnitude();
-            let total_momentum = momentum1 + momentum2;
-            let position_adjustment_base =
-                from_1_to_2.normalize() * (intersection_depth / total_momentum.max(f64::EPSILON));
-            positions[object1_index] += position_adjustment_base * momentum2;
-            positions[object2_index] -= position_adjustment_base * momentum1;
+        let distance = distance_squared.sqrt();
 
-            if !is_planet[object1_index] {
-                velocity1 *= restitution_coefficient;
-            }
-            if !is_planet[object2_index] {
-                velocity2 *= restitution_coefficient;
-            }
+        // Compute collision normal
+        let normal = from_1_to_2 / distance;
 
-            velocities[object1_index] = velocity1;
-            velocities[object2_index] = velocity2;
-        }
+        let mass1 = masses[object1_index];
+        let mass2 = masses[object2_index];
+        let total_mass = mass1 + mass2;
+
+        // Save the initial velocities for simultaneous impulse calculation.
+        let v1_initial = velocities[object1_index];
+        let v2_initial = velocities[object2_index];
+
+        // Compute the impulse scalar using the original velocities.
+        let impulse_scalar = 2.0 * (v1_initial - v2_initial).dot(&normal) / total_mass;
+
+        // Update velocities using the impulse
+        let new_v1 = v1_initial - normal * mass2 * impulse_scalar;
+        let new_v2 = v2_initial + normal * mass1 * impulse_scalar;
+
+        // Apply restitution coefficient if the objects aren't planets.
+        let corrected_v1 = if !is_planet[object1_index] {
+            new_v1 * restitution_coefficient
+        } else {
+            new_v1
+        };
+        let corrected_v2 = if !is_planet[object2_index] {
+            new_v2 * restitution_coefficient
+        } else {
+            new_v2
+        };
+
+        velocities[object1_index] = corrected_v1;
+        velocities[object2_index] = corrected_v2;
+
+        // Correct positions based on penetration depth using inverse masses.
+        let intersection_depth = collision_distance - distance;
+        let inv_mass1 = 1.0 / mass1;
+        let inv_mass2 = 1.0 / mass2;
+        let total_inv_mass = inv_mass1 + inv_mass2;
+        let correction = normal * intersection_depth;
+        positions[object1_index] += correction * (inv_mass1 / total_inv_mass);
+        positions[object2_index] -= correction * (inv_mass2 / total_inv_mass);
     }
 
     fn apply_constraints(&mut self) {
@@ -546,6 +550,14 @@ impl ConstraintBox {
     pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
         Self { topleft, bottomright }
     }
+}
+
+#[derive(Clone, Copy)]
+struct CollisionPair {
+    object1_index: usize,
+    object2_index: usize,
+    distance_squared: f64,
+    collision_distance: f64,
 }
 
 #[derive(Clone, Debug)]

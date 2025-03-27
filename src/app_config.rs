@@ -86,10 +86,11 @@ pub struct SimulationConfig {
     pub dt: DtSource,
     #[serde(default = "default_speed_factor")]
     pub speed_factor: f64,
-    #[serde(default = "default_gpu_integration")]
+    #[serde(default)]
     pub gpu_integration: bool,
     pub restitution_coefficient: f64,
-    pub gravity: (f64, f64),
+    #[serde(default)]
+    pub global_gravity: (f64, f64),
     pub gravitational_constant: f64,
     pub time_limit: Option<f64>,
     #[serde(default)]
@@ -98,10 +99,6 @@ pub struct SimulationConfig {
 
 fn default_speed_factor() -> f64 {
     1.0
-}
-
-fn default_gpu_integration() -> bool {
-    false
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
@@ -151,6 +148,7 @@ pub struct DemoConfig {
 
     #[serde(default)]
     pub randomize_positions: bool,
+    #[serde(default)]
     pub randomize_position_factor: f64,
 }
 

@@ -30,7 +30,6 @@ impl Grid {
         if self.cell_size > 0.0 {
             self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize;
             self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize;
-
             if self.cell_records.len() != objects.len() {
                 self.cell_records.resize(objects.len(), CellRecord::EMPTY);
             }
@@ -39,15 +38,11 @@ impl Grid {
                 self.cell_records[object_index] = CellRecord {
                     object_index,
                     cell_coords: (x, y),
-                    radix_key: ((y << (CellRadixKey::BITS / 2)) | x).try_into().unwrap(),
+                    radix_key: (x + y * self.size.x).try_into().unwrap(),
                 }
             }
-
             self.cell_records.radix_sort_unstable();
-
-            if self.coords_to_cells.size() != (self.size.x, self.size.y) {
-                self.coords_to_cells.reset((self.size.x, self.size.y));
-            }
+            self.coords_to_cells.reset((self.size.x, self.size.y));
             if !self.cell_records.is_empty() {
                 for range in CellIter::new(&self.cell_records) {
                     let cell_coords = self.cell_records[range.start].cell_coords;
