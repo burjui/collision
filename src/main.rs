@@ -824,7 +824,7 @@ fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) -> 
     };
     writeln!(
         buffer,
-        "{}: {:?} (min {:?}, max {:?}, avg {:?})",
+        "{}: {:.2?} (min {:.2?}, max {:.2?}, avg {:.2?})",
         name, stat.current, stat.lowest, stat.highest, average
     )?;
     Ok(())

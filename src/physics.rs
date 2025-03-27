@@ -542,7 +542,7 @@ pub struct DurationStat {
     pub current: Duration,
     pub lowest: Duration,
     pub highest: Duration,
-    pub average: RingBuffer<10, Duration>,
+    pub average: RingBuffer<32, Duration>,
 }
 
 impl DurationStat {
