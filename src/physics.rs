@@ -190,18 +190,60 @@ impl PhysicsEngine {
     }
 
     fn integrate_cpu(&mut self, dt: f64) {
+        #[allow(clippy::unreadable_literal)]
+        const CBRT2: f64 = 1.2599210498948732;
+        const W0: f64 = -CBRT2 / (2.0 - CBRT2);
+        const W1: f64 = 1.0 / (2.0 - CBRT2);
+        const C1: f64 = 0.5 * W1;
+        const C4: f64 = C1;
+        const C2: f64 = 0.5 * (W0 + W1);
+        const C3: f64 = C2;
+        const D1: f64 = W1;
+        const D3: f64 = D1;
+        const D2: f64 = W0;
+
+        let c1dt = C1 * dt;
+        let c2dt = C2 * dt;
+        let c3dt = C3 * dt;
+        let c4dt = C4 * dt;
+        let d1dt = D1 * dt;
+        let d2dt = D2 * dt;
+        let d3dt = D3 * dt;
         for object_index in 0..self.objects.len() {
-            let update = Self::integrate_object_cpu(
+            let x0 = self.objects.positions[object_index];
+            let v0 = self.objects.velocities[object_index];
+            let x1 = x0 + v0 * c1dt;
+            let a1 = Self::gravity_acceleration(
                 object_index,
+                x1,
                 &self.objects.positions,
-                self.objects.velocities[object_index],
-                dt,
                 self.global_gravity,
                 self.gravitational_constant,
                 &self.objects.masses[self.objects.planet_range()],
             );
-            self.objects.positions[object_index] = update.position;
-            self.objects.velocities[object_index] = update.velocity;
+            let v1 = v0 + a1 * d1dt;
+            let x2 = x0 + v1 * c2dt;
+            let a2 = Self::gravity_acceleration(
+                object_index,
+                x2,
+                &self.objects.positions,
+                self.global_gravity,
+                self.gravitational_constant,
+                &self.objects.masses[self.objects.planet_range()],
+            );
+            let v2 = v0 + a2 * d2dt;
+            let x3 = x0 + v2 * c3dt;
+            let a3 = Self::gravity_acceleration(
+                object_index,
+                x3,
+                &self.objects.positions,
+                self.global_gravity,
+                self.gravitational_constant,
+                &self.objects.masses[self.objects.planet_range()],
+            );
+            let v3 = v0 + a3 * d3dt;
+            self.objects.positions[object_index] = x0 + v3 * c4dt;
+            self.objects.velocities[object_index] = v3;
         }
     }
 
@@ -288,65 +330,6 @@ impl PhysicsEngine {
         GPU.enqueue_write_device_buffer(planet_mass_buffer, &self.gpu_planet_masses)
             .context("Failed to write planet mass buffer")
             .unwrap();
-    }
-
-    fn integrate_object_cpu(
-        object_index: usize,
-        positions: &[Vector2<f64>],
-        velocity: Vector2<f64>,
-        dt: f64,
-        global_gravity: Vector2<f64>,
-        gravitational_constant: f64,
-        planet_masses: &[f64],
-    ) -> ObjectUpdate {
-        #[allow(clippy::unreadable_literal)]
-        const CBRT2: f64 = 1.2599210498948732;
-        const W0: f64 = -CBRT2 / (2.0 - CBRT2);
-        const W1: f64 = 1.0 / (2.0 - CBRT2);
-        const C1: f64 = 0.5 * W1;
-        const C4: f64 = C1;
-        const C2: f64 = 0.5 * (W0 + W1);
-        const C3: f64 = C2;
-        const D1: f64 = W1;
-        const D3: f64 = D1;
-        const D2: f64 = W0;
-
-        let x0 = positions[object_index];
-        let v0 = velocity;
-        let x1 = x0 + v0 * (C1 * dt);
-        let a1 = Self::gravity_acceleration(
-            object_index,
-            x1,
-            positions,
-            global_gravity,
-            gravitational_constant,
-            planet_masses,
-        );
-        let v1 = v0 + a1 * (D1 * dt);
-        let x2 = x0 + v1 * (C2 * dt);
-        let a2 = Self::gravity_acceleration(
-            object_index,
-            x2,
-            positions,
-            global_gravity,
-            gravitational_constant,
-            planet_masses,
-        );
-        let v2 = v0 + a2 * (D2 * dt);
-        let x3 = x0 + v2 * (C3 * dt);
-        let a3 = Self::gravity_acceleration(
-            object_index,
-            x3,
-            positions,
-            global_gravity,
-            gravitational_constant,
-            planet_masses,
-        );
-        let v3 = v0 + a3 * (D3 * dt);
-        ObjectUpdate {
-            position: x0 + v3 * (C4 * dt),
-            velocity: v3,
-        }
     }
 
     fn gravity_acceleration(
@@ -459,7 +442,7 @@ impl PhysicsEngine {
         let v2_initial = velocities[object2_index];
 
         // Compute the impulse scalar using the original velocities.
-        let impulse_scalar = 2.0 * (v1_initial - v2_initial).dot(&normal) / total_mass;
+        let impulse_scalar = 2.0 * (v1_initial - v2_initial).dot(normal) / total_mass;
 
         // Update velocities using the impulse
         let new_v1 = v1_initial - normal * mass2 * impulse_scalar;
@@ -531,12 +514,6 @@ impl PhysicsEngine {
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GpuComputeOptions {
     pub integration: bool,
-}
-
-#[derive(Clone, Copy)]
-struct ObjectUpdate {
-    position: Vector2<f64>,
-    velocity: Vector2<f64>,
 }
 
 #[derive(Default, Clone, Copy)]

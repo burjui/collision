@@ -18,16 +18,6 @@ impl<T> Vector2<T> {
         Self { x, y }
     }
 
-    pub fn from_slice(slice: &[T]) -> Self
-    where
-        T: Copy,
-    {
-        Self {
-            x: slice[0],
-            y: slice[1],
-        }
-    }
-
     pub fn magnitude(&self) -> T
     where
         T: Float,
@@ -39,7 +29,7 @@ impl<T> Vector2<T> {
     where
         T: Mul<Output = T> + Add<Output = T> + Copy,
     {
-        self.x * self.x + self.y * self.y
+        self.dot(*self)
     }
 
     #[must_use]
@@ -48,14 +38,15 @@ impl<T> Vector2<T> {
         T: Float + Div<Output = T>,
     {
         let one_over_magnitude = T::one() / self.magnitude().max(T::epsilon());
-        Vector2::new(self.x * one_over_magnitude, self.y * one_over_magnitude)
+        *self * one_over_magnitude
     }
 
-    pub fn dot(&self, other: &Vector2<T>) -> T
+    pub fn dot(&self, other: Vector2<T>) -> T
     where
         T: Mul<Output = T> + Add<Output = T> + Copy,
     {
-        self.x * other.x + self.y * other.y
+        let product = *self * other;
+        product.x + product.y
     }
 }
 
@@ -142,6 +133,20 @@ where
         Self {
             x: self.x * rhs,
             y: self.y * rhs,
+        }
+    }
+}
+
+impl<T> Mul<Vector2<T>> for Vector2<T>
+where
+    T: Mul<Output = T> + Copy,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: Vector2<T>) -> Self::Output {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
         }
     }
 }
