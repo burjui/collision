@@ -34,16 +34,19 @@ impl<T: Default + Copy, const N: usize> Default for FixedVec<T, N> {
     }
 }
 
-impl<T: Copy, const N: usize> FromIterator<T> for FixedVec<T, N> {
+impl<T: Copy + Default, const N: usize> FromIterator<T> for FixedVec<T, N> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut data = unsafe { MaybeUninit::<[T; N]>::uninit().assume_init() };
+        let mut data = [MaybeUninit::<T>::uninit(); N];
         let mut len = 0;
         for item in iter {
             assert!(len < N);
-            data[len] = item;
+            data[len].write(item);
             len += 1;
         }
-        Self { inner: data, len }
+        Self {
+            inner: unsafe { MaybeUninit::array_assume_init(data) },
+            len,
+        }
     }
 }
 

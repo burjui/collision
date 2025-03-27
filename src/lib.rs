@@ -8,6 +8,7 @@
 #![feature(array_windows)]
 #![feature(more_float_constants)]
 #![feature(lazy_get)]
+#![feature(maybe_uninit_array_assume_init)]
 
 pub mod app_config;
 pub mod array2;
