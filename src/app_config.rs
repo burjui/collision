@@ -166,6 +166,9 @@ fn default_color_source() -> ColorSource {
 #[derive(Debug, Deserialize, Clone, Copy, Default)]
 pub enum ColorSource {
     #[default]
+    #[serde(rename = "none")]
+    None,
+
     #[serde(rename = "demo")]
     Demo,
 

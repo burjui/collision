@@ -5,12 +5,13 @@ use rdst::{RadixKey, RadixSort};
 use super::object::ObjectSoa;
 use crate::{array2::Array2, vector2::Vector2};
 
+#[derive(Clone)]
 pub struct Grid {
     position: Vector2<f64>,
     size: Vector2<usize>,
     cell_size: f64,
-    pub(super) cell_records: Vec<CellRecord>,
-    pub(super) coords_to_cells: Array2<Option<(usize, usize)>>,
+    pub cell_records: Vec<CellRecord>,
+    pub coords_to_cells: Array2<Option<(usize, usize)>>,
 }
 
 impl Grid {
@@ -30,9 +31,7 @@ impl Grid {
         if self.cell_size > 0.0 {
             self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize;
             self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize;
-            if self.cell_records.len() != objects.len() {
-                self.cell_records.resize(objects.len(), CellRecord::EMPTY);
-            }
+            self.cell_records.resize(objects.len(), CellRecord::EMPTY);
             for (object_index, &position) in objects.positions.iter().enumerate() {
                 let (x, y) = cell_at(position, self.position, self.cell_size);
                 self.cell_records[object_index] = CellRecord {
@@ -145,7 +144,7 @@ impl Default for Grid {
             size: Vector2::new(0, 0),
             cell_size: 0.0,
             cell_records: Vec::new(),
-            coords_to_cells: Array2::default((0, 0)),
+            coords_to_cells: Array2::default(),
         }
     }
 }

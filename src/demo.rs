@@ -40,6 +40,14 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
             ..Brick::new(Vector2::new(400.0, 100.0), Vector2::new(600.0, 300.0))
         };
         generate_brick(physics, &brick);
+
+        let brick = Brick {
+            particle_radius: CONFIG.demo.object_radius,
+            particle_spacing: CONFIG.demo.object_spacing,
+            particle_mass: 0.01,
+            ..Brick::new(Vector2::new(1300.0, 0.0), Vector2::new(200.0, 500.0))
+        };
+        generate_brick(physics, &brick);
     }
 
     if CONFIG.demo.enable_ball {

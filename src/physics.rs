@@ -72,15 +72,6 @@ impl PhysicsEngine {
     }
 
     #[must_use]
-    pub fn grid(&self) -> &Grid {
-        &self.grid
-    }
-
-    pub fn grid_mut(&mut self) -> &mut Grid {
-        &mut self.grid
-    }
-
-    #[must_use]
     pub fn objects(&self) -> &ObjectSoa {
         &self.objects
     }
@@ -508,6 +499,10 @@ impl PhysicsEngine {
                 *velocity *= self.restitution_coefficient;
             }
         }
+    }
+
+    pub fn grid(&self) -> &Grid {
+        &self.grid
     }
 }
 

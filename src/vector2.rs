@@ -90,6 +90,20 @@ where
     }
 }
 
+impl<T: Copy> Add<T> for Vector2<T>
+where
+    T: Add<Output = T>,
+{
+    type Output = Self;
+
+    fn add(self, rhs: T) -> Self::Output {
+        Self {
+            x: self.x + rhs,
+            y: self.y + rhs,
+        }
+    }
+}
+
 impl<T> AddAssign for Vector2<T>
 where
     T: AddAssign,
@@ -113,6 +127,21 @@ where
         }
     }
 }
+
+impl<T: Copy> Sub<T> for Vector2<T>
+where
+    T: Sub<Output = T>,
+{
+    type Output = Self;
+
+    fn sub(self, rhs: T) -> Self::Output {
+        Self {
+            x: self.x - rhs,
+            y: self.y - rhs,
+        }
+    }
+}
+
 impl<T> SubAssign for Vector2<T>
 where
     T: SubAssign,
