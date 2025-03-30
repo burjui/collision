@@ -169,86 +169,19 @@ fn simulation_thread(
     rendering_start_barrier: &Arc<Barrier>,
     rendering_result_receiver: &mpsc::Receiver<()>,
 ) -> PhysicsEngine {
-    const DIVERGENCE_RESOLUTION: f64 = 6.0;
-    let div_job_queue = Box::leak(Box::new(ArrayQueue::<DivergenceJob>::new(1)));
-    let div_job_queue = &*div_job_queue;
-    let div_result_queue = Box::leak(Box::new(ArrayQueue::<Array2<f64>>::new(1)));
-    let div_result_queue = &*div_result_queue;
-    let div_start_barrier = Arc::new(Barrier::new(2));
+    const EDF_RESOLUTION: f64 = 6.0;
+    const EDF_SAMPLING_AREA_SIZE: usize = 3;
 
-    struct DivergenceJob {
-        divergence_map_size: Vector2<usize>,
-        positions: Vec<Vector2<f64>>,
-        velocities: Vec<Vector2<f64>>,
-        radii: Vec<f64>,
-    }
+    let energy_field_job_queue = Box::leak(Box::new(ArrayQueue::new(1)));
+    let edf_job_queue = &*energy_field_job_queue;
+    let edf_result_queue = Box::leak(Box::new(ArrayQueue::new(1)));
+    let edf_result_queue = &*edf_result_queue;
+    let edf_ready = Arc::new(Barrier::new(2));
 
     {
-        let div_start_barrier = div_start_barrier.clone();
+        let edf_thread_ready_barrier = edf_ready.clone();
         thread::spawn(move || {
-            div_start_barrier.wait();
-            loop {
-                if let Some(DivergenceJob {
-                    divergence_map_size,
-                    positions,
-                    velocities,
-                    radii,
-                }) = div_job_queue.pop()
-                {
-                    let start = Instant::now();
-                    let mut divergence_map = Array2::<f64>::default();
-                    divergence_map.reset((divergence_map_size.x, divergence_map_size.y));
-                    for object_index in 0..positions.len() {
-                        const N: usize = 3;
-
-                        let position = positions[object_index];
-                        let velocity = velocities[object_index];
-                        let radius = radii[object_index];
-                        let topleft = position - radius;
-                        let bottomright = position + radius;
-                        let div_start = topleft / DIVERGENCE_RESOLUTION;
-                        let div_count = (bottomright - topleft) / DIVERGENCE_RESOLUTION;
-                        let start_i = (div_start.x as usize).saturating_sub(N);
-                        let start_j = (div_start.y as usize).saturating_sub(N);
-                        let div_cell_count_x = div_count.x.ceil() as usize + N * 2 + 1;
-                        let div_cell_count_y = div_count.y.ceil() as usize + N * 2 + 1;
-                        let velocity_magnitude = velocity.magnitude();
-                        for i in start_i..(start_i + div_cell_count_x).min(divergence_map_size.x.saturating_sub(1)) {
-                            for j in start_j..(start_j + div_cell_count_y).min(divergence_map_size.y.saturating_sub(1))
-                            {
-                                let divergence_position = Vector2::new(
-                                    (i as f64 + 0.5) * DIVERGENCE_RESOLUTION,
-                                    (j as f64 + 0.5) * DIVERGENCE_RESOLUTION,
-                                );
-                                let from_div_to_object = position - divergence_position;
-                                let distance = from_div_to_object.magnitude();
-                                let div_cell_distance = (distance / DIVERGENCE_RESOLUTION) as usize;
-                                if div_cell_distance < N {
-                                    divergence_map[(i, j)] +=
-                                        velocity_magnitude * ((N - div_cell_distance) as f64 / N as f64);
-                                };
-                            }
-                        }
-                    }
-                    let mut max_divergence = f64::MIN_POSITIVE;
-                    for i in 0..divergence_map_size.x {
-                        for j in 0..divergence_map_size.y {
-                            max_divergence = divergence_map[(i, j)].max(max_divergence);
-                        }
-                    }
-                    let mut divergence_magnitude_sqrt_map = Array2::default();
-                    divergence_magnitude_sqrt_map.reset((divergence_map_size.x, divergence_map_size.y));
-                    for i in 0..divergence_map_size.x {
-                        for j in 0..divergence_map_size.y {
-                            let divergence = divergence_map[(i, j)];
-                            divergence_magnitude_sqrt_map[(i, j)] = divergence / max_divergence.max(f64::MIN_POSITIVE);
-                        }
-                    }
-                    println!("div map took {:.2?}", start.elapsed());
-                    div_result_queue.force_push(divergence_magnitude_sqrt_map);
-                }
-                yield_now();
-            }
+            energy_density_field_thread(edf_thread_ready_barrier, edf_job_queue, edf_result_queue);
         });
     }
 
@@ -262,11 +195,11 @@ fn simulation_thread(
     println!("{} objects", physics.objects().len());
     let mut redraw_needed = false;
     let mut last_redraw_instant = Instant::now();
-    let mut draw_divergence = false;
+    let mut draw_edf = false;
     rendering_start_barrier.wait();
-    div_start_barrier.wait();
+    edf_ready.wait();
     let mut first_redraw = true;
-    let mut divergence_map = Array2::default();
+    let mut edf = Array2::default();
     'main_loop: loop {
         fn send_app_event(event_loop_proxy: &EventLoopProxy<AppEvent>, mut event: AppEvent) {
             let _ = event_loop_proxy
@@ -293,8 +226,8 @@ fn simulation_thread(
                     color_source = source;
                     redraw_needed = true;
                 }
-                SimulationThreadEvent::ToggleDrawDivergence => {
-                    draw_divergence = !draw_divergence;
+                SimulationThreadEvent::ToggleDrawEdf => {
+                    draw_edf = !draw_edf;
                     redraw_needed = true;
                 }
                 SimulationThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
@@ -329,23 +262,20 @@ fn simulation_thread(
             }
         }
 
-        if let Some(map) = div_result_queue.pop() {
-            divergence_map = map;
+        if let Some(new_edf) = edf_result_queue.pop() {
+            edf = new_edf;
         }
-        if draw_divergence && div_job_queue.is_empty() {
-            let divergence_map_size = Vector2::new(
-                (CONFIG.window.width as f64 / DIVERGENCE_RESOLUTION) as usize + 1,
-                (CONFIG.window.height as f64 / DIVERGENCE_RESOLUTION) as usize + 1,
-            );
-
-            div_job_queue
-                .push(DivergenceJob {
-                    divergence_map_size,
+        if draw_edf && edf_job_queue.is_empty() {
+            edf_job_queue
+                .push(EnergyDensityFieldJob {
                     positions: physics.objects().positions.clone(),
                     velocities: physics.objects().velocities.clone(),
                     radii: physics.objects().radii.clone(),
+                    masses: physics.objects().radii.clone(),
+                    resolution: EDF_RESOLUTION,
+                    sampling_area_size: EDF_SAMPLING_AREA_SIZE,
                 })
-                .map_err(|_| anyhow!("failed to send div job"))
+                .map_err(|_| anyhow!("failed to send edf job"))
                 .unwrap();
         }
 
@@ -378,15 +308,96 @@ fn simulation_thread(
                     grid_size: physics.grid().size(),
                     grid_cell_size: physics.grid().cell_size(),
                     constraints: physics.constraints(),
-                    draw_divergence,
-                    divergence_magnitude_sqrt_map: divergence_map.clone(),
-                    divergence_resolution: DIVERGENCE_RESOLUTION,
+                    draw_edf,
+                    edf: edf.clone(),
+                    edf_resolution: EDF_RESOLUTION,
                 }));
             }
         }
     }
 
     physics
+}
+
+struct EnergyDensityFieldJob {
+    positions: Vec<Vector2<f64>>,
+    velocities: Vec<Vector2<f64>>,
+    radii: Vec<f64>,
+    masses: Vec<f64>,
+    resolution: f64,
+    sampling_area_size: usize,
+}
+
+fn energy_density_field_thread(
+    edf_thread_ready_barrier: Arc<Barrier>,
+    energy_field_job_queue: &ArrayQueue<EnergyDensityFieldJob>,
+    energy_field_result_queue: &ArrayQueue<Array2<f64>>,
+) {
+    edf_thread_ready_barrier.wait();
+    loop {
+        if let Some(EnergyDensityFieldJob {
+            positions,
+            velocities,
+            radii,
+            masses,
+            resolution,
+            sampling_area_size,
+        }) = energy_field_job_queue.pop()
+        {
+            assert!(resolution > 1.0);
+            let start = Instant::now();
+            let mut edf = Array2::<f64>::default();
+            let width = (CONFIG.window.width as f64 / resolution) as usize + 1;
+            let height = (CONFIG.window.height as f64 / resolution) as usize + 1;
+            edf.reset((width, height));
+            for object_index in 0..positions.len() {
+                let position = positions[object_index];
+                let velocity = velocities[object_index];
+                let radius = radii[object_index];
+                let mass = masses[object_index];
+                let topleft = position - radius;
+                let bottomright = position + radius;
+                let cell_start = topleft / resolution;
+                let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
+                let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
+                let cell_count = (bottomright - topleft) / resolution;
+                let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
+                let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
+                let energy = 0.5 * mass * velocity.magnitude_squared();
+                for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
+                    for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
+                        let cell_center_position =
+                            Vector2::new((i as f64 + 0.5) * resolution, (j as f64 + 0.5) * resolution);
+                        let distance = (position - cell_center_position).magnitude();
+                        let edf_distance = (distance / resolution) as usize;
+                        if edf_distance < sampling_area_size {
+                            edf[(i, j)] +=
+                                energy * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
+                        };
+                    }
+                }
+            }
+            let mut max_energy_density = f64::MIN_POSITIVE;
+            for i in 0..width {
+                for j in 0..height {
+                    max_energy_density = edf[(i, j)].max(max_energy_density);
+                }
+            }
+            for i in 0..width {
+                for j in 0..height {
+                    let energy_density = edf[(i, j)];
+                    edf[(i, j)] = if max_energy_density > 0.0 {
+                        energy_density / max_energy_density.max(f64::MIN_POSITIVE)
+                    } else {
+                        0.0
+                    };
+                }
+            }
+            println!("edf calculation took {:.2?}", start.elapsed());
+            energy_field_result_queue.force_push(edf);
+        }
+        yield_now();
+    }
 }
 
 fn rendering_thread(
@@ -450,9 +461,9 @@ fn draw_physics(
         color_source,
         draw_ids,
         constraints,
-        draw_divergence,
-        divergence_magnitude_sqrt_map,
-        divergence_resolution,
+        draw_edf,
+        edf,
+        edf_resolution,
         ..
     }: &RenderingData,
 ) -> Vec<Scene> {
@@ -553,39 +564,34 @@ fn draw_physics(
         &Rect::new(topleft.x, topleft.y, bottomright.x, bottomright.y),
     );
 
-    println!(
-        "div map size: {}x{}",
-        divergence_magnitude_sqrt_map.size().0,
-        divergence_magnitude_sqrt_map.size().1
-    );
+    println!("edf size: {}x{}", edf.size().0, edf.size().1);
 
-    if *draw_divergence && !divergence_magnitude_sqrt_map.is_empty() {
+    if *draw_edf && !edf.is_empty() {
         const BYTES_PER_PIXEL: usize = 4;
 
         let start = Instant::now();
-        let width = divergence_magnitude_sqrt_map.size().0;
-        let height = divergence_magnitude_sqrt_map.size().1;
-        let image_data_length =
-            divergence_magnitude_sqrt_map.size().1 * divergence_magnitude_sqrt_map.size().0 * BYTES_PER_PIXEL;
-        let mut div_image_data = Vec::with_capacity(image_data_length);
-        div_image_data.resize(image_data_length, 255);
+        let width = edf.size().0;
+        let height = edf.size().1;
+        let image_data_length = edf.size().1 * edf.size().0 * BYTES_PER_PIXEL;
+        let mut edf_image_data = Vec::with_capacity(image_data_length);
+        edf_image_data.resize(image_data_length, 255);
         for i in 0..width {
             for j in 0..height {
-                let div = divergence_magnitude_sqrt_map[(i, j)];
-                let color = spectrum(div.sqrt() as f32, 0.5);
+                let energy_density = edf[(i, j)];
+                let color = spectrum(energy_density.sqrt() as f32, 0.5);
                 let offset = j * width * BYTES_PER_PIXEL + i * BYTES_PER_PIXEL;
                 for i in 0..4 {
-                    div_image_data[offset + i] = (color.components[i] * 255.0) as u8;
+                    edf_image_data[offset + i] = (color.components[i] * 255.0) as u8;
                 }
             }
         }
-        println!("filling div image took {:.02?}", start.elapsed());
+        println!("filling edf image took {:.02?}", start.elapsed());
 
         let start = Instant::now();
-        let blob = Blob::new(Arc::new(div_image_data));
+        let blob = Blob::new(Arc::new(edf_image_data));
         let image = Image::new(blob, ImageFormat::Rgba8, width as u32, height as u32);
-        scene.draw_image(&image, transform.pre_scale(*divergence_resolution));
-        println!("rendering div map took {:.2?}", start.elapsed());
+        scene.draw_image(&image, transform.pre_scale(*edf_resolution));
+        println!("rendering edf took {:.2?}", start.elapsed());
     }
 
     scenes
@@ -709,7 +715,7 @@ enum SimulationThreadEvent {
         mouse_position: Vector2<f64>,
         mouse_influence_radius: f64,
     },
-    ToggleDrawDivergence,
+    ToggleDrawEdf,
 }
 
 enum RenderingThreadEvent {
@@ -741,9 +747,9 @@ struct RenderingData {
     grid_size: Vector2<usize>,
     grid_cell_size: f64,
     constraints: ConstraintBox,
-    draw_divergence: bool,
-    divergence_magnitude_sqrt_map: Array2<f64>,
-    divergence_resolution: f64,
+    draw_edf: bool,
+    edf: Array2<f64>,
+    edf_resolution: f64,
 }
 
 struct VelloApp<'s> {
@@ -877,7 +883,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         }
                         Key::Character("d") => {
                             self.simulation_event_sender
-                                .send(SimulationThreadEvent::ToggleDrawDivergence)
+                                .send(SimulationThreadEvent::ToggleDrawEdf)
                                 .unwrap();
                         }
                         _ => {}
@@ -903,6 +909,13 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         self.min_fps = self.min_fps.min(fps);
                     }
                     self.scene.reset();
+                    self.scene.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        css::BLACK,
+                        None,
+                        &Rect::new(0.0, 0.0, CONFIG.window.width as f64, CONFIG.window.height as f64),
+                    );
                     self.scene.append(&self.simulation_scene, None);
                     draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
                     draw_stats(
