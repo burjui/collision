@@ -12,6 +12,7 @@
 
 pub mod app_config;
 pub mod array2;
+pub mod demo;
 pub mod fixed_vec;
 pub mod fps;
 pub mod gpu;

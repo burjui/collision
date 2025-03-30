@@ -5,13 +5,15 @@ use std::{fmt::Display, fs::File, io::Read, path::Path, sync::LazyLock};
 use anyhow::{Context, anyhow};
 use serde_derive::Deserialize;
 
+use crate::demo::{Ball, Brick};
+
 pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
     AppConfig::from_file(Path::new("config.toml"))
         .context("load config")
         .unwrap()
 });
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct AppConfig {
     pub window: WindowConfig,
@@ -131,7 +133,7 @@ impl Display for TimeLimitAction {
     }
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct DemoConfig {
     pub object_radius: f64,
@@ -150,6 +152,12 @@ pub struct DemoConfig {
     pub randomize_positions: bool,
     #[serde(default)]
     pub randomize_position_factor: f64,
+
+    #[serde(default)]
+    pub bricks: Vec<Brick>,
+
+    #[serde(default)]
+    pub balls: Vec<Ball>,
 }
 
 #[derive(Deserialize, Clone, Copy)]

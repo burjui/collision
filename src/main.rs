@@ -16,13 +16,13 @@ use anyhow::anyhow;
 use collision::{
     app_config::{CONFIG, ColorSource, TimeLimitAction},
     array2::Array2,
+    demo::create_demo,
     fps::FpsCalculator,
     physics::{ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
 };
 use crossbeam::queue::{ArrayQueue, SegQueue};
-use demo::create_demo;
 use itertools::Itertools;
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
@@ -39,8 +39,6 @@ use winit::{
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
-
-mod demo;
 
 pub fn main() -> anyhow::Result<()> {
     enable_floating_point_exceptions();
@@ -881,7 +879,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
                                 .unwrap();
                         }
-                        Key::Character("d") => {
+                        Key::Character("e") => {
                             self.simulation_event_sender
                                 .send(SimulationThreadEvent::ToggleDrawEdf)
                                 .unwrap();

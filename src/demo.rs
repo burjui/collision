@@ -1,14 +1,17 @@
 #![allow(unused)]
 
-use collision::{
-    app_config::{self, AppConfig, CONFIG},
-    physics::{PhysicsEngine, object::ObjectPrototype},
-    vector2::Vector2,
-};
+use num_traits::Signed;
 use rand::random;
+use serde_derive::Deserialize;
 use vello::peniko::{
     Color,
     color::{ColorSpace, Hsl, Srgb, palette::css},
+};
+
+use crate::{
+    app_config::{self, AppConfig, CONFIG},
+    physics::{PhysicsEngine, object::ObjectPrototype},
+    vector2::Vector2,
 };
 
 pub fn create_demo(physics: &mut PhysicsEngine) {
@@ -32,30 +35,42 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
         });
     }
 
-    if CONFIG.demo.enable_brick {
-        let brick = Brick {
-            particle_radius: CONFIG.demo.object_radius,
-            particle_spacing: CONFIG.demo.object_spacing,
-            particle_mass: 0.01,
-            ..Brick::new(Vector2::new(400.0, 100.0), Vector2::new(600.0, 300.0))
+    for brick in &CONFIG.demo.bricks {
+        let particle_radius = if brick.particle_radius > 0.0 {
+            brick.particle_radius
+        } else {
+            CONFIG.demo.object_radius
         };
-        generate_brick(physics, &brick);
-
-        let brick = Brick {
-            particle_radius: CONFIG.demo.object_radius,
-            particle_spacing: CONFIG.demo.object_spacing,
-            particle_mass: 0.01,
-            ..Brick::new(Vector2::new(1300.0, 0.0), Vector2::new(200.0, 500.0))
+        let particle_spacing = if brick.particle_spacing >= 0.0 {
+            brick.particle_spacing
+        } else {
+            CONFIG.demo.object_spacing
         };
-        generate_brick(physics, &brick);
+        generate_brick(
+            physics,
+            &Brick {
+                particle_radius,
+                particle_spacing,
+                ..Brick::new(brick.position, brick.size)
+            },
+        );
     }
 
-    if CONFIG.demo.enable_ball {
+    for ball in &CONFIG.demo.balls {
+        let particle_radius = if ball.particle_radius > 0.0 {
+            ball.particle_radius
+        } else {
+            CONFIG.demo.object_radius
+        };
+        let particle_spacing = if ball.particle_spacing >= 0.0 {
+            ball.particle_spacing
+        } else {
+            CONFIG.demo.object_spacing
+        };
         let ball = Ball {
-            particle_radius: CONFIG.demo.object_radius,
-            particle_spacing: CONFIG.demo.object_spacing,
-            particle_mass: 0.01,
-            ..Ball::new(Vector2::new(400.0, 600.0), 100.0)
+            particle_radius,
+            particle_spacing,
+            ..Ball::new(ball.position, ball.radius)
         };
         generate_ball(physics, &ball);
     }
@@ -65,12 +80,17 @@ const DEFAULT_PARTICLE_RADIUS: f64 = 2.0;
 const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
 const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
+#[derive(Deserialize, Clone, Copy)]
 pub struct Brick {
     pub position: Vector2<f64>,
     pub size: Vector2<f64>,
+    #[serde(default)]
     pub velocity: Vector2<f64>,
+    #[serde(default)]
     pub particle_radius: f64,
+    #[serde(default = "default_spacing")]
     pub particle_spacing: f64,
+    #[serde(default)]
     pub particle_mass: f64,
 }
 
@@ -126,13 +146,17 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
     result
 }
 
+#[derive(Deserialize, Clone, Copy)]
 pub struct Ball {
     pub position: Vector2<f64>,
     pub radius: f64,
-    pub acceleration: Vector2<f64>,
+    #[serde(default)]
     pub velocity: Vector2<f64>,
+    #[serde(default)]
     pub particle_radius: f64,
+    #[serde(default = "default_spacing")]
     pub particle_spacing: f64,
+    #[serde(default)]
     pub particle_mass: f64,
 }
 
@@ -143,7 +167,6 @@ impl Ball {
             position,
             radius,
             velocity: Vector2::new(0.0, 0.0),
-            acceleration: Vector2::new(0.0, 0.0),
             particle_radius: DEFAULT_PARTICLE_RADIUS,
             particle_spacing: DEFAULT_PARTICLE_SPACING,
             particle_mass: DEFAULT_PARTICLE_MASS,
@@ -188,4 +211,8 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
         }
     }
     result
+}
+
+fn default_spacing() -> f64 {
+    -0.0
 }

@@ -1,10 +1,15 @@
 use std::{
     fmt,
     iter::Sum,
+    marker::PhantomData,
     ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use num_traits::Float;
+use serde::{
+    Deserialize,
+    de::{Error, Visitor},
+};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -232,5 +237,35 @@ impl From<(f64, f64)> for Vector2<f64> {
 impl fmt::Debug for Vector2<f64> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.x, self.y)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Vector2<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_tuple(2, Vector2Visitor::<T>(PhantomData))
+    }
+}
+
+struct Vector2Visitor<T>(PhantomData<T>);
+
+impl<'de, T: Deserialize<'de>> Visitor<'de> for Vector2Visitor<T> {
+    type Value = Vector2<T>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a pair of numbers")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        if let (Some(x), Some(y)) = (seq.next_element()?, seq.next_element()?) {
+            Ok(Vector2 { x, y })
+        } else {
+            Err(Error::custom("expected a pair of numbers"))
+        }
     }
 }
