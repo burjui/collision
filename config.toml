@@ -31,5 +31,5 @@ position = [250, 150]
 radius = 100
 
 [rendering]
-color_source = "demo"
-
+color_source = "none"
+show_edf = true

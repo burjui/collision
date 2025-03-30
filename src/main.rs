@@ -193,7 +193,7 @@ fn simulation_thread(
     println!("{} objects", physics.objects().len());
     let mut redraw_needed = false;
     let mut last_redraw_instant = Instant::now();
-    let mut draw_edf = false;
+    let mut show_edf = CONFIG.rendering.show_edf;
     rendering_start_barrier.wait();
     edf_ready.wait();
     let mut first_redraw = true;
@@ -225,7 +225,7 @@ fn simulation_thread(
                     redraw_needed = true;
                 }
                 SimulationThreadEvent::ToggleDrawEdf => {
-                    draw_edf = !draw_edf;
+                    show_edf = !show_edf;
                     redraw_needed = true;
                 }
                 SimulationThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
@@ -263,7 +263,7 @@ fn simulation_thread(
         if let Some(new_edf) = edf_result_queue.pop() {
             edf = new_edf;
         }
-        if draw_edf && edf_job_queue.is_empty() {
+        if show_edf && edf_job_queue.is_empty() {
             edf_job_queue
                 .push(EnergyDensityFieldJob {
                     positions: physics.objects().positions.clone(),
@@ -306,7 +306,7 @@ fn simulation_thread(
                     grid_size: physics.grid().size(),
                     grid_cell_size: physics.grid().cell_size(),
                     constraints: physics.constraints(),
-                    draw_edf,
+                    draw_edf: show_edf,
                     edf: edf.clone(),
                     edf_resolution: EDF_RESOLUTION,
                 }));

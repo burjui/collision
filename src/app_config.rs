@@ -165,6 +165,9 @@ pub struct DemoConfig {
 pub struct RenderConfig {
     #[serde(default = "default_color_source")]
     pub color_source: ColorSource,
+
+    #[serde(default)]
+    pub show_edf: bool,
 }
 
 fn default_color_source() -> ColorSource {
