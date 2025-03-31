@@ -431,7 +431,6 @@ fn rendering_thread(
     redraw_job_queue: &ArrayQueue<Scene>,
     app_event_loop_proxy: EventLoopProxy<AppEvent>,
 ) {
-    let mut last_redraw = Instant::now();
     let mut rendering_data = RenderingData::default();
     rendering_thread_ready.wait();
     'main_loop: loop {
@@ -445,26 +444,22 @@ fn rendering_thread(
             }
         }
         if !rendering_data.positions.is_empty() && redraw_job_queue.is_empty() {
-            let now = Instant::now();
-            if (now - last_redraw).as_secs_f64() > 1.0 / 60.0 {
-                last_redraw = now;
-                let mut scenes = draw_physics(&rendering_data);
-                let mut scene = scenes.remove(0);
-                for subscene in scenes {
-                    scene.append(&subscene, None);
-                }
-                if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
-                    draw_grid(
-                        &mut scene,
-                        rendering_data.grid_position,
-                        rendering_data.grid_size,
-                        rendering_data.grid_cell_size,
-                    );
-                }
-                redraw_job_queue.force_push(scene);
-                let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
-                rendering_result_queue.send(()).unwrap();
+            let mut scenes = draw_physics(&rendering_data);
+            let mut scene = scenes.remove(0);
+            for subscene in scenes {
+                scene.append(&subscene, None);
             }
+            if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
+                draw_grid(
+                    &mut scene,
+                    rendering_data.grid_position,
+                    rendering_data.grid_size,
+                    rendering_data.grid_cell_size,
+                );
+            }
+            redraw_job_queue.force_push(scene);
+            let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
+            rendering_result_queue.send(()).unwrap();
         }
         yield_now();
     }
@@ -593,22 +588,22 @@ fn draw_physics(
         let width = edf.size().0;
         let height = edf.size().1;
         let image_data_length = edf.size().1 * edf.size().0 * BYTES_PER_PIXEL;
-        let mut edf_image_data = Vec::with_capacity(image_data_length);
-        edf_image_data.resize(image_data_length, 255);
+        let mut image_data = Vec::with_capacity(image_data_length);
+        image_data.resize(image_data_length, 255);
         for i in 0..width {
             for j in 0..height {
                 let energy_density = edf[(i, j)];
                 let color = spectrum(energy_density.sqrt() as f32, 0.5);
                 let offset = j * width * BYTES_PER_PIXEL + i * BYTES_PER_PIXEL;
                 for i in 0..4 {
-                    edf_image_data[offset + i] = (color.components[i] * 255.0) as u8;
+                    image_data[offset + i] = (color.components[i] * 255.0) as u8;
                 }
             }
         }
         println!("filling edf image took {:.02?}", start.elapsed());
 
         let start = Instant::now();
-        let blob = Blob::new(Arc::new(edf_image_data));
+        let blob = Blob::new(Arc::new(image_data));
         let image = Image::new(blob, ImageFormat::Rgba8, width as u32, height as u32);
         scene.draw_image(&image, transform.pre_scale(*edf_cell_size));
         println!("rendering edf took {:.2?}", start.elapsed());
@@ -817,7 +812,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
         let size = window.inner_size();
         let surface_future =
             self.context
-                .create_surface(window.clone(), size.width, size.height, PresentMode::AutoNoVsync);
+                .create_surface(window.clone(), size.width, size.height, PresentMode::AutoVsync);
         // We need to block here, in case a Suspended event appeared
         let surface = pollster::block_on(surface_future).expect("failed to create surface");
         self.state = {
