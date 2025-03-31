@@ -392,6 +392,7 @@ dependencies = [
  "opencl3",
  "pollster",
  "rand",
+ "rayon",
  "rdst",
  "serde",
  "serde_derive",

@@ -24,6 +24,7 @@ use collision::{
 };
 use crossbeam::queue::{ArrayQueue, SegQueue};
 use itertools::Itertools;
+use rayon::ThreadPoolBuilder;
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
     kurbo::{Affine, Circle, Line, Rect, Stroke},
@@ -325,6 +326,11 @@ fn energy_density_field_thread(
     energy_field_result: &ArrayQueue<Array2<f64>>,
 ) {
     edf_thread_ready.wait();
+    let sub_edf_thread_count = num_cpus::get();
+    let sub_edf_threadpool = ThreadPoolBuilder::new()
+        .num_threads(sub_edf_thread_count)
+        .build()
+        .unwrap();
     loop {
         if let Some(EnergyDensityFieldJob {
             positions,
@@ -339,64 +345,51 @@ fn energy_density_field_thread(
             let start = Instant::now();
             let width = (CONFIG.window.width as f64 / resolution) as usize + 1;
             let height = (CONFIG.window.height as f64 / resolution) as usize + 1;
-            let mut edf = thread::scope(|scope| {
-                let mut subthreads = Vec::default();
-                for chunk in (0..positions.len())
-                    .chunks(positions.len().div_ceil(num_cpus::get()))
-                    .into_iter()
-                {
-                    let chunk = chunk.collect_vec();
-                    subthreads.push(scope.spawn(|| {
-                        let mut edf = Array2::<f64>::default();
-                        edf.reset((width, height));
-                        for object_index in chunk {
-                            let position = positions[object_index];
-                            let velocity = velocities[object_index];
-                            let radius = radii[object_index];
-                            let mass = masses[object_index];
-                            let topleft = position - radius;
-                            let bottomright = position + radius;
-                            let cell_start = topleft / resolution;
-                            let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
-                            let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
-                            let cell_count = (bottomright - topleft) / resolution;
-                            let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
-                            let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
-                            let energy = 0.5 * mass * velocity.magnitude_squared();
-                            for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
-                                for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
-                                    let cell_center_position =
-                                        Vector2::new((i as f64 + 0.5) * resolution, (j as f64 + 0.5) * resolution);
-                                    let distance = (position - cell_center_position).magnitude();
-                                    let edf_distance = (distance / resolution) as usize;
-                                    if edf_distance < sampling_area_size {
-                                        edf[(i, j)] += energy
-                                            * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
-                                    };
-                                }
-                            }
-                        }
-                        edf
-                    }));
-                }
-                let mut edf = Array2::<f64>::new((width, height));
-                let mut sub_edfs = Vec::default();
-                for subthread in subthreads {
-                    sub_edfs.push(subthread.join().unwrap());
-                }
-
-                let start = Instant::now();
-                for sub_edf in &sub_edfs {
-                    for j in 0..height {
-                        for i in 0..width {
-                            edf[(i, j)] += sub_edf[(i, j)];
+            let chunk_size = positions.len().div_ceil(sub_edf_thread_count);
+            let sub_edfs = sub_edf_threadpool.broadcast(|context| {
+                let mut edf = Array2::<f64>::default();
+                edf.reset((width, height));
+                let chunk_offset = context.index() * chunk_size;
+                for object_index in chunk_offset..(chunk_offset + chunk_size).min(positions.len()) {
+                    let position = positions[object_index];
+                    let velocity = velocities[object_index];
+                    let radius = radii[object_index];
+                    let mass = masses[object_index];
+                    let topleft = position - radius;
+                    let bottomright = position + radius;
+                    let cell_start = topleft / resolution;
+                    let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
+                    let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
+                    let cell_count = (bottomright - topleft) / resolution;
+                    let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
+                    let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
+                    let energy = 0.5 * mass * velocity.magnitude_squared();
+                    for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
+                        for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
+                            let cell_center_position =
+                                Vector2::new((i as f64 + 0.5) * resolution, (j as f64 + 0.5) * resolution);
+                            let distance = (position - cell_center_position).magnitude();
+                            let edf_distance = (distance / resolution) as usize;
+                            if edf_distance < sampling_area_size {
+                                edf[(i, j)] +=
+                                    energy * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
+                            };
                         }
                     }
                 }
-                println!("summing sub edfs took {:.02?}", start.elapsed());
-
                 edf
             });
+
+            let sum_start = Instant::now();
+            let mut edf = Array2::<f64>::new((width, height));
+            for sub_edf in sub_edfs {
+                for j in 0..height {
+                    for i in 0..width {
+                        edf[(i, j)] += sub_edf[(i, j)];
+                    }
+                }
+            }
+            println!("summing sub edfs took {:.02?}", sum_start.elapsed());
 
             let mut max_energy_density = f64::MIN_POSITIVE;
             for i in 0..width {
