@@ -852,6 +852,11 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
         }
         match event {
             WindowEvent::CloseRequested => {
+                self.simulation_event_sender
+                    .send(SimulationThreadEvent::Exit)
+                    .expect("failed to send simulation thread Exit event");
+                self.rendering_event_queue.push(RenderingThreadEvent::Exit);
+                self.ready_to_exit.wait();
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
