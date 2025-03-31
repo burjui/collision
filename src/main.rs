@@ -166,8 +166,8 @@ fn simulation_thread(
     rendering_thread_ready: &Arc<Barrier>,
     rendering_result_receiver: &mpsc::Receiver<()>,
 ) -> PhysicsEngine {
-    const EDF_RESOLUTION: f64 = 4.0;
-    const EDF_SAMPLING_AREA_SIZE: usize = 5;
+    const EDF_CELL_SIZE: f64 = 6.0;
+    const EDF_SAMPLING_AREA_SIZE: usize = 3;
 
     let energy_field_job_queue = Box::leak(Box::new(ArrayQueue::new(1)));
     let edf_job_queue = &*energy_field_job_queue;
@@ -267,7 +267,7 @@ fn simulation_thread(
                     velocities: physics.objects().velocities.clone(),
                     radii: physics.objects().radii.clone(),
                     masses: physics.objects().radii.clone(),
-                    resolution: EDF_RESOLUTION,
+                    cell_size: EDF_CELL_SIZE,
                     sampling_area_size: EDF_SAMPLING_AREA_SIZE,
                 })
                 .map_err(|_| anyhow!("failed to send edf job"))
@@ -305,7 +305,7 @@ fn simulation_thread(
                     constraints: physics.constraints(),
                     draw_edf: show_edf,
                     edf: edf.clone(),
-                    edf_resolution: EDF_RESOLUTION,
+                    edf_cell_size: EDF_CELL_SIZE,
                 }));
             }
         }
@@ -319,7 +319,7 @@ struct EnergyDensityFieldJob {
     velocities: Vec<Vector2<f64>>,
     radii: Vec<f64>,
     masses: Vec<f64>,
-    resolution: f64,
+    cell_size: f64,
     sampling_area_size: usize,
 }
 
@@ -340,14 +340,14 @@ fn energy_density_field_thread(
             velocities,
             radii,
             masses,
-            resolution,
+            cell_size,
             sampling_area_size,
         }) = energy_field_jobs.pop()
         {
-            assert!(resolution > 1.0);
+            assert!(cell_size > 1.0);
             let start = Instant::now();
-            let width = (CONFIG.window.width as f64 / resolution) as usize + 1;
-            let height = (CONFIG.window.height as f64 / resolution) as usize + 1;
+            let width = (CONFIG.window.width as f64 / cell_size) as usize + 1;
+            let height = (CONFIG.window.height as f64 / cell_size) as usize + 1;
             let chunk_size = positions.len().div_ceil(sub_edf_thread_count);
             let sub_edfs = sub_edf_threadpool.broadcast(|context| {
                 let mut edf = Array2::<f64>::default();
@@ -360,19 +360,19 @@ fn energy_density_field_thread(
                     let mass = masses[object_index];
                     let topleft = position - radius;
                     let bottomright = position + radius;
-                    let cell_start = topleft / resolution;
+                    let cell_start = topleft / cell_size;
                     let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
                     let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
-                    let cell_count = (bottomright - topleft) / resolution;
+                    let cell_count = (bottomright - topleft) / cell_size;
                     let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
                     let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
                     let energy = 0.5 * mass * velocity.magnitude_squared();
                     for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
                         for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
                             let cell_center_position =
-                                Vector2::new((i as f64 + 0.5) * resolution, (j as f64 + 0.5) * resolution);
+                                Vector2::new((i as f64 + 0.5) * cell_size, (j as f64 + 0.5) * cell_size);
                             let distance = (position - cell_center_position).magnitude();
-                            let edf_distance = (distance / resolution) as usize;
+                            let edf_distance = (distance / cell_size) as usize;
                             if edf_distance < sampling_area_size {
                                 edf[(i, j)] +=
                                     energy * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
@@ -483,7 +483,7 @@ fn draw_physics(
         constraints,
         draw_edf,
         edf,
-        edf_resolution,
+        edf_cell_size,
         ..
     }: &RenderingData,
 ) -> Vec<Scene> {
@@ -610,7 +610,7 @@ fn draw_physics(
         let start = Instant::now();
         let blob = Blob::new(Arc::new(edf_image_data));
         let image = Image::new(blob, ImageFormat::Rgba8, width as u32, height as u32);
-        scene.draw_image(&image, transform.pre_scale(*edf_resolution));
+        scene.draw_image(&image, transform.pre_scale(*edf_cell_size));
         println!("rendering edf took {:.2?}", start.elapsed());
     }
 
@@ -769,7 +769,7 @@ struct RenderingData {
     constraints: ConstraintBox,
     draw_edf: bool,
     edf: Array2<f64>,
-    edf_resolution: f64,
+    edf_cell_size: f64,
 }
 
 struct VelloApp<'s> {
