@@ -29,6 +29,10 @@ impl<T: Default + Copy> Array2<T> {
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
+
+    pub fn data(&self) -> &[T] {
+        &self.data
+    }
 }
 
 impl<T> AsRef<[T]> for Array2<T> {

@@ -43,33 +43,30 @@ use winit::{
 pub fn main() -> anyhow::Result<()> {
     enable_floating_point_exceptions();
     let event_loop = EventLoop::with_user_event().build()?;
-    let render_context = RenderContext::new();
-    let renderers: Vec<Option<Renderer>> = vec![];
-    let render_state = None::<RenderState<'_>>;
     let (simulation_event_sender, simulation_event_receiver) = mpsc::channel();
     let rendering_event_queue = Box::leak(Box::new(SegQueue::new()));
     let rendering_event_queue = &*rendering_event_queue;
     let sim_total_duration = Arc::new(Mutex::new(Duration::ZERO));
-    let wait_for_exit_barrier = Arc::new(Barrier::new(3));
+    let ready_to_exit = Arc::new(Barrier::new(3));
     let gpu_compute_options = GpuComputeOptions {
         integration: CONFIG.simulation.gpu_integration,
     };
-    let rendering_start_barrier = Arc::new(Barrier::new(3));
+    let rendering_thread_ready = Arc::new(Barrier::new(3));
     let (rendering_result_sender, rendering_result_receiver) = mpsc::channel();
     let simulation_thread = {
         let sim_total_duration = sim_total_duration.clone();
-        let wait_for_exit_barrier = wait_for_exit_barrier.clone();
+        let ready_to_exit = ready_to_exit.clone();
         let app_event_loop_proxy = event_loop.create_proxy();
-        let rendering_start_barrier = rendering_start_barrier.clone();
+        let rendering_thread_ready = rendering_thread_ready.clone();
         thread::spawn(move || -> PhysicsEngine {
             simulation_thread(
                 &sim_total_duration,
                 &app_event_loop_proxy,
                 &simulation_event_receiver,
-                &wait_for_exit_barrier,
+                &ready_to_exit,
                 gpu_compute_options,
                 rendering_event_queue,
-                &rendering_start_barrier,
+                &rendering_thread_ready,
                 &rendering_result_receiver,
             )
         })
@@ -79,20 +76,23 @@ pub fn main() -> anyhow::Result<()> {
     let redraw_result_queue = Box::leak(Box::new(ArrayQueue::new(1)));
     let redraw_result_queue = &*redraw_result_queue;
     let rendering_thread = {
-        let wait_for_exit_barrier = wait_for_exit_barrier.clone();
-        let rendering_start_barrier = rendering_start_barrier.clone();
+        let ready_to_exit = ready_to_exit.clone();
+        let rendering_thread_ready = rendering_thread_ready.clone();
         let app_event_loop_proxy = event_loop.create_proxy();
         thread::spawn(move || {
             rendering_thread(
                 rendering_event_queue,
-                &wait_for_exit_barrier,
-                &rendering_start_barrier,
+                &ready_to_exit,
+                &rendering_thread_ready,
                 &rendering_result_sender,
                 redraw_job_queue,
                 app_event_loop_proxy,
             );
         })
     };
+    let render_context = RenderContext::new();
+    let renderers: Vec<Option<Renderer>> = vec![];
+    let render_state = None::<RenderState<'_>>;
     let mut app = VelloApp {
         context: render_context,
         renderers,
@@ -110,13 +110,13 @@ pub fn main() -> anyhow::Result<()> {
         simulation_event_sender,
         rendering_event_queue,
         stats: Stats::default(),
-        wait_for_exit_barrier,
+        ready_to_exit,
         gpu_compute_options,
         redraw_job_queue,
         redraw_result_queue,
     };
 
-    rendering_start_barrier.wait();
+    rendering_thread_ready.wait();
     let start = Instant::now();
     event_loop.run_app(&mut app).expect("run to completion");
 
@@ -156,14 +156,14 @@ fn simulation_thread(
     sim_total_duration: &Arc<Mutex<Duration>>,
     app_event_loop_proxy: &EventLoopProxy<AppEvent>,
     simulation_event_receiver: &mpsc::Receiver<SimulationThreadEvent>,
-    wait_for_exit_barrier: &Arc<Barrier>,
+    ready_to_exit: &Arc<Barrier>,
     mut gpu_compute_options: GpuComputeOptions,
     rendering_event_queue: &SegQueue<RenderingThreadEvent>,
-    rendering_start_barrier: &Arc<Barrier>,
+    rendering_thread_ready: &Arc<Barrier>,
     rendering_result_receiver: &mpsc::Receiver<()>,
 ) -> PhysicsEngine {
-    const EDF_RESOLUTION: f64 = 6.0;
-    const EDF_SAMPLING_AREA_SIZE: usize = 3;
+    const EDF_RESOLUTION: f64 = 4.0;
+    const EDF_SAMPLING_AREA_SIZE: usize = 5;
 
     let energy_field_job_queue = Box::leak(Box::new(ArrayQueue::new(1)));
     let edf_job_queue = &*energy_field_job_queue;
@@ -172,10 +172,8 @@ fn simulation_thread(
     let edf_ready = Arc::new(Barrier::new(2));
 
     {
-        let edf_thread_ready_barrier = edf_ready.clone();
-        thread::spawn(move || {
-            energy_density_field_thread(edf_thread_ready_barrier, edf_job_queue, edf_result_queue);
-        });
+        let edf_thread_ready = edf_ready.clone();
+        thread::spawn(move || energy_density_field_thread(edf_thread_ready, edf_job_queue, edf_result_queue));
     }
 
     let mut advance_time = CONFIG.simulation.auto_start;
@@ -189,7 +187,7 @@ fn simulation_thread(
     let mut redraw_needed = false;
     let mut last_redraw_instant = Instant::now();
     let mut show_edf = CONFIG.rendering.show_edf;
-    rendering_start_barrier.wait();
+    rendering_thread_ready.wait();
     edf_ready.wait();
     let mut first_redraw = true;
     let mut edf = Array2::default();
@@ -203,7 +201,7 @@ fn simulation_thread(
         while let Result::Ok(event) = simulation_event_receiver.try_recv() {
             match event {
                 SimulationThreadEvent::Exit => {
-                    wait_for_exit_barrier.wait();
+                    ready_to_exit.wait();
                     break 'main_loop;
                 }
                 SimulationThreadEvent::ToggleAdvanceTime => advance_time = !advance_time,
@@ -248,7 +246,7 @@ fn simulation_thread(
                 TimeLimitAction::Exit => {
                     send_app_event(app_event_loop_proxy, AppEvent::Exit);
                     rendering_event_queue.push(RenderingThreadEvent::Exit);
-                    wait_for_exit_barrier.wait();
+                    ready_to_exit.wait();
                     break 'main_loop;
                 }
                 TimeLimitAction::Pause => advance_time = false,
@@ -322,11 +320,11 @@ struct EnergyDensityFieldJob {
 }
 
 fn energy_density_field_thread(
-    edf_thread_ready_barrier: Arc<Barrier>,
-    energy_field_job_queue: &ArrayQueue<EnergyDensityFieldJob>,
-    energy_field_result_queue: &ArrayQueue<Array2<f64>>,
+    edf_thread_ready: Arc<Barrier>,
+    energy_field_jobs: &ArrayQueue<EnergyDensityFieldJob>,
+    energy_field_result: &ArrayQueue<Array2<f64>>,
 ) {
-    edf_thread_ready_barrier.wait();
+    edf_thread_ready.wait();
     loop {
         if let Some(EnergyDensityFieldJob {
             positions,
@@ -335,41 +333,71 @@ fn energy_density_field_thread(
             masses,
             resolution,
             sampling_area_size,
-        }) = energy_field_job_queue.pop()
+        }) = energy_field_jobs.pop()
         {
             assert!(resolution > 1.0);
             let start = Instant::now();
-            let mut edf = Array2::<f64>::default();
             let width = (CONFIG.window.width as f64 / resolution) as usize + 1;
             let height = (CONFIG.window.height as f64 / resolution) as usize + 1;
-            edf.reset((width, height));
-            for object_index in 0..positions.len() {
-                let position = positions[object_index];
-                let velocity = velocities[object_index];
-                let radius = radii[object_index];
-                let mass = masses[object_index];
-                let topleft = position - radius;
-                let bottomright = position + radius;
-                let cell_start = topleft / resolution;
-                let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
-                let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
-                let cell_count = (bottomright - topleft) / resolution;
-                let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
-                let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
-                let energy = 0.5 * mass * velocity.magnitude_squared();
-                for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
-                    for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
-                        let cell_center_position =
-                            Vector2::new((i as f64 + 0.5) * resolution, (j as f64 + 0.5) * resolution);
-                        let distance = (position - cell_center_position).magnitude();
-                        let edf_distance = (distance / resolution) as usize;
-                        if edf_distance < sampling_area_size {
-                            edf[(i, j)] +=
-                                energy * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
-                        };
+            let mut edf = thread::scope(|scope| {
+                let mut subthreads = Vec::default();
+                for chunk in (0..positions.len())
+                    .chunks(positions.len().div_ceil(num_cpus::get()))
+                    .into_iter()
+                {
+                    let chunk = chunk.collect_vec();
+                    subthreads.push(scope.spawn(|| {
+                        let mut edf = Array2::<f64>::default();
+                        edf.reset((width, height));
+                        for object_index in chunk {
+                            let position = positions[object_index];
+                            let velocity = velocities[object_index];
+                            let radius = radii[object_index];
+                            let mass = masses[object_index];
+                            let topleft = position - radius;
+                            let bottomright = position + radius;
+                            let cell_start = topleft / resolution;
+                            let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
+                            let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
+                            let cell_count = (bottomright - topleft) / resolution;
+                            let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
+                            let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
+                            let energy = 0.5 * mass * velocity.magnitude_squared();
+                            for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
+                                for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
+                                    let cell_center_position =
+                                        Vector2::new((i as f64 + 0.5) * resolution, (j as f64 + 0.5) * resolution);
+                                    let distance = (position - cell_center_position).magnitude();
+                                    let edf_distance = (distance / resolution) as usize;
+                                    if edf_distance < sampling_area_size {
+                                        edf[(i, j)] += energy
+                                            * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
+                                    };
+                                }
+                            }
+                        }
+                        edf
+                    }));
+                }
+                let mut edf = Array2::<f64>::new((width, height));
+                let mut sub_edfs = Vec::default();
+                for subthread in subthreads {
+                    sub_edfs.push(subthread.join().unwrap());
+                }
+
+                let start = Instant::now();
+                for sub_edf in &sub_edfs {
+                    for j in 0..height {
+                        for i in 0..width {
+                            edf[(i, j)] += sub_edf[(i, j)];
+                        }
                     }
                 }
-            }
+                println!("summing sub edfs took {:.02?}", start.elapsed());
+
+                edf
+            });
+
             let mut max_energy_density = f64::MIN_POSITIVE;
             for i in 0..width {
                 for j in 0..height {
@@ -387,7 +415,7 @@ fn energy_density_field_thread(
                 }
             }
             println!("edf calculation took {:.2?}", start.elapsed());
-            energy_field_result_queue.force_push(edf);
+            energy_field_result.force_push(edf);
         }
         yield_now();
     }
@@ -395,22 +423,22 @@ fn energy_density_field_thread(
 
 fn rendering_thread(
     rendering_event_queue: &SegQueue<RenderingThreadEvent>,
-    wait_for_exit_barrier: &Arc<Barrier>,
-    rendering_start_barrier: &Arc<Barrier>,
+    ready_to_exit: &Arc<Barrier>,
+    rendering_thread_ready: &Arc<Barrier>,
     rendering_result_queue: &mpsc::Sender<()>,
     redraw_job_queue: &ArrayQueue<Scene>,
     app_event_loop_proxy: EventLoopProxy<AppEvent>,
 ) {
     let mut last_redraw = Instant::now();
     let mut rendering_data = RenderingData::default();
-    rendering_start_barrier.wait();
+    rendering_thread_ready.wait();
     // redraw_result_queue.force_push(());
     'main_loop: loop {
         while let Some(event) = rendering_event_queue.pop() {
             match event {
                 RenderingThreadEvent::Draw(data) => rendering_data = data,
                 RenderingThreadEvent::Exit => {
-                    wait_for_exit_barrier.wait();
+                    ready_to_exit.wait();
                     break 'main_loop;
                 }
             }
@@ -762,7 +790,7 @@ struct VelloApp<'s> {
     simulation_event_sender: mpsc::Sender<SimulationThreadEvent>,
     rendering_event_queue: &'s SegQueue<RenderingThreadEvent>,
     stats: Stats,
-    wait_for_exit_barrier: Arc<Barrier>,
+    ready_to_exit: Arc<Barrier>,
     gpu_compute_options: GpuComputeOptions,
     redraw_job_queue: &'s ArrayQueue<Scene>,
     redraw_result_queue: &'s ArrayQueue<()>,
@@ -833,7 +861,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::Exit)
                                 .expect("failed to send simulation thread Exit event");
                             self.rendering_event_queue.push(RenderingThreadEvent::Exit);
-                            self.wait_for_exit_barrier.wait();
+                            self.ready_to_exit.wait();
                             event_loop.exit();
                         }
                         Key::Named(NamedKey::Space) => {
@@ -958,7 +986,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             }
             AppEvent::RequestRedraw => request_redraw(self.state.as_ref()),
             AppEvent::Exit => {
-                self.wait_for_exit_barrier.wait();
+                self.ready_to_exit.wait();
                 event_loop.exit();
             }
         }
