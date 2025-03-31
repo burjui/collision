@@ -78,12 +78,10 @@ pub fn main() -> anyhow::Result<()> {
     let redraw_job_queue = &*redraw_job_queue;
     let redraw_result_queue = Box::leak(Box::new(ArrayQueue::new(1)));
     let redraw_result_queue = &*redraw_result_queue;
-    let scene_updated_barrier = Arc::new(Barrier::new(2));
     let rendering_thread = {
         let wait_for_exit_barrier = wait_for_exit_barrier.clone();
         let rendering_start_barrier = rendering_start_barrier.clone();
         let app_event_loop_proxy = event_loop.create_proxy();
-        let scene_updated_barrier = scene_updated_barrier.clone();
         thread::spawn(move || {
             rendering_thread(
                 rendering_event_queue,
@@ -92,7 +90,6 @@ pub fn main() -> anyhow::Result<()> {
                 &rendering_result_sender,
                 redraw_job_queue,
                 app_event_loop_proxy,
-                scene_updated_barrier,
             );
         })
     };
@@ -117,8 +114,6 @@ pub fn main() -> anyhow::Result<()> {
         gpu_compute_options,
         redraw_job_queue,
         redraw_result_queue,
-        scene_updated_barrier,
-        exiting: false,
     };
 
     rendering_start_barrier.wait();
@@ -405,7 +400,6 @@ fn rendering_thread(
     rendering_result_queue: &mpsc::Sender<()>,
     redraw_job_queue: &ArrayQueue<Scene>,
     app_event_loop_proxy: EventLoopProxy<AppEvent>,
-    scene_updated_barrier: Arc<Barrier>,
 ) {
     let mut last_redraw = Instant::now();
     let mut rendering_data = RenderingData::default();
@@ -439,8 +433,7 @@ fn rendering_thread(
                     );
                 }
                 redraw_job_queue.force_push(scene);
-                app_event_loop_proxy.send_event(AppEvent::RequestRedraw).unwrap();
-                scene_updated_barrier.wait();
+                let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
                 rendering_result_queue.send(()).unwrap();
             }
         }
@@ -773,8 +766,6 @@ struct VelloApp<'s> {
     gpu_compute_options: GpuComputeOptions,
     redraw_job_queue: &'s ArrayQueue<Scene>,
     redraw_result_queue: &'s ArrayQueue<()>,
-    scene_updated_barrier: Arc<Barrier>,
-    exiting: bool,
 }
 
 impl ApplicationHandler<AppEvent> for VelloApp<'_> {
@@ -831,7 +822,9 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             return;
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
                     match event.logical_key.as_ref() {
@@ -896,9 +889,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(RenderState { surface, .. }) = &self.state {
-                    if !self.exiting {
-                        self.scene_updated_barrier.wait();
-                    }
                     if let Some(scene) = self.redraw_job_queue.pop() {
                         self.simulation_scene = scene;
                     }
@@ -968,7 +958,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             }
             AppEvent::RequestRedraw => request_redraw(self.state.as_ref()),
             AppEvent::Exit => {
-                self.exiting = true;
                 self.wait_for_exit_barrier.wait();
                 event_loop.exit();
             }
