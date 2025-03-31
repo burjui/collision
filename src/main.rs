@@ -24,7 +24,10 @@ use collision::{
 };
 use crossbeam::queue::{ArrayQueue, SegQueue};
 use itertools::Itertools;
-use rayon::ThreadPoolBuilder;
+use rayon::{
+    ThreadPoolBuilder,
+    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+};
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
     kurbo::{Affine, Circle, Line, Rect, Stroke},
@@ -381,14 +384,20 @@ fn energy_density_field_thread(
             });
 
             let sum_start = Instant::now();
-            let mut edf = Array2::<f64>::new((width, height));
-            for sub_edf in sub_edfs {
-                for j in 0..height {
-                    for i in 0..width {
-                        edf[(i, j)] += sub_edf[(i, j)];
-                    }
-                }
-            }
+            let mut edf = sub_edf_threadpool.install(|| {
+                let mut edf = Array2::<f64>::new((width, height));
+                edf.data_mut()
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(i, energy_density)| {
+                        let y = i / width;
+                        let x = i % width;
+                        for sub_edf in &sub_edfs {
+                            *energy_density += sub_edf[(x, y)];
+                        }
+                    });
+                edf
+            });
             println!("summing sub edfs took {:.02?}", sum_start.elapsed());
 
             let mut max_energy_density = f64::MIN_POSITIVE;
@@ -425,7 +434,6 @@ fn rendering_thread(
     let mut last_redraw = Instant::now();
     let mut rendering_data = RenderingData::default();
     rendering_thread_ready.wait();
-    // redraw_result_queue.force_push(());
     'main_loop: loop {
         while let Some(event) = rendering_event_queue.pop() {
             match event {
