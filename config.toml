@@ -8,14 +8,14 @@ height = 800
 # speed_factor = 0.2
 # gpu_integration = true
 restitution_coefficient = 0.995
-global_gravity = [0, 1000]
+# global_gravity = [0, 1000]
 gravitational_constant = 10000
 # time_limit = 0.25
 # time_limit_action = "pause"
 
 [demo]
 object_radius = 2
-object_spacing = 0.01
+object_spacing = 2
 # enable_planets = true
 enable_brick = true
 # enable_ball = true
@@ -29,6 +29,7 @@ size = [300, 300]
 [[demo.balls]]
 position = [250, 150]
 radius = 100
+velocity = [200, 0]
 
 [rendering]
 color_source = "none"
