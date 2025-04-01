@@ -32,8 +32,8 @@ double2 gravity_acceleration(
 }
 
 kernel void leapfrog_yoshida(
-    global double2 *global_positions,
-    global double2 *global_velocities,
+    global double2 *positions,
+    global double2 *velocities,
     const uint object_count,
     const double dt,
     const double2 global_gravity,
@@ -41,22 +41,13 @@ kernel void leapfrog_yoshida(
     const uint planet_count,
     const double gravitational_constant
 ) {
-    #define WORK_SIZE 1
-    #define MAX_PLANETS 3
+    #define MAX_PLANETS 2
 
-    const uint object_index_start = get_global_id(0) * WORK_SIZE;
-    uint i;
-    uint object_index;
-    double2 positions[WORK_SIZE];
-    double2 velocities[WORK_SIZE];
+    const uint object_index = get_global_id(0);
     double2 planet_positions[MAX_PLANETS];
     double planet_masses[MAX_PLANETS];
-    for (i = 0, object_index = object_index_start; i < WORK_SIZE && object_index < object_count; ++i, ++object_index) {
-        positions[i] = global_positions[object_index];
-        velocities[i] = global_velocities[object_index];
-    }
     for (uint planet_index = 0; planet_index < planet_count; ++planet_index) {
-        planet_positions[planet_index] = global_positions[planet_index];
+        planet_positions[planet_index] = positions[planet_index];
         planet_masses[planet_index] = global_planet_masses[planet_index];
     }
     const double2 c1dt = (double2)(C1 * dt, C1 * dt);
@@ -66,26 +57,20 @@ kernel void leapfrog_yoshida(
     const double2 d1dt = (double2)(D1 * dt, D1 * dt);
     const double2 d2dt = (double2)(D2 * dt, D2 * dt);
     const double2 d3dt = (double2)(D3 * dt, D3 * dt);
-    for (i = 0, object_index = object_index_start; i < WORK_SIZE && object_index < object_count; ++i, ++object_index) {
-        const double2 x0 = positions[i];
-        const double2 v0 = velocities[i];
-        const double2 x1 = x0 + v0 * c1dt;
-        const double2 a1 = gravity_acceleration(
-            object_index, x1, global_gravity, planet_positions, planet_masses, planet_count, gravitational_constant);
-        const double2 v1 = v0 + a1 * d1dt;
-        const double2 x2 = x0 + v1 * c2dt;
-        const double2 a2 = gravity_acceleration(
-            object_index, x2, global_gravity, planet_positions, planet_masses, planet_count, gravitational_constant);
-        const double2 v2 = v0 + a2 * d2dt;
-        const double2 x3 = x0 + v2 * c3dt;
-        const double2 a3 = gravity_acceleration(
-            object_index, x3, global_gravity, planet_positions, planet_masses, planet_count, gravitational_constant);
-        const double2 v3 = v0 + a3 * d3dt;
-        positions[i] = x0 + v3 * c4dt;
-        velocities[i] = v3;
-    }
-    for (i = 0, object_index = object_index_start; i < WORK_SIZE && object_index < object_count; ++i, ++object_index) {
-        global_positions[object_index] = positions[i];
-        global_velocities[object_index] = velocities[i];
-    }
+    const double2 x0 = positions[object_index];
+    const double2 v0 = velocities[object_index];
+    const double2 x1 = x0 + v0 * c1dt;
+    const double2 a1 = gravity_acceleration(
+        object_index, x1, global_gravity, planet_positions, planet_masses, planet_count, gravitational_constant);
+    const double2 v1 = v0 + a1 * d1dt;
+    const double2 x2 = x0 + v1 * c2dt;
+    const double2 a2 = gravity_acceleration(
+        object_index, x2, global_gravity, planet_positions, planet_masses, planet_count, gravitational_constant);
+    const double2 v2 = v0 + a2 * d2dt;
+    const double2 x3 = x0 + v2 * c3dt;
+    const double2 a3 = gravity_acceleration(
+        object_index, x3, global_gravity, planet_positions, planet_masses, planet_count, gravitational_constant);
+    const double2 v3 = v0 + a3 * d3dt;
+    positions[object_index] = x0 + v3 * c4dt;
+    velocities[object_index] = v3;
 }
