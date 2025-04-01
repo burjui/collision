@@ -166,12 +166,6 @@ pub struct DemoConfig {
     pub enable_planets: bool,
 
     #[serde(default)]
-    pub enable_brick: bool,
-
-    #[serde(default)]
-    pub enable_ball: bool,
-
-    #[serde(default)]
     pub randomize_positions: bool,
     #[serde(default)]
     pub randomize_position_factor: f64,
