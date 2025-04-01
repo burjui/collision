@@ -28,7 +28,7 @@ use crossbeam::queue::{ArrayQueue, SegQueue};
 use itertools::Itertools;
 use rayon::{
     ThreadPoolBuilder,
-    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
@@ -336,6 +336,11 @@ fn energy_density_field_thread(
         .num_threads(sub_edf_thread_count)
         .build()
         .unwrap();
+    let mut sub_edfs = Vec::with_capacity(sub_edf_thread_count);
+    for _ in 0..sub_edf_thread_count {
+        sub_edfs.push(Mutex::new(Array2::<f64>::default()));
+    }
+    let mut edf = Array2::<f64>::default();
     loop {
         if let Some(EnergyDensityFieldJob {
             positions,
@@ -351,8 +356,9 @@ fn energy_density_field_thread(
             let width = (CONFIG.window.width as f64 / cell_size) as usize + 1;
             let height = (CONFIG.window.height as f64 / cell_size) as usize + 1;
             let chunk_size = positions.len().div_ceil(sub_edf_thread_count);
-            let sub_edfs = sub_edf_threadpool.broadcast(|context| {
-                let mut edf = Array2::<f64>::default();
+            sub_edf_threadpool.broadcast(|context| {
+                let mut edf_guard = sub_edfs[context.index()].lock().unwrap();
+                let edf = &mut *edf_guard;
                 edf.reset((width, height));
                 let chunk_offset = context.index() * chunk_size;
                 for object_index in chunk_offset..(chunk_offset + chunk_size).min(positions.len()) {
@@ -382,44 +388,38 @@ fn energy_density_field_thread(
                         }
                     }
                 }
-                edf
             });
 
             let sum_start = Instant::now();
-            let mut edf = sub_edf_threadpool.install(|| {
-                let mut edf = Array2::<f64>::new((width, height));
+            let sub_edf_guards = sub_edfs.iter().map(|mutex| mutex.lock().unwrap()).collect_vec();
+            let sub_edfs = sub_edf_guards.iter().map(|guard| guard.data()).collect_vec();
+            edf.reset((width, height));
+            sub_edf_threadpool.install(|| {
                 edf.data_mut()
                     .par_iter_mut()
                     .enumerate()
                     .for_each(|(i, energy_density)| {
-                        let y = i / width;
-                        let x = i % width;
                         for sub_edf in &sub_edfs {
-                            *energy_density += sub_edf[(x, y)];
+                            *energy_density += sub_edf[i];
                         }
                     });
-                edf
             });
             println!("summing sub edfs took {:.02?}", sum_start.elapsed());
 
-            let mut max_energy_density = f64::MIN_POSITIVE;
-            for i in 0..width {
-                for j in 0..height {
-                    max_energy_density = edf[(i, j)].max(max_energy_density);
-                }
-            }
-            for i in 0..width {
-                for j in 0..height {
-                    let energy_density = edf[(i, j)];
-                    edf[(i, j)] = if max_energy_density > 0.0 {
-                        energy_density / max_energy_density.max(f64::MIN_POSITIVE)
+            let max_energy_density =
+                sub_edf_threadpool.install(|| edf.data().par_iter().copied().max_by(|a, b| a.total_cmp(&b)).unwrap());
+            sub_edf_threadpool.install(|| {
+                edf.data_mut().par_iter_mut().for_each(|energy_density| {
+                    *energy_density = if max_energy_density > 0.0 {
+                        *energy_density / max_energy_density.max(f64::MIN_POSITIVE)
                     } else {
                         0.0
-                    };
-                }
-            }
+                    }
+                });
+            });
+
             println!("edf calculation took {:.2?}", start.elapsed());
-            energy_field_result.force_push(edf);
+            energy_field_result.force_push(edf.clone());
         }
         yield_now();
     }
