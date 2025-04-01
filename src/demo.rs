@@ -36,55 +36,13 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
     }
 
     for brick in &CONFIG.demo.bricks {
-        let particle_radius = if brick.particle_radius > 0.0 {
-            brick.particle_radius
-        } else {
-            CONFIG.demo.object_radius
-        };
-        let particle_spacing = if brick.particle_spacing >= 0.0 {
-            brick.particle_spacing
-        } else {
-            CONFIG.demo.object_spacing
-        };
-        generate_brick(
-            physics,
-            &Brick {
-                position: brick.position,
-                size: brick.size,
-                velocity: brick.velocity,
-                particle_radius,
-                particle_spacing,
-                particle_mass: brick.particle_mass,
-            },
-        );
+        generate_brick(physics, brick);
     }
 
     for ball in &CONFIG.demo.balls {
-        let particle_radius = if ball.particle_radius > 0.0 {
-            ball.particle_radius
-        } else {
-            CONFIG.demo.object_radius
-        };
-        let particle_spacing = if ball.particle_spacing >= 0.0 {
-            ball.particle_spacing
-        } else {
-            CONFIG.demo.object_spacing
-        };
-        let ball = Ball {
-            position: ball.position,
-            radius: ball.radius,
-            velocity: ball.velocity,
-            particle_radius,
-            particle_spacing,
-            particle_mass: ball.particle_mass,
-        };
-        generate_ball(physics, &ball);
+        generate_ball(physics, ball);
     }
 }
-
-const DEFAULT_PARTICLE_RADIUS: f64 = 2.0;
-const DEFAULT_PARTICLE_SPACING: f64 = 2.0;
-const DEFAULT_PARTICLE_MASS: f64 = 1.0;
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
@@ -95,24 +53,10 @@ pub struct Brick {
     pub velocity: Vector2<f64>,
     #[serde(default)]
     pub particle_radius: f64,
-    #[serde(default = "default_spacing")]
+    #[serde(default)]
     pub particle_spacing: f64,
     #[serde(default)]
     pub particle_mass: f64,
-}
-
-impl Brick {
-    #[must_use]
-    pub fn new(position: Vector2<f64>, size: Vector2<f64>) -> Self {
-        Self {
-            position,
-            size,
-            velocity: Vector2::new(0.0, 0.0),
-            particle_radius: DEFAULT_PARTICLE_RADIUS,
-            particle_spacing: DEFAULT_PARTICLE_SPACING,
-            particle_mass: DEFAULT_PARTICLE_MASS,
-        }
-    }
 }
 
 pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> {
@@ -162,24 +106,10 @@ pub struct Ball {
     pub velocity: Vector2<f64>,
     #[serde(default)]
     pub particle_radius: f64,
-    #[serde(default = "default_spacing")]
+    #[serde(default)]
     pub particle_spacing: f64,
     #[serde(default)]
     pub particle_mass: f64,
-}
-
-impl Ball {
-    #[must_use]
-    pub fn new(position: Vector2<f64>, radius: f64) -> Self {
-        Self {
-            position,
-            radius,
-            velocity: Vector2::new(0.0, 0.0),
-            particle_radius: DEFAULT_PARTICLE_RADIUS,
-            particle_spacing: DEFAULT_PARTICLE_SPACING,
-            particle_mass: DEFAULT_PARTICLE_MASS,
-        }
-    }
 }
 
 pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
@@ -219,8 +149,4 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
         }
     }
     result
-}
-
-fn default_spacing() -> f64 {
-    -1.0
 }
