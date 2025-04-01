@@ -1,13 +1,13 @@
 #[derive(Default)]
 pub struct Array2<T> {
-    data: Box<[T]>,
+    data: Vec<T>,
     size: (usize, usize),
 }
 
 impl<T: Default + Copy> Array2<T> {
     pub fn new(size: (usize, usize)) -> Self {
         Self {
-            data: vec![T::default(); size.0 * size.1].into_boxed_slice(),
+            data: vec![T::default(); size.0 * size.1],
             size,
         }
     }
@@ -19,7 +19,8 @@ impl<T: Default + Copy> Array2<T> {
 
     pub fn reset(&mut self, size: (usize, usize)) {
         if size.0 > self.size.0 || size.1 > self.size.1 {
-            self.data = vec![T::default(); size.0 * size.1].into_boxed_slice();
+            self.data.clear();
+            self.data.resize(size.0 * size.1, T::default());
         } else {
             self.data.fill(T::default());
         }
