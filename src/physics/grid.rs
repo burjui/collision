@@ -2,7 +2,7 @@ use std::{iter::zip, ops::Range};
 
 use rdst::{RadixKey, RadixSort};
 
-use super::object::ObjectSoa;
+use super::{bvh::morton_code, object::ObjectSoa};
 use crate::{array2::Array2, vector2::Vector2};
 
 #[derive(Clone)]
@@ -37,7 +37,7 @@ impl Grid {
                 self.cell_records[object_index] = CellRecord {
                     object_index,
                     cell_coords: (x, y),
-                    radix_key: (x + y * self.size.x).try_into().unwrap(),
+                    radix_key: morton_code(x as u32, y as u32),
                 }
             }
             self.cell_records.radix_sort_unstable();

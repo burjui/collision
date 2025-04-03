@@ -1,10 +1,12 @@
-use core::f64;
+use core::{f64, fmt};
 use std::{
+    collections::HashSet,
     iter::zip,
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
+use bvh::Bvh;
 use grid::{CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
@@ -16,13 +18,17 @@ use crate::{
     vector2::Vector2,
 };
 
+pub mod bvh;
 pub mod grid;
 pub mod object;
 
 pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
+    pub broad_phase: BroadPhase,
     objects: ObjectSoa,
     grid: Grid,
+    bvh: Bvh,
+    collisions: HashSet<(usize, usize)>,
     time: f64,
     constraints: ConstraintBox,
     stats: Stats,
@@ -35,7 +41,6 @@ pub struct PhysicsEngine {
     integration_gpu_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
     gpu_planet_masses: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
-    collision_pairs: Vec<CollisionPair>,
 }
 
 impl PhysicsEngine {
@@ -49,8 +54,11 @@ impl PhysicsEngine {
             Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
         Ok(Self {
             enable_constraint_bouncing: true,
+            broad_phase: BroadPhase::Grid,
             objects: ObjectSoa::default(),
             grid: Grid::default(),
+            bvh: Bvh::default(),
+            collisions: HashSet::default(),
             time: 0.0,
             constraints,
             stats: Stats::default(),
@@ -63,7 +71,6 @@ impl PhysicsEngine {
             integration_gpu_planet_mass_buffer: None,
             gpu_planet_masses: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
-            collision_pairs: Vec::default(),
         })
     }
 
@@ -159,9 +166,31 @@ impl PhysicsEngine {
         self.integrate(dt, gpu_compute_options);
         self.stats.integration_duration.update(start.elapsed());
 
-        let start = Instant::now();
-        self.grid.update(&self.objects);
-        self.stats.grid_duration.update(start.elapsed());
+        if matches!(self.broad_phase, BroadPhase::Grid) {
+            let start = Instant::now();
+            self.grid.update(&self.objects);
+            self.stats.grid_duration.update(start.elapsed());
+        } else {
+            self.stats.grid_duration.update(Duration::ZERO);
+        }
+
+        if matches!(self.broad_phase, BroadPhase::Bvh) {
+            let start = Instant::now();
+            self.bvh = Bvh::new(&self.objects.positions, &self.objects.radii);
+            let collisions_start = Instant::now();
+            self.collisions.clear();
+            for object_index in 0..self.objects.len() {
+                self.bvh.find_intersections(object_index, &mut self.collisions);
+            }
+            println!(
+                "BVH found {} collisions in {:?}",
+                self.collisions.len(),
+                collisions_start.elapsed()
+            );
+            self.stats.bvh_duration.update(start.elapsed());
+        } else {
+            self.stats.bvh_duration.update(Duration::ZERO);
+        }
 
         let start = Instant::now();
         self.process_collisions();
@@ -344,6 +373,13 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
+        match self.broad_phase {
+            BroadPhase::Grid => self.process_collisions_grid(),
+            BroadPhase::Bvh => self.process_collisions_bvh(),
+        }
+    }
+
+    fn process_collisions_grid(&mut self) {
         const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
             // // Objects in the same cell are the closest
             (0, 0),
@@ -353,7 +389,6 @@ impl PhysicsEngine {
             (-1, 1),
             (1, 1),
         ];
-        self.collision_pairs.clear();
         for range in self.grid.cell_iter() {
             for &CellRecord {
                 object_index: object1_index,
@@ -401,6 +436,32 @@ impl PhysicsEngine {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    fn process_collisions_bvh(&mut self) {
+        for &(object1_index, object2_index) in &self.collisions {
+            let object1_position = self.objects.positions[object1_index];
+            let object2_position = self.objects.positions[object2_index];
+            let object1_radius = self.objects.radii[object1_index];
+            let object2_radius = self.objects.radii[object2_index];
+            let distance_squared = (object1_position - object2_position).magnitude_squared();
+            let collision_distance = object1_radius + object2_radius;
+            if distance_squared < collision_distance * collision_distance {
+                Self::process_object_collision(
+                    CollisionPair {
+                        object1_index,
+                        object2_index,
+                        distance_squared,
+                        collision_distance,
+                    },
+                    self.restitution_coefficient,
+                    &mut self.objects.positions,
+                    &mut self.objects.velocities,
+                    &self.objects.masses,
+                    &self.objects.is_planet,
+                );
             }
         }
     }
@@ -506,6 +567,21 @@ impl PhysicsEngine {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum BroadPhase {
+    Grid,
+    Bvh,
+}
+
+impl fmt::Display for BroadPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            BroadPhase::Grid => "grid",
+            BroadPhase::Bvh => "bvh",
+        })
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GpuComputeOptions {
     pub integration: bool,
@@ -566,6 +642,7 @@ pub struct Stats {
     pub object_count: usize,
     pub integration_duration: DurationStat,
     pub grid_duration: DurationStat,
+    pub bvh_duration: DurationStat,
     pub collisions_duration: DurationStat,
     pub constraints_duration: DurationStat,
     pub total_duration: DurationStat,
