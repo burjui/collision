@@ -6,7 +6,6 @@
 use std::{
     fmt::{self, Debug, Write as _},
     iter::zip,
-    mem::take,
     num::NonZero,
     ops::{Add, Range},
     sync::{Arc, Barrier, Mutex, mpsc},
@@ -20,7 +19,7 @@ use collision::{
     array2::Array2,
     demo::create_demo,
     fps::FpsCalculator,
-    physics::{ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
+    physics::{BroadPhase, ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
 };
@@ -116,6 +115,7 @@ pub fn main() -> anyhow::Result<()> {
         simulation_event_sender,
         rendering_event_queue,
         stats: Stats::default(),
+        broad_phase: BroadPhase::Grid,
         ready_to_exit,
         gpu_compute_options,
         redraw_job_queue,
@@ -133,6 +133,7 @@ pub fn main() -> anyhow::Result<()> {
         &mut stats_buffer,
         (app.last_fps, app.min_fps),
         physics.stats(),
+        physics.broad_phase,
         app.gpu_compute_options,
     )?;
     print!("{stats_buffer}");
@@ -198,9 +199,9 @@ fn simulation_thread(
     let mut first_redraw = true;
     let mut edf = Array2::default();
     'main_loop: loop {
-        fn send_app_event(event_loop_proxy: &EventLoopProxy<AppEvent>, mut event: AppEvent) {
+        fn send_app_event(event_loop_proxy: &EventLoopProxy<AppEvent>, event: AppEvent) {
             let _ = event_loop_proxy
-                .send_event(event.take())
+                .send_event(event.clone())
                 .map_err(|e| eprintln!("Failed to send event {event:?}: {}", &e));
         }
 
@@ -225,6 +226,14 @@ fn simulation_thread(
                 }
                 SimulationThreadEvent::ToggleDrawEdf => {
                     show_edf = !show_edf;
+                    redraw_needed = true;
+                }
+                SimulationThreadEvent::ToggleBroadPhase => {
+                    physics.broad_phase = match physics.broad_phase {
+                        BroadPhase::Grid => BroadPhase::Bvh,
+                        BroadPhase::Bvh => BroadPhase::Grid,
+                    };
+                    send_app_event(app_event_loop_proxy, AppEvent::BroadPhaseUpdated(physics.broad_phase));
                     redraw_needed = true;
                 }
                 SimulationThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
@@ -675,12 +684,13 @@ fn draw_stats(
     text: &mut SimpleText,
     (fps, min_fps): (usize, usize),
     stats: &Stats,
+    broad_phase: BroadPhase,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
     const TEXT_SIZE: f32 = 16.0;
 
     let buffer = &mut String::new();
-    write_stats(buffer, (fps, min_fps), stats, gpu_compute_options)?;
+    write_stats(buffer, (fps, min_fps), stats, broad_phase, gpu_compute_options)?;
     text.add(
         scene,
         TEXT_SIZE,
@@ -693,20 +703,12 @@ fn draw_stats(
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
 enum AppEvent {
     StatsUpdated(Stats),
+    BroadPhaseUpdated(BroadPhase),
     RequestRedraw,
     Exit,
-}
-
-impl AppEvent {
-    fn take(&mut self) -> AppEvent {
-        match self {
-            Self::StatsUpdated(stats) => AppEvent::StatsUpdated(take(stats)),
-            Self::RequestRedraw => AppEvent::RequestRedraw,
-            Self::Exit => AppEvent::Exit,
-        }
-    }
 }
 
 impl Debug for AppEvent {
@@ -714,6 +716,7 @@ impl Debug for AppEvent {
         write!(f, "AppEvent::")?;
         match self {
             Self::StatsUpdated(_) => write!(f, "StatsUpdated(...)"),
+            Self::BroadPhaseUpdated(bp) => write!(f, "BroadPhaseUpdated({bp})"),
             Self::RequestRedraw => f.write_str("RedrawRequest"),
             Self::Exit => f.write_str("Exit"),
         }
@@ -726,6 +729,7 @@ enum SimulationThreadEvent {
     ToggleAdvanceTime,
     ToggleDrawIds,
     ToggleDrawGrid,
+    ToggleBroadPhase,
     SetColorSource(ColorSource),
     SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
@@ -788,6 +792,7 @@ struct VelloApp<'s> {
     simulation_event_sender: mpsc::Sender<SimulationThreadEvent>,
     rendering_event_queue: &'s SegQueue<RenderingThreadEvent>,
     stats: Stats,
+    broad_phase: BroadPhase,
     ready_to_exit: Arc<Barrier>,
     gpu_compute_options: GpuComputeOptions,
     redraw_job_queue: &'s ArrayQueue<Scene>,
@@ -882,6 +887,11 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::ToggleDrawIds)
                                 .unwrap();
                         }
+                        Key::Character("p") => {
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::ToggleBroadPhase)
+                                .unwrap();
+                        }
                         Key::Character("c") => {
                             self.simulation_event_sender
                                 .send(SimulationThreadEvent::SetColorSource(ColorSource::Demo))
@@ -942,6 +952,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         &mut self.text,
                         (self.last_fps, self.min_fps),
                         &self.stats,
+                        self.broad_phase,
                         self.gpu_compute_options,
                     )
                     .expect("failed to draw stats");
@@ -987,6 +998,10 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 self.stats = stats;
                 request_redraw(self.state.as_ref());
             }
+            AppEvent::BroadPhaseUpdated(bp) => {
+                self.broad_phase = bp;
+                request_redraw(self.state.as_ref());
+            }
             AppEvent::RequestRedraw => request_redraw(self.state.as_ref()),
             AppEvent::Exit => {
                 self.ready_to_exit.wait();
@@ -1019,11 +1034,21 @@ fn request_redraw(render_state: Option<&RenderState<'_>>) {
 fn write_stats(
     buffer: &mut String,
     (fps, min_fps): (usize, usize),
-    stats: &Stats,
+    Stats {
+        sim_time,
+        object_count,
+        integration_duration,
+        grid_duration,
+        bvh_duration,
+        collisions_duration,
+        constraints_duration,
+        total_duration: _,
+    }: &Stats,
+    broad_phase: BroadPhase,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
     writeln!(buffer, "FPS: {fps} (min {min_fps})")?;
-    write!(buffer, "sim time: {}", stats.sim_time)?;
+    write!(buffer, "sim time: {}", sim_time)?;
     if let Some(time_limit) = CONFIG.simulation.time_limit {
         let action = CONFIG.simulation.time_limit_action.to_string();
         write!(buffer, " ({action} at {time_limit})")?;
@@ -1038,11 +1063,12 @@ fn write_stats(
             "off"
         }
     )?;
-    writeln!(buffer, "objects: {}", stats.object_count)?;
-    write_duration_stat(buffer, "integration", &stats.integration_duration)?;
-    write_duration_stat(buffer, "collisions", &stats.collisions_duration)?;
-    write_duration_stat(buffer, "grid", &stats.grid_duration)?;
-    write_duration_stat(buffer, "constraints", &stats.constraints_duration)?;
+    writeln!(buffer, "objects: {}", object_count)?;
+    write_duration_stat(buffer, "integration", &integration_duration)?;
+    write_duration_stat(buffer, &format!("collisions ({})", broad_phase), &collisions_duration)?;
+    write_duration_stat(buffer, "grid", &grid_duration)?;
+    write_duration_stat(buffer, "bvh", &bvh_duration)?;
+    write_duration_stat(buffer, "constraints", &constraints_duration)?;
     Ok(())
 }
 
