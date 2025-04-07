@@ -1,7 +1,7 @@
 use core::{f64, fmt};
 use std::{
-    collections::HashSet,
     iter::zip,
+    mem::swap,
     time::{Duration, Instant},
 };
 
@@ -28,7 +28,7 @@ pub struct PhysicsEngine {
     objects: ObjectSoa,
     grid: Grid,
     bvh: Bvh,
-    collisions: HashSet<(usize, usize)>,
+    collision_candidates: Vec<(usize, usize)>,
     time: f64,
     constraints: ConstraintBox,
     stats: Stats,
@@ -58,7 +58,7 @@ impl PhysicsEngine {
             objects: ObjectSoa::default(),
             grid: Grid::default(),
             bvh: Bvh::default(),
-            collisions: HashSet::default(),
+            collision_candidates: Vec::default(),
             time: 0.0,
             constraints,
             stats: Stats::default(),
@@ -90,6 +90,11 @@ impl PhysicsEngine {
     #[must_use]
     pub fn stats(&self) -> &Stats {
         &self.stats
+    }
+
+    #[must_use]
+    pub fn stats_mut(&mut self) -> &mut Stats {
+        &mut self.stats
     }
 
     #[must_use]
@@ -177,16 +182,6 @@ impl PhysicsEngine {
         if matches!(self.broad_phase, BroadPhase::Bvh) {
             let start = Instant::now();
             self.bvh = Bvh::new(&self.objects.positions, &self.objects.radii);
-            let collisions_start = Instant::now();
-            self.collisions.clear();
-            for object_index in 0..self.objects.len() {
-                self.bvh.find_intersections(object_index, &mut self.collisions);
-            }
-            println!(
-                "BVH found {} collisions in {:?}",
-                self.collisions.len(),
-                collisions_start.elapsed()
-            );
             self.stats.bvh_duration.update(start.elapsed());
         } else {
             self.stats.bvh_duration.update(Duration::ZERO);
@@ -373,13 +368,15 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
+        self.collision_candidates.clear();
         match self.broad_phase {
-            BroadPhase::Grid => self.process_collisions_grid(),
-            BroadPhase::Bvh => self.process_collisions_bvh(),
+            BroadPhase::Grid => self.find_collision_candidates_grid(),
+            BroadPhase::Bvh => self.find_collision_candidates_bvh(),
         }
+        self.process_collision_candidates();
     }
 
-    fn process_collisions_grid(&mut self) {
+    fn find_collision_candidates_grid(&mut self) {
         const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
             // // Objects in the same cell are the closest
             (0, 0),
@@ -409,27 +406,7 @@ impl PhysicsEngine {
                                 } in &self.grid.cell_records[start..end]
                                 {
                                     if object1_index != object2_index {
-                                        let collision_distance =
-                                            self.objects.radii[object1_index] + self.objects.radii[object2_index];
-                                        let from_1_to_2 = self.objects.positions[object1_index]
-                                            - self.objects.positions[object2_index];
-                                        let distance_squared = from_1_to_2.magnitude_squared();
-                                        if distance_squared <= collision_distance * collision_distance {
-                                            let collision_pair = CollisionPair {
-                                                object1_index,
-                                                object2_index,
-                                                distance_squared,
-                                                collision_distance,
-                                            };
-                                            Self::process_object_collision(
-                                                collision_pair,
-                                                self.restitution_coefficient,
-                                                &mut self.objects.positions,
-                                                &mut self.objects.velocities,
-                                                &self.objects.masses,
-                                                &self.objects.is_planet,
-                                            );
-                                        }
+                                        self.collision_candidates.push((object1_index, object2_index));
                                     }
                                 }
                             }
@@ -440,8 +417,24 @@ impl PhysicsEngine {
         }
     }
 
-    fn process_collisions_bvh(&mut self) {
-        for &(object1_index, object2_index) in &self.collisions {
+    fn find_collision_candidates_bvh(&mut self) {
+        for object_index in 0..self.objects.len() {
+            self.bvh
+                .find_intersections(object_index, &mut self.collision_candidates);
+        }
+    }
+
+    fn process_collision_candidates(&mut self) {
+        self.collision_candidates.retain(|(a, b)| a != b);
+        for (a, b) in &mut self.collision_candidates {
+            if *a > *b {
+                swap(a, b);
+            }
+        }
+        self.collision_candidates
+            .sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        self.collision_candidates.dedup();
+        for &(object1_index, object2_index) in &self.collision_candidates {
             let object1_position = self.objects.positions[object1_index];
             let object2_position = self.objects.positions[object2_index];
             let object1_radius = self.objects.radii[object1_index];

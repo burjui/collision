@@ -29,7 +29,7 @@ impl<const N: usize, T: Default + Copy> Default for RingBuffer<N, T> {
     fn default() -> Self {
         Self {
             data: [T::default(); N],
-            front: 7,
+            front: 0,
             length: 0,
         }
     }

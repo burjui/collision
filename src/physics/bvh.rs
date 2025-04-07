@@ -39,11 +39,11 @@ impl Bvh {
         bvh
     }
 
-    pub fn find_intersections(&self, object_index: usize, collisions: &mut HashSet<(usize, usize)>) {
+    pub fn find_intersections(&self, object_index: usize, collisions: &mut Vec<(usize, usize)>) {
         self.find_intersections_with(object_index, NodeId(0), collisions);
     }
 
-    fn find_intersections_with(&self, object_index: usize, node_id: NodeId, collisions: &mut HashSet<(usize, usize)>) {
+    fn find_intersections_with(&self, object_index: usize, node_id: NodeId, collisions: &mut Vec<(usize, usize)>) {
         let object_aabb = self.object_aabbs[object_index];
         match self.nodes.get(node_id.0) {
             Some(Node { aabb, kind }) => {
@@ -51,11 +51,7 @@ impl Bvh {
                     match kind {
                         &NodeKind::Leaf(other_object_index) => {
                             if other_object_index != object_index {
-                                let mut pair = (object_index, other_object_index);
-                                if pair.0 > pair.1 {
-                                    swap(&mut pair.0, &mut pair.1);
-                                }
-                                collisions.insert(pair);
+                                collisions.push((object_index, other_object_index));
                             }
                         }
                         &NodeKind::Tree { left, right } => {
@@ -107,15 +103,6 @@ impl Bvh {
         NodeId(id)
     }
 }
-
-// impl Default for Bvh {
-// fn default() -> Self {
-// Self {
-// object_aabbs: Vec::default(),
-// nodes: Vec::default(),
-// }
-// }
-// }
 
 pub fn morton_code(x: u32, y: u32) -> u32 {
     expand_bits(x as u32) | (expand_bits(y as u32) << 1)

@@ -12,6 +12,7 @@ pub struct ObjectSoa {
     pub masses: Vec<f64>,
     pub colors: Vec<Option<Color>>,
     pub is_planet: Vec<bool>,
+    pub morton_codes: Vec<u32>,
     pub planet_count: usize,
 }
 

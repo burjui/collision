@@ -228,11 +228,18 @@ fn simulation_thread(
                     show_edf = !show_edf;
                     redraw_needed = true;
                 }
-                SimulationThreadEvent::ToggleBroadPhase => {
+                SimulationThreadEvent::CycleBroadPhase => {
                     physics.broad_phase = match physics.broad_phase {
-                        BroadPhase::Grid => BroadPhase::Bvh,
-                        BroadPhase::Bvh => BroadPhase::Grid,
+                        BroadPhase::Grid => {
+                            physics.stats_mut().bvh_duration = DurationStat::default();
+                            BroadPhase::Bvh
+                        }
+                        BroadPhase::Bvh => {
+                            physics.stats_mut().grid_duration = DurationStat::default();
+                            BroadPhase::Grid
+                        }
                     };
+                    physics.stats_mut().collisions_duration = DurationStat::default();
                     send_app_event(app_event_loop_proxy, AppEvent::BroadPhaseUpdated(physics.broad_phase));
                     redraw_needed = true;
                 }
@@ -729,7 +736,7 @@ enum SimulationThreadEvent {
     ToggleAdvanceTime,
     ToggleDrawIds,
     ToggleDrawGrid,
-    ToggleBroadPhase,
+    CycleBroadPhase,
     SetColorSource(ColorSource),
     SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
@@ -889,7 +896,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         }
                         Key::Character("p") => {
                             self.simulation_event_sender
-                                .send(SimulationThreadEvent::ToggleBroadPhase)
+                                .send(SimulationThreadEvent::CycleBroadPhase)
                                 .unwrap();
                         }
                         Key::Character("c") => {

@@ -6,25 +6,23 @@ height = 800
 # auto_start = true
 # dt = { fixed = 0.0001 }
 # speed_factor = 0.2
-gpu_integration = true
+# gpu_integration = true
 restitution_coefficient = 0.995
-# global_gravity = [0, 1000]
+global_gravity = [0, 1000]
 gravitational_constant = 10000
-# time_limit = 0.25
+# time_limit = 0.2
 # time_limit_action = "pause"
 
 [demo]
 object_radius = 1
-enable_planets = true
-enable_brick = true
-# enable_ball = true
+# enable_planets = true
 randomize_positions = true
 randomize_position_factor = 1
 
 [[demo.bricks]]
-position = [300, 300]
-size = [400, 100]
-velocity = [1000, 0]
+position = [300, 100]
+size = [600, 300]
+# velocity = [1, 0]
 particle_radius = 1
 particle_spacing = 0.01
 particle_mass = 0.1
