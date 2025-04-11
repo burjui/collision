@@ -347,16 +347,9 @@ fn energy_density_field_thread(
     energy_field_result: &ArrayQueue<Array2<f64>>,
 ) {
     edf_thread_ready.wait();
-    let sub_edf_thread_count = num_cpus::get();
-    let sub_edf_threadpool = ThreadPoolBuilder::new()
-        .num_threads(sub_edf_thread_count)
-        .build()
-        .unwrap();
-    let mut sub_edfs = Vec::with_capacity(sub_edf_thread_count);
-    for _ in 0..sub_edf_thread_count {
-        sub_edfs.push(Mutex::new(Array2::<f64>::default()));
-    }
     let mut edf = Array2::<f64>::default();
+    let mut edf_avg = Array2::<f64>::default();
+    let thread_pool = ThreadPoolBuilder::new().num_threads(num_cpus::get()).build().unwrap();
     loop {
         if let Some(EnergyDensityFieldJob {
             positions,
@@ -371,71 +364,69 @@ fn energy_density_field_thread(
             let start = Instant::now();
             let width = (CONFIG.window.width as f64 / cell_size) as usize + 1;
             let height = (CONFIG.window.height as f64 / cell_size) as usize + 1;
-            let chunk_size = positions.len().div_ceil(sub_edf_thread_count);
-            sub_edf_threadpool.broadcast(|context| {
-                let mut edf_guard = sub_edfs[context.index()].lock().unwrap();
-                let edf = &mut *edf_guard;
-                edf.reset((width, height));
-                let chunk_offset = context.index() * chunk_size;
-                for object_index in chunk_offset..(chunk_offset + chunk_size).min(positions.len()) {
-                    let position = positions[object_index];
-                    let velocity = velocities[object_index];
-                    let radius = radii[object_index];
-                    let mass = masses[object_index];
-                    let topleft = position - radius;
-                    let bottomright = position + radius;
-                    let cell_start = topleft / cell_size;
-                    let start_i = (cell_start.x as usize).saturating_sub(sampling_area_size);
-                    let start_j = (cell_start.y as usize).saturating_sub(sampling_area_size);
-                    let cell_count = (bottomright - topleft) / cell_size;
-                    let cell_count_x = cell_count.x.ceil() as usize + sampling_area_size * 2 + 1;
-                    let cell_count_y = cell_count.y.ceil() as usize + sampling_area_size * 2 + 1;
-                    let energy = 0.5 * mass * velocity.magnitude_squared();
-                    for i in start_i..(start_i + cell_count_x).min(width.saturating_sub(1)) {
-                        for j in start_j..(start_j + cell_count_y).min(height.saturating_sub(1)) {
-                            let cell_center_position =
-                                Vector2::new((i as f64 + 0.5) * cell_size, (j as f64 + 0.5) * cell_size);
-                            let distance = (position - cell_center_position).magnitude();
-                            let edf_distance = (distance / cell_size) as usize;
-                            if edf_distance < sampling_area_size {
-                                edf[(i, j)] +=
-                                    energy * ((sampling_area_size - edf_distance) as f64 / sampling_area_size as f64);
-                            };
-                        }
-                    }
-                }
-            });
-
-            let sum_start = Instant::now();
-            let sub_edf_guards = sub_edfs.iter().map(|mutex| mutex.lock().unwrap()).collect_vec();
-            let sub_edfs = sub_edf_guards.iter().map(|guard| guard.data()).collect_vec();
             edf.reset((width, height));
-            sub_edf_threadpool.install(|| {
-                edf.data_mut()
-                    .par_iter_mut()
-                    .enumerate()
-                    .for_each(|(i, energy_density)| {
-                        for sub_edf in &sub_edfs {
-                            *energy_density += sub_edf[i];
-                        }
-                    });
-            });
-            println!("summing sub edfs took {:.02?}", sum_start.elapsed());
+            for object_index in 0..positions.len() {
+                let position = positions[object_index];
+                let edf_position = position / cell_size;
+                let velocity = velocities[object_index];
+                let radius = radii[object_index];
+                let mass = masses[object_index];
+                let energy_contribution = radius * 0.5 * mass * velocity.magnitude_squared();
+                edf[(edf_position.x as usize, edf_position.y as usize)] += energy_contribution;
+            }
+            let mut sat = edf.clone(); // summed-area table
+            for y in 0..height {
+                for x in 0..width {
+                    let x_minus_1 = x.checked_sub(1);
+                    let y_minus_1 = y.checked_sub(1);
+                    sat[(x, y)] = edf[(x, y)]
+                        + y_minus_1.map(|y| sat[(x, y)]).unwrap_or(0.0)
+                        + x_minus_1.map(|x| sat[(x, y)]).unwrap_or(0.0)
+                        - x_minus_1.and_then(|x| y_minus_1.map(|y| sat[(x, y)])).unwrap_or(0.0);
+                }
+            }
 
-            let max_energy_density =
-                sub_edf_threadpool.install(|| edf.data().par_iter().copied().max_by(|a, b| a.total_cmp(&b)).unwrap());
-            sub_edf_threadpool.install(|| {
-                edf.data_mut().par_iter_mut().for_each(|energy_density| {
-                    *energy_density = if max_energy_density > 0.0 {
-                        *energy_density / max_energy_density.max(f64::MIN_POSITIVE)
-                    } else {
-                        0.0
+            edf.reset((width, height));
+            for y in 0..height {
+                for x in 0..width {
+                    let x1 = x.saturating_sub(sampling_area_size);
+                    let x2 = x.saturating_add(sampling_area_size).min(width - 1);
+                    let y1 = y.saturating_sub(sampling_area_size);
+                    let y2 = y.saturating_add(sampling_area_size).min(height - 1);
+                    edf[(x, y)] = sat[(x1, y1)] + sat[(x2, y2)] - sat[(x1, y2)] - sat[(x2, y1)];
+                }
+            }
+
+            edf_avg.reset((width, height));
+            thread_pool.install(|| {
+                edf_avg.data_mut().par_iter_mut().enumerate().for_each(|(i, avg)| {
+                    let x = i % width;
+                    let y = i / width;
+                    let mut count = 0.0_f64;
+                    for j in y.saturating_sub(sampling_area_size)..y.saturating_add(sampling_area_size).min(height - 1)
+                    {
+                        for i in
+                            x.saturating_sub(sampling_area_size)..x.saturating_add(sampling_area_size).min(width - 1)
+                        {
+                            *avg += edf[(i, j)];
+                            count += 1.0;
+                        }
                     }
+                    *avg /= count;
+                });
+                let max_energy_density = edf_avg
+                    .data()
+                    .par_iter()
+                    .max_by(|a, b| a.total_cmp(&b))
+                    .unwrap()
+                    .max(1.0);
+                edf_avg.data_mut().par_iter_mut().for_each(|energy_density| {
+                    *energy_density = (*energy_density / max_energy_density).max(0.0);
                 });
             });
 
             println!("edf calculation took {:.2?}", start.elapsed());
-            energy_field_result.force_push(edf.clone());
+            energy_field_result.force_push(edf_avg.clone());
         }
         yield_now();
     }
