@@ -10,6 +10,7 @@ use bvh::Bvh;
 use grid::{CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
+use rdst::{RadixKey, RadixSort};
 
 use crate::{
     app_config::{CONFIG, DtSource},
@@ -28,7 +29,7 @@ pub struct PhysicsEngine {
     objects: ObjectSoa,
     grid: Grid,
     bvh: Bvh,
-    collision_candidates: Vec<(usize, usize)>,
+    collision_candidates: Vec<CollisionPair>,
     time: f64,
     constraints: ConstraintBox,
     stats: Stats,
@@ -105,6 +106,22 @@ impl PhysicsEngine {
     #[must_use]
     pub fn constraints(&self) -> ConstraintBox {
         self.constraints
+    }
+
+    pub fn grid(&self) -> &Grid {
+        &self.grid
+    }
+
+    pub fn grid_mut(&mut self) -> &mut Grid {
+        &mut self.grid
+    }
+
+    pub fn bvh(&self) -> &Bvh {
+        &self.bvh
+    }
+
+    pub fn bvh_mut(&mut self) -> &mut Bvh {
+        &mut self.bvh
     }
 
     pub fn advance(&mut self, speed_factor: f64, gpu_compute_options: GpuComputeOptions) {
@@ -405,9 +422,10 @@ impl PhysicsEngine {
                                     ..
                                 } in &self.grid.cell_records[start..end]
                                 {
-                                    if object1_index != object2_index {
-                                        self.collision_candidates.push((object1_index, object2_index));
-                                    }
+                                    self.collision_candidates.push(CollisionPair {
+                                        object1_index,
+                                        object2_index,
+                                    });
                                 }
                             }
                         }
@@ -418,6 +436,7 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_bvh(&mut self) {
+        self.collision_candidates.reserve(self.objects.len() * 2);
         for object_index in 0..self.objects.len() {
             self.bvh
                 .find_intersections(object_index, &mut self.collision_candidates);
@@ -425,16 +444,33 @@ impl PhysicsEngine {
     }
 
     fn process_collision_candidates(&mut self) {
-        self.collision_candidates.retain(|(a, b)| a != b);
-        for (a, b) in &mut self.collision_candidates {
-            if *a > *b {
-                swap(a, b);
+        self.collision_candidates.retain(
+            |CollisionPair {
+                 object1_index,
+                 object2_index,
+             }| object1_index != object2_index,
+        );
+        for CollisionPair {
+            object1_index,
+            object2_index,
+        } in &mut self.collision_candidates
+        {
+            if *object1_index > *object2_index {
+                swap(object1_index, object2_index);
             }
         }
-        self.collision_candidates
-            .sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        self.collision_candidates.sort_by(|a, b| {
+            a.object1_index
+                .cmp(&b.object1_index)
+                .then(a.object2_index.cmp(&b.object2_index))
+        });
         self.collision_candidates.dedup();
-        for &(object1_index, object2_index) in &self.collision_candidates {
+        self.collision_candidates.radix_sort_unstable();
+        for &CollisionPair {
+            object1_index,
+            object2_index,
+        } in &self.collision_candidates
+        {
             let object1_position = self.objects.positions[object1_index];
             let object2_position = self.objects.positions[object2_index];
             let object1_radius = self.objects.radii[object1_index];
@@ -443,12 +479,10 @@ impl PhysicsEngine {
             let collision_distance = object1_radius + object2_radius;
             if distance_squared < collision_distance * collision_distance {
                 Self::process_object_collision(
-                    CollisionPair {
-                        object1_index,
-                        object2_index,
-                        distance_squared,
-                        collision_distance,
-                    },
+                    object1_index,
+                    object2_index,
+                    distance_squared,
+                    collision_distance,
                     self.restitution_coefficient,
                     &mut self.objects.positions,
                     &mut self.objects.velocities,
@@ -460,12 +494,10 @@ impl PhysicsEngine {
     }
 
     fn process_object_collision(
-        CollisionPair {
-            object1_index,
-            object2_index,
-            distance_squared,
-            collision_distance,
-        }: CollisionPair,
+        object1_index: usize,
+        object2_index: usize,
+        distance_squared: f64,
+        collision_distance: f64,
         restitution_coefficient: f64,
         positions: &mut [Vector2<f64>],
         velocities: &mut [Vector2<f64>],
@@ -554,14 +586,11 @@ impl PhysicsEngine {
             }
         }
     }
-
-    pub fn grid(&self) -> &Grid {
-        &self.grid
-    }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub enum BroadPhase {
+    #[default]
     Grid,
     Bvh,
 }
@@ -593,12 +622,18 @@ impl ConstraintBox {
     }
 }
 
-#[derive(Clone, Copy)]
-struct CollisionPair {
+#[derive(Clone, Copy, PartialEq)]
+pub struct CollisionPair {
     object1_index: usize,
     object2_index: usize,
-    distance_squared: f64,
-    collision_distance: f64,
+}
+
+impl RadixKey for CollisionPair {
+    const LEVELS: usize = u32::LEVELS;
+
+    fn get_level(&self, level: usize) -> u8 {
+        self.object1_index.get_level(level) ^ self.object1_index.get_level(level)
+    }
 }
 
 #[derive(Clone, Debug)]
