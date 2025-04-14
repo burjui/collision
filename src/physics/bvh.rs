@@ -1,13 +1,9 @@
-#![allow(unused)]
+#![warn(clippy::mismatching_type_param_order)]
 
-use std::{collections::HashSet, f64::NAN, mem::swap, ops::Range};
-
-use itertools::Itertools;
-use rand::seq::IndexedRandom;
 use rdst::{RadixKey, RadixSort};
 
 use super::CollisionPair;
-use crate::{fixed_vec::FixedVec, vector2::Vector2};
+use crate::vector2::Vector2;
 
 #[derive(Default, Clone)]
 pub struct Bvh {
@@ -21,7 +17,6 @@ impl Bvh {
     pub fn new(positions: &[Vector2<f64>], radii: &[f64]) -> Self {
         let mut items = Vec::with_capacity(positions.len());
         let mut object_aabbs = Vec::with_capacity(positions.len());
-        let mut max_object_size = 0.0;
         for object_index in 0..positions.len() {
             let position = positions[object_index];
             let radius = radii[object_index];
@@ -50,7 +45,6 @@ impl Bvh {
 
     pub fn find_intersections(&self, object_index: usize, collisions: &mut Vec<CollisionPair>) {
         if !self.nodes.is_empty() {
-            let Node { aabb, kind } = &self.nodes[self.object_nodes[object_index].0];
             self.find_intersections_with(object_index, self.root, collisions);
         }
     }
@@ -58,17 +52,15 @@ impl Bvh {
     fn find_intersections_with(&self, object1_index: usize, node_id: NodeId, collisions: &mut Vec<CollisionPair>) {
         let object_aabb = self.object_aabbs[object1_index];
         let Node { aabb, kind, .. } = &self.nodes[node_id.0];
-        if object_aabb.intersects(&aabb) {
-            match kind {
-                &NodeKind::Leaf(object2_index) => {
-                    if object2_index != object1_index {
-                        collisions.push(CollisionPair {
-                            object1_index,
-                            object2_index,
-                        });
-                    }
+        if object_aabb.intersects(aabb) {
+            match *kind {
+                NodeKind::Leaf(object2_index) => {
+                    collisions.push(CollisionPair {
+                        object1_index,
+                        object2_index,
+                    });
                 }
-                &NodeKind::Tree { left, right } => {
+                NodeKind::Tree { left, right } => {
                     self.find_intersections_with(object1_index, left, collisions);
                     self.find_intersections_with(object1_index, right, collisions);
                 }
@@ -118,7 +110,7 @@ impl Bvh {
 }
 
 pub fn morton_code(x: u32, y: u32) -> u32 {
-    expand_bits(x as u32) | (expand_bits(y as u32) << 1)
+    expand_bits(x) | (expand_bits(y) << 1)
 }
 
 #[derive(Clone, Copy)]
@@ -126,14 +118,6 @@ struct Item {
     object_index: usize,
     aabb: AABB,
     morton_code: u32,
-}
-
-impl Item {
-    const PLACEHOLDER: Self = Self {
-        object_index: usize::MAX,
-        aabb: AABB::PLACEHOLDER,
-        morton_code: u32::MAX,
-    };
 }
 
 impl RadixKey for Item {
@@ -145,7 +129,7 @@ impl RadixKey for Item {
 }
 
 fn expand_bits(mut x: u32) -> u32 {
-    x = x & 0xFFFF;
+    x &= 0xFFFF;
     x = (x | (x << 8)) & 0x00FF00FF;
     x = (x | (x << 4)) & 0x0F0F0F0F;
     x = (x | (x << 2)) & 0x33333333;
@@ -153,7 +137,7 @@ fn expand_bits(mut x: u32) -> u32 {
     x
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct AABB {
     pub topleft: Vector2<f64>,
     pub bottomright: Vector2<f64>,
@@ -161,9 +145,13 @@ pub struct AABB {
 
 impl AABB {
     const PLACEHOLDER: Self = Self {
-        topleft: Vector2::new(NAN, NAN),
-        bottomright: Vector2::new(NAN, NAN),
+        topleft: Vector2::new(f64::NAN, f64::NAN),
+        bottomright: Vector2::new(f64::NAN, f64::NAN),
     };
+
+    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
+        Self { topleft, bottomright }
+    }
 
     fn intersects(&self, other: &AABB) -> bool {
         self.topleft.x <= other.bottomright.x

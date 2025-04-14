@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use bvh::Bvh;
+use bvh::{AABB, Bvh};
 use grid::{CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
@@ -31,7 +31,7 @@ pub struct PhysicsEngine {
     bvh: Bvh,
     collision_candidates: Vec<CollisionPair>,
     time: f64,
-    constraints: ConstraintBox,
+    constraints: AABB,
     stats: Stats,
     restitution_coefficient: f64,
     global_gravity: Vector2<f64>,
@@ -46,7 +46,7 @@ pub struct PhysicsEngine {
 
 impl PhysicsEngine {
     pub fn new() -> anyhow::Result<Self> {
-        let constraints = ConstraintBox::new(
+        let constraints = AABB::new(
             Vector2::new(0.0, 0.0),
             Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
         );
@@ -104,7 +104,7 @@ impl PhysicsEngine {
     }
 
     #[must_use]
-    pub fn constraints(&self) -> ConstraintBox {
+    pub fn constraints(&self) -> AABB {
         self.constraints
     }
 
@@ -607,19 +607,6 @@ impl fmt::Display for BroadPhase {
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GpuComputeOptions {
     pub integration: bool,
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct ConstraintBox {
-    pub topleft: Vector2<f64>,
-    pub bottomright: Vector2<f64>,
-}
-
-impl ConstraintBox {
-    #[must_use]
-    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
-        Self { topleft, bottomright }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

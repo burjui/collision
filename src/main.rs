@@ -21,8 +21,8 @@ use collision::{
     demo::create_demo,
     fps::FpsCalculator,
     physics::{
-        BroadPhase, ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats,
-        bvh::{Bvh, Node, NodeKind},
+        BroadPhase, DurationStat, GpuComputeOptions, PhysicsEngine, Stats,
+        bvh::{AABB, Bvh, Node, NodeKind},
     },
     simple_text::SimpleText,
     vector2::Vector2,
@@ -425,7 +425,7 @@ fn energy_density_field_thread(
                 let max_energy_density = edf_avg
                     .data()
                     .par_iter()
-                    .max_by(|a, b| a.total_cmp(&b))
+                    .max_by(|a, b| a.total_cmp(b))
                     .unwrap()
                     .max(1.0);
                 edf_avg.data_mut().par_iter_mut().for_each(|energy_density| {
@@ -704,10 +704,10 @@ fn draw_bvh(scene: &mut Scene, bvh: &[Node]) {
                 css::LIGHT_GRAY,
                 None,
                 &Rect {
-                    x0: node.aabb.topleft.x as f64,
-                    y0: node.aabb.topleft.y as f64,
-                    x1: node.aabb.bottomright.x as f64,
-                    y1: node.aabb.bottomright.y as f64,
+                    x0: node.aabb.topleft.x,
+                    y0: node.aabb.topleft.y,
+                    x1: node.aabb.bottomright.x,
+                    y1: node.aabb.bottomright.y,
                 },
             );
         }
@@ -802,7 +802,7 @@ struct RenderingData {
     grid_position: Vector2<f64>,
     grid_size: Vector2<usize>,
     grid_cell_size: f64,
-    constraints: ConstraintBox,
+    constraints: AABB,
     draw_edf: bool,
     edf: Array2<f64>,
     edf_cell_size: f64,
@@ -1101,11 +1101,11 @@ fn write_stats(
         }
     )?;
     writeln!(buffer, "objects: {}", object_count)?;
-    write_duration_stat(buffer, "integration", &integration_duration)?;
-    write_duration_stat(buffer, &format!("collisions ({})", broad_phase), &collisions_duration)?;
-    write_duration_stat(buffer, "grid", &grid_duration)?;
-    write_duration_stat(buffer, "bvh", &bvh_duration)?;
-    write_duration_stat(buffer, "constraints", &constraints_duration)?;
+    write_duration_stat(buffer, "integration", integration_duration)?;
+    write_duration_stat(buffer, &format!("collisions ({})", broad_phase), collisions_duration)?;
+    write_duration_stat(buffer, "grid", grid_duration)?;
+    write_duration_stat(buffer, "bvh", bvh_duration)?;
+    write_duration_stat(buffer, "constraints", constraints_duration)?;
     Ok(())
 }
 
