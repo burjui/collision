@@ -1,15 +1,20 @@
 #![allow(unused)]
 
-use std::{collections::HashSet, f64::NAN, mem::swap};
+use std::{collections::HashSet, f64::NAN, mem::swap, ops::Range};
 
+use itertools::Itertools;
 use rdst::{RadixKey, RadixSort};
 
-use crate::vector2::Vector2;
+use super::CollisionPair;
+use crate::{fixed_vec::FixedVec, vector2::Vector2};
 
-#[derive(Default)]
+const MAX_CHILDREN: usize = 2;
+
+#[derive(Default, Clone)]
 pub struct Bvh {
     object_aabbs: Vec<AABB>,
-    nodes: Vec<Node>,
+    pub nodes: Vec<Node>,
+    root: NodeId,
 }
 
 impl Bvh {
@@ -24,76 +29,90 @@ impl Bvh {
                 bottomright: position + radius,
             };
             object_aabbs[object_index] = aabb;
+            let morton_code = morton_code(position.x as u32, position.y as u32);
             items[object_index] = Item {
                 object_index,
                 aabb,
-                morton_code: morton_code(position.x as u32, position.y as u32),
+                morton_code,
             };
         }
         items.radix_sort_unstable();
         let mut bvh = Bvh {
             object_aabbs,
             nodes: Vec::default(),
+            root: NodeId::default(),
         };
-        bvh.create_subtree(&items);
+        for item in items {
+            bvh.nodes.push(Node {
+                aabb: item.aabb,
+                kind: NodeKind::Leaf(item.object_index),
+            });
+        }
+        let mut combining_area = (0..bvh.nodes.len()).map(NodeId).collect_vec();
+        let mut combining_staging_area = Vec::new();
+        while combining_area.len() > 1 {
+            let level_start = bvh.nodes.len();
+            combining_staging_area.clear();
+            let mut end = combining_area.len();
+            while end > 0 {
+                let start = end.saturating_sub(MAX_CHILDREN);
+                let children = combining_area[start..end]
+                    .iter()
+                    .copied()
+                    .collect::<FixedVec<_, MAX_CHILDREN>>();
+                end = start;
+                let mut combined_aabb = bvh.nodes[children[0].0].aabb;
+                for &child_id in &children[1..] {
+                    let child_aabb = bvh.nodes[child_id.0].aabb;
+                    combined_aabb = AABB {
+                        topleft: Vector2::new(
+                            combined_aabb.topleft.x.min(child_aabb.topleft.x),
+                            combined_aabb.topleft.y.min(child_aabb.topleft.y),
+                        ),
+                        bottomright: Vector2::new(
+                            combined_aabb.bottomright.x.max(child_aabb.bottomright.x),
+                            combined_aabb.bottomright.y.max(child_aabb.bottomright.y),
+                        ),
+                    };
+                }
+                let node_id = bvh.add_node(Node {
+                    aabb: combined_aabb,
+                    kind: NodeKind::Tree { children },
+                });
+                combining_staging_area.push(node_id);
+            }
+            combining_area.resize(combining_staging_area.len(), NodeId::default());
+            combining_area.copy_from_slice(&combining_staging_area);
+        }
+        bvh.root = combining_area[0];
         bvh
     }
 
-    pub fn find_intersections(&self, object_index: usize, collisions: &mut Vec<(usize, usize)>) {
-        self.find_intersections_with(object_index, NodeId(0), collisions);
-    }
-
-    fn find_intersections_with(&self, object_index: usize, node_id: NodeId, collisions: &mut Vec<(usize, usize)>) {
-        let object_aabb = self.object_aabbs[object_index];
-        match self.nodes.get(node_id.0) {
-            Some(Node { aabb, kind }) => {
-                if object_aabb.intersects(&aabb) {
-                    match kind {
-                        &NodeKind::Leaf(other_object_index) => {
-                            if other_object_index != object_index {
-                                collisions.push((object_index, other_object_index));
-                            }
-                        }
-                        &NodeKind::Tree { left, right } => {
-                            self.find_intersections_with(object_index, left, collisions);
-                            self.find_intersections_with(object_index, right, collisions);
-                        }
-                    }
-                }
-            }
-            None => (),
+    pub fn find_intersections(&self, object_index: usize, collisions: &mut Vec<CollisionPair>) {
+        if !self.nodes.is_empty() {
+            self.find_intersections_with(object_index, self.root, collisions);
         }
     }
 
-    fn create_subtree(&mut self, items: &[Item]) -> NodeId {
-        if items.len() == 1 {
-            let item = items[0];
-            self.add_node(Node {
-                aabb: item.aabb,
-                kind: NodeKind::Leaf(item.object_index),
-            })
-        } else {
-            let node_id = self.add_node(Node::PLACEHOLDER);
-            let middle = items.len() / 2;
-            let left = self.create_subtree(&items[..middle]);
-            let right = self.create_subtree(&items[middle..]);
-            let left_aabb = self.nodes[left.0].aabb;
-            let right_aabb = self.nodes[right.0].aabb;
-            let aabb = AABB {
-                topleft: Vector2::new(
-                    left_aabb.topleft.x.min(right_aabb.topleft.x),
-                    left_aabb.topleft.y.min(right_aabb.topleft.y),
-                ),
-                bottomright: Vector2::new(
-                    left_aabb.bottomright.x.max(right_aabb.bottomright.x),
-                    left_aabb.bottomright.y.max(right_aabb.bottomright.y),
-                ),
-            };
-            self.nodes[node_id.0] = Node {
-                aabb,
-                kind: NodeKind::Tree { left, right },
-            };
-            node_id
+    fn find_intersections_with(&self, object1_index: usize, node_id: NodeId, collisions: &mut Vec<CollisionPair>) {
+        let object_aabb = self.object_aabbs[object1_index];
+        let Node { aabb, kind } = &self.nodes[node_id.0];
+        if object_aabb.intersects(&aabb) {
+            match kind {
+                &NodeKind::Leaf(object2_index) => {
+                    if object2_index != object1_index {
+                        collisions.push(CollisionPair {
+                            object1_index,
+                            object2_index,
+                        });
+                    }
+                }
+                NodeKind::Tree { children } => {
+                    for &child_id in children.as_slice() {
+                        self.find_intersections_with(object1_index, child_id, collisions);
+                    }
+                }
+            }
         }
     }
 
@@ -141,9 +160,9 @@ fn expand_bits(mut x: u32) -> u32 {
 }
 
 #[derive(Clone, Copy)]
-struct AABB {
-    topleft: Vector2<f64>,
-    bottomright: Vector2<f64>,
+pub struct AABB {
+    pub topleft: Vector2<f64>,
+    pub bottomright: Vector2<f64>,
 }
 
 impl AABB {
@@ -160,22 +179,17 @@ impl AABB {
     }
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct NodeId(usize);
+
 #[derive(Clone, Copy)]
-struct NodeId(usize);
-
-struct Node {
-    aabb: AABB,
-    kind: NodeKind,
+pub struct Node {
+    pub aabb: AABB,
+    pub kind: NodeKind,
 }
 
-impl Node {
-    const PLACEHOLDER: Self = Self {
-        aabb: AABB::PLACEHOLDER,
-        kind: NodeKind::Leaf(usize::MAX),
-    };
-}
-
-enum NodeKind {
+#[derive(Clone, Copy)]
+pub enum NodeKind {
     Leaf(usize),
-    Tree { left: NodeId, right: NodeId },
+    Tree { children: FixedVec<NodeId, MAX_CHILDREN> },
 }

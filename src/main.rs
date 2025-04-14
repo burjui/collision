@@ -6,6 +6,7 @@
 use std::{
     fmt::{self, Debug, Write as _},
     iter::zip,
+    mem::take,
     num::NonZero,
     ops::{Add, Range},
     sync::{Arc, Barrier, Mutex, mpsc},
@@ -19,7 +20,10 @@ use collision::{
     array2::Array2,
     demo::create_demo,
     fps::FpsCalculator,
-    physics::{BroadPhase, ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
+    physics::{
+        BroadPhase, ConstraintBox, DurationStat, GpuComputeOptions, PhysicsEngine, Stats,
+        bvh::{Bvh, Node, NodeKind},
+    },
     simple_text::SimpleText,
     vector2::Vector2,
 };
@@ -232,10 +236,12 @@ fn simulation_thread(
                     physics.broad_phase = match physics.broad_phase {
                         BroadPhase::Grid => {
                             physics.stats_mut().bvh_duration = DurationStat::default();
+                            take(physics.bvh_mut());
                             BroadPhase::Bvh
                         }
                         BroadPhase::Bvh => {
                             physics.stats_mut().grid_duration = DurationStat::default();
+                            take(physics.grid_mut());
                             BroadPhase::Grid
                         }
                     };
@@ -324,6 +330,8 @@ fn simulation_thread(
                     draw_edf: show_edf,
                     edf: edf.clone(),
                     edf_cell_size: EDF_CELL_SIZE,
+                    bvh: physics.bvh().clone(),
+                    broad_phase: physics.broad_phase,
                 }));
             }
         }
@@ -458,14 +466,24 @@ fn rendering_thread(
             for subscene in scenes {
                 scene.append(&subscene, None);
             }
-            if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
-                draw_grid(
-                    &mut scene,
-                    rendering_data.grid_position,
-                    rendering_data.grid_size,
-                    rendering_data.grid_cell_size,
-                );
+            match rendering_data.broad_phase {
+                BroadPhase::Grid => {
+                    if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
+                        draw_grid(
+                            &mut scene,
+                            rendering_data.grid_position,
+                            rendering_data.grid_size,
+                            rendering_data.grid_cell_size,
+                        );
+                    }
+                }
+                BroadPhase::Bvh => {
+                    if rendering_data.draw_grid && !rendering_data.bvh.nodes.is_empty() {
+                        draw_bvh(&mut scene, &rendering_data.bvh.nodes);
+                    }
+                }
             }
+
             redraw_job_queue.force_push(scene);
             let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
             rendering_result_queue.send(()).unwrap();
@@ -677,6 +695,25 @@ fn draw_grid(scene: &mut Scene, grid_position: Vector2<f64>, grid_size: Vector2<
     }
 }
 
+fn draw_bvh(scene: &mut Scene, bvh: &[Node]) {
+    for node in bvh {
+        if let NodeKind::Tree { .. } = &node.kind {
+            scene.stroke(
+                &Stroke::default(),
+                Affine::IDENTITY,
+                css::LIGHT_GRAY,
+                None,
+                &Rect {
+                    x0: node.aabb.topleft.x as f64,
+                    y0: node.aabb.topleft.y as f64,
+                    x1: node.aabb.bottomright.x as f64,
+                    y1: node.aabb.bottomright.y as f64,
+                },
+            );
+        }
+    }
+}
+
 fn draw_stats(
     scene: &mut Scene,
     text: &mut SimpleText,
@@ -769,6 +806,8 @@ struct RenderingData {
     draw_edf: bool,
     edf: Array2<f64>,
     edf_cell_size: f64,
+    bvh: Bvh,
+    broad_phase: BroadPhase,
 }
 
 struct VelloApp<'s> {

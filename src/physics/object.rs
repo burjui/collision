@@ -61,15 +61,6 @@ impl ObjectSoa {
     }
 }
 
-pub struct ObjectSoaRef<'a> {
-    pub positions: &'a [Vector2<f64>],
-    pub velocities: &'a [Vector2<f64>],
-    pub radii: &'a [f64],
-    pub masses: &'a [f64],
-    pub colors: &'a [Option<Color>],
-    pub is_planet: &'a [bool],
-}
-
 #[derive(Copy, Clone)]
 pub struct ObjectPrototype {
     pub position: Vector2<f64>,
