@@ -10,7 +10,7 @@ use bvh::Bvh;
 use grid::{CellRecord, Grid};
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
-use rdst::{RadixKey, RadixSort};
+use rand::seq::SliceRandom;
 
 use crate::{
     app_config::{CONFIG, DtSource},
@@ -465,7 +465,7 @@ impl PhysicsEngine {
                 .then(a.object2_index.cmp(&b.object2_index))
         });
         self.collision_candidates.dedup();
-        self.collision_candidates.radix_sort_unstable();
+        self.collision_candidates.shuffle(&mut rand::rng());
         for &CollisionPair {
             object1_index,
             object2_index,
@@ -626,14 +626,6 @@ impl ConstraintBox {
 pub struct CollisionPair {
     object1_index: usize,
     object2_index: usize,
-}
-
-impl RadixKey for CollisionPair {
-    const LEVELS: usize = u32::LEVELS;
-
-    fn get_level(&self, level: usize) -> u8 {
-        self.object1_index.get_level(level) ^ self.object1_index.get_level(level)
-    }
 }
 
 #[derive(Clone, Debug)]
