@@ -29,8 +29,8 @@ impl Grid {
         }
 
         if self.cell_size > 0.0 {
-            self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize + 1;
-            self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
+            self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize;
+            self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize;
             self.cell_records.resize(positions.len(), CellRecord::EMPTY);
             for (i, &position) in positions.iter().enumerate() {
                 let Vector2 { x, y } = cell_at(position, self.position, self.cell_size);

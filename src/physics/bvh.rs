@@ -111,6 +111,15 @@ pub fn morton_code(x: u32, y: u32) -> u32 {
     expand_bits(x) | (expand_bits(y) << 1)
 }
 
+fn expand_bits(mut x: u32) -> u32 {
+    x &= 0xFFFF;
+    x = (x | (x << 8)) & 0x00FF00FF;
+    x = (x | (x << 4)) & 0x0F0F0F0F;
+    x = (x | (x << 2)) & 0x33333333;
+    x = (x | (x << 1)) & 0x55555555;
+    x
+}
+
 #[derive(Clone, Copy)]
 struct Item {
     object_index: usize,
@@ -124,15 +133,6 @@ impl RadixKey for Item {
     fn get_level(&self, level: usize) -> u8 {
         self.morton_code.get_level(level)
     }
-}
-
-fn expand_bits(mut x: u32) -> u32 {
-    x &= 0xFFFF;
-    x = (x | (x << 8)) & 0x00FF00FF;
-    x = (x | (x << 4)) & 0x0F0F0F0F;
-    x = (x | (x << 2)) & 0x33333333;
-    x = (x | (x << 1)) & 0x55555555;
-    x
 }
 
 #[derive(Default, Clone, Copy)]

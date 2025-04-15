@@ -180,7 +180,7 @@ pub struct DemoConfig {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct RenderConfig {
-    #[serde(default = "default_color_source")]
+    #[serde(rename = "color", default = "default_color_source")]
     pub color_source: ColorSource,
 
     #[serde(default)]
@@ -193,13 +193,19 @@ fn default_color_source() -> ColorSource {
 
 #[derive(Debug, Deserialize, Clone, Copy, Default)]
 pub enum ColorSource {
-    #[default]
     #[serde(rename = "none")]
     None,
+
+    #[default]
+    #[serde(rename = "default")]
+    Default,
 
     #[serde(rename = "demo")]
     Demo,
 
     #[serde(rename = "velocity")]
     Velocity,
+
+    #[serde(rename = "black")]
+    Dark,
 }

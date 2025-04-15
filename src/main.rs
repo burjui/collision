@@ -558,17 +558,21 @@ fn draw_physics(
                         let particle_position = positions[object_index];
                         let color = match color_source {
                             ColorSource::None => None,
+                            ColorSource::Default => Some(css::GRAY),
                             ColorSource::Demo => colors[object_index],
                             ColorSource::Velocity => Some(color_from_velocity(velocities, object_index)),
+                            ColorSource::Dark => Some(Color::new([0.2, 0.2, 0.2, 1.0])),
+                        };
+                        if let Some(color) = color {
+                            draw_circle(
+                                &mut scene,
+                                transform,
+                                particle_position,
+                                radii[object_index].max(1.0),
+                                color,
+                            );
                         }
-                        .unwrap_or(css::GRAY);
-                        draw_circle(
-                            &mut scene,
-                            transform,
-                            particle_position,
-                            radii[object_index].max(1.0),
-                            color,
-                        );
+
                         if *draw_ids {
                             draw_text(
                                 &mut scene,
@@ -630,7 +634,8 @@ fn draw_physics(
         for i in 0..width {
             for j in 0..height {
                 let energy_density = edf[(i, j)];
-                let color = spectrum(energy_density.sqrt() as f32, 0.5);
+                let energy_density_sqrt = energy_density.sqrt() as f32;
+                let color = spectrum(energy_density_sqrt, (0.9 * energy_density_sqrt) as f32);
                 let offset = j * width * BYTES_PER_PIXEL + i * BYTES_PER_PIXEL;
                 for i in 0..4 {
                     image_data[offset + i] = (color.components[i] * 255.0) as u8;
@@ -940,19 +945,29 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::CycleBroadPhase)
                                 .unwrap();
                         }
-                        Key::Character("c") => {
+                        Key::Character("1") => {
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::SetColorSource(ColorSource::None))
+                                .unwrap();
+                        }
+                        Key::Character("2") => {
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::SetColorSource(ColorSource::Default))
+                                .unwrap();
+                        }
+                        Key::Character("3") => {
                             self.simulation_event_sender
                                 .send(SimulationThreadEvent::SetColorSource(ColorSource::Demo))
                                 .unwrap();
                         }
-                        Key::Character("v") => {
+                        Key::Character("4") => {
                             self.simulation_event_sender
                                 .send(SimulationThreadEvent::SetColorSource(ColorSource::Velocity))
                                 .unwrap();
                         }
-                        Key::Character("b") => {
+                        Key::Character("5") => {
                             self.simulation_event_sender
-                                .send(SimulationThreadEvent::SetColorSource(ColorSource::None))
+                                .send(SimulationThreadEvent::SetColorSource(ColorSource::Dark))
                                 .unwrap();
                         }
                         Key::Character("a") => {

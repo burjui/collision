@@ -424,13 +424,15 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_grid(&mut self) {
-        const AREA_CELL_OFFSETS: [(isize, isize); 5] = [
-            // // Objects in the same cell are the closest
-            (0, 0),
-            // // Checking only these neighboring cells to avoid duplicate collisions
-            (0, 1),
-            (1, 0),
+        const AREA_CELL_OFFSETS: [(isize, isize); 9] = [
+            (-1, -1),
+            (-1, 0),
             (-1, 1),
+            (0, -1),
+            (0, 0),
+            (0, 1),
+            (1, -1),
+            (1, 0),
             (1, 1),
         ];
         for range in self.grid.cell_iter() {
