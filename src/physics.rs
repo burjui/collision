@@ -1,13 +1,14 @@
 use core::{f64, fmt};
 use std::{
     iter::zip,
-    mem::swap,
+    mem::{swap, take},
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use bvh::{AABB, Bvh};
 use grid::{CellRecord, Grid};
+use hshg::Hshg;
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 use rand::seq::SliceRandom;
@@ -21,14 +22,17 @@ use crate::{
 
 pub mod bvh;
 pub mod grid;
+pub mod hshg;
 pub mod object;
 
 pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     pub broad_phase: BroadPhase,
     objects: ObjectSoa,
+    object_indices: Vec<usize>,
     grid: Grid,
     bvh: Bvh,
+    hshg: Hshg,
     collision_candidates: Vec<CollisionPair>,
     time: f64,
     constraints: AABB,
@@ -46,10 +50,10 @@ pub struct PhysicsEngine {
 
 impl PhysicsEngine {
     pub fn new() -> anyhow::Result<Self> {
-        let constraints = AABB::new(
-            Vector2::new(0.0, 0.0),
-            Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
-        );
+        let constraints = AABB {
+            topleft: Vector2::new(0.0, 0.0),
+            bottomright: Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
+        };
         let integration_program = GPU.build_program("src/leapfrog_yoshida.cl")?;
         let integration_kernel =
             Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
@@ -58,7 +62,9 @@ impl PhysicsEngine {
             broad_phase: BroadPhase::Grid,
             objects: ObjectSoa::default(),
             grid: Grid::default(),
+            object_indices: Vec::default(),
             bvh: Bvh::default(),
+            hshg: Hshg::default(),
             collision_candidates: Vec::default(),
             time: 0.0,
             constraints,
@@ -122,6 +128,14 @@ impl PhysicsEngine {
 
     pub fn bvh_mut(&mut self) -> &mut Bvh {
         &mut self.bvh
+    }
+
+    pub fn hshg(&self) -> &Hshg {
+        &self.hshg
+    }
+
+    pub fn hshg_mut(&mut self) -> &mut Hshg {
+        &mut self.hshg
     }
 
     pub fn advance(&mut self, speed_factor: f64, gpu_compute_options: GpuComputeOptions) {
@@ -190,9 +204,13 @@ impl PhysicsEngine {
 
         if matches!(self.broad_phase, BroadPhase::Grid) {
             let start = Instant::now();
-            self.grid.update(&self.objects);
+            self.object_indices.clear();
+            self.object_indices.extend(0..self.objects.len());
+            self.grid
+                .update(&self.objects.positions, &self.objects.radii, &self.object_indices);
             self.stats.grid_duration.update(start.elapsed());
         } else {
+            take(&mut self.grid);
             self.stats.grid_duration.update(Duration::ZERO);
         }
 
@@ -201,7 +219,17 @@ impl PhysicsEngine {
             self.bvh = Bvh::new(&self.objects.positions, &self.objects.radii);
             self.stats.bvh_duration.update(start.elapsed());
         } else {
+            take(&mut self.bvh);
             self.stats.bvh_duration.update(Duration::ZERO);
+        }
+
+        if matches!(self.broad_phase, BroadPhase::Hhsg) {
+            let start = Instant::now();
+            self.hshg = Hshg::new(&self.objects.positions, &self.objects.radii);
+            self.stats.hshg_duration.update(start.elapsed());
+        } else {
+            take(&mut self.hshg);
+            self.stats.hshg_duration.update(Duration::ZERO);
         }
 
         let start = Instant::now();
@@ -386,9 +414,11 @@ impl PhysicsEngine {
 
     fn process_collisions(&mut self) {
         self.collision_candidates.clear();
+        self.collision_candidates.reserve(self.objects.len() * 2);
         match self.broad_phase {
             BroadPhase::Grid => self.find_collision_candidates_grid(),
             BroadPhase::Bvh => self.find_collision_candidates_bvh(),
+            BroadPhase::Hhsg => self.find_collision_candidates_hshg(),
         }
         self.process_collision_candidates();
     }
@@ -422,10 +452,12 @@ impl PhysicsEngine {
                                     ..
                                 } in &self.grid.cell_records[start..end]
                                 {
-                                    self.collision_candidates.push(CollisionPair {
-                                        object1_index,
-                                        object2_index,
-                                    });
+                                    if object2_index != object1_index {
+                                        self.collision_candidates.push(CollisionPair {
+                                            object1_index,
+                                            object2_index,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -436,20 +468,17 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_bvh(&mut self) {
-        self.collision_candidates.reserve(self.objects.len() * 2);
         for object_index in 0..self.objects.len() {
             self.bvh
                 .find_intersections(object_index, &mut self.collision_candidates);
         }
     }
 
+    fn find_collision_candidates_hshg(&mut self) {
+        self.hshg.find_collision_candidates(&mut self.collision_candidates);
+    }
+
     fn process_collision_candidates(&mut self) {
-        self.collision_candidates.retain(
-            |CollisionPair {
-                 object1_index,
-                 object2_index,
-             }| object1_index != object2_index,
-        );
         for CollisionPair {
             object1_index,
             object2_index,
@@ -593,6 +622,7 @@ pub enum BroadPhase {
     #[default]
     Grid,
     Bvh,
+    Hhsg,
 }
 
 impl fmt::Display for BroadPhase {
@@ -600,6 +630,7 @@ impl fmt::Display for BroadPhase {
         f.write_str(match self {
             BroadPhase::Grid => "grid",
             BroadPhase::Bvh => "bvh",
+            BroadPhase::Hhsg => "hshg",
         })
     }
 }
@@ -650,6 +681,7 @@ pub struct Stats {
     pub integration_duration: DurationStat,
     pub grid_duration: DurationStat,
     pub bvh_duration: DurationStat,
+    pub hshg_duration: DurationStat,
     pub collisions_duration: DurationStat,
     pub constraints_duration: DurationStat,
     pub total_duration: DurationStat,

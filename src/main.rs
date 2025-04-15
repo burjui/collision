@@ -4,9 +4,8 @@
 #![feature(let_chains)]
 
 use std::{
-    fmt::{self, Debug, Write as _},
+    fmt::{self, Debug, Write},
     iter::zip,
-    mem::take,
     num::NonZero,
     ops::{Add, Range},
     sync::{Arc, Barrier, Mutex, mpsc},
@@ -23,6 +22,7 @@ use collision::{
     physics::{
         BroadPhase, DurationStat, GpuComputeOptions, PhysicsEngine, Stats,
         bvh::{AABB, Bvh, Node, NodeKind},
+        hshg::Hshg,
     },
     simple_text::SimpleText,
     vector2::Vector2,
@@ -236,12 +236,14 @@ fn simulation_thread(
                     physics.broad_phase = match physics.broad_phase {
                         BroadPhase::Grid => {
                             physics.stats_mut().bvh_duration = DurationStat::default();
-                            take(physics.bvh_mut());
                             BroadPhase::Bvh
                         }
                         BroadPhase::Bvh => {
+                            physics.stats_mut().hshg_duration = DurationStat::default();
+                            BroadPhase::Hhsg
+                        }
+                        BroadPhase::Hhsg => {
                             physics.stats_mut().grid_duration = DurationStat::default();
-                            take(physics.grid_mut());
                             BroadPhase::Grid
                         }
                     };
@@ -331,6 +333,7 @@ fn simulation_thread(
                     edf: edf.clone(),
                     edf_cell_size: EDF_CELL_SIZE,
                     bvh: physics.bvh().clone(),
+                    hshg: physics.hshg().clone(),
                     broad_phase: physics.broad_phase,
                 }));
             }
@@ -480,6 +483,13 @@ fn rendering_thread(
                 BroadPhase::Bvh => {
                     if rendering_data.draw_grid && !rendering_data.bvh.nodes.is_empty() {
                         draw_bvh(&mut scene, &rendering_data.bvh.nodes);
+                    }
+                }
+                BroadPhase::Hhsg => {
+                    if rendering_data.draw_grid && !rendering_data.hshg.grids.is_empty() {
+                        for grid in &rendering_data.hshg.grids {
+                            draw_grid(&mut scene, grid.position(), grid.size(), grid.cell_size());
+                        }
                     }
                 }
             }
@@ -807,6 +817,7 @@ struct RenderingData {
     edf: Array2<f64>,
     edf_cell_size: f64,
     bvh: Bvh,
+    hshg: Hshg,
     broad_phase: BroadPhase,
 }
 
@@ -993,7 +1004,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         self.gpu_compute_options,
                     )
                     .expect("failed to draw stats");
-                    println!("scene draw data {}", self.scene.encoding().draw_data.len());
 
                     let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
                     let device_handle = &self.context.devices[surface.dev_id];
@@ -1077,6 +1087,7 @@ fn write_stats(
         integration_duration,
         grid_duration,
         bvh_duration,
+        hshg_duration,
         collisions_duration,
         constraints_duration,
         total_duration: _,
@@ -1105,6 +1116,7 @@ fn write_stats(
     write_duration_stat(buffer, &format!("collisions ({})", broad_phase), collisions_duration)?;
     write_duration_stat(buffer, "grid", grid_duration)?;
     write_duration_stat(buffer, "bvh", bvh_duration)?;
+    write_duration_stat(buffer, "hshg", hshg_duration)?;
     write_duration_stat(buffer, "constraints", constraints_duration)?;
     Ok(())
 }

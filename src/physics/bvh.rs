@@ -9,7 +9,6 @@ use crate::vector2::Vector2;
 pub struct Bvh {
     object_aabbs: Vec<AABB>,
     pub nodes: Vec<Node>,
-    object_nodes: Vec<NodeId>,
     root: NodeId,
 }
 
@@ -35,7 +34,6 @@ impl Bvh {
         let mut bvh = Bvh {
             object_aabbs,
             nodes: Vec::with_capacity(positions.len() * 2),
-            object_nodes: vec![NodeId::default(); positions.len()],
             root: NodeId::default(),
         };
         items.radix_sort_unstable();
@@ -55,10 +53,12 @@ impl Bvh {
         if object_aabb.intersects(aabb) {
             match *kind {
                 NodeKind::Leaf(object2_index) => {
-                    collisions.push(CollisionPair {
-                        object1_index,
-                        object2_index,
-                    });
+                    if object2_index != object1_index {
+                        collisions.push(CollisionPair {
+                            object1_index,
+                            object2_index,
+                        });
+                    }
                 }
                 NodeKind::Tree { left, right } => {
                     self.find_intersections_with(object1_index, left, collisions);
@@ -71,12 +71,10 @@ impl Bvh {
     fn create_subtree(&mut self, items: &[Item]) -> NodeId {
         if items.len() == 1 {
             let item = items[0];
-            let node_id = self.add_node(Node {
+            self.add_node(Node {
                 aabb: item.aabb,
                 kind: NodeKind::Leaf(item.object_index),
-            });
-            self.object_nodes[item.object_index] = node_id;
-            node_id
+            })
         } else {
             let node_id = self.add_node(Node::PLACEHOLDER);
             let middle = items.len() / 2;
@@ -148,10 +146,6 @@ impl AABB {
         topleft: Vector2::new(f64::NAN, f64::NAN),
         bottomright: Vector2::new(f64::NAN, f64::NAN),
     };
-
-    pub fn new(topleft: Vector2<f64>, bottomright: Vector2<f64>) -> Self {
-        Self { topleft, bottomright }
-    }
 
     fn intersects(&self, other: &AABB) -> bool {
         self.topleft.x <= other.bottomright.x

@@ -9,6 +9,7 @@
 #![feature(more_float_constants)]
 #![feature(lazy_get)]
 #![feature(maybe_uninit_array_assume_init)]
+#![feature(coroutines, coroutine_trait)]
 
 pub mod app_config;
 pub mod array2;

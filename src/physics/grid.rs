@@ -2,7 +2,7 @@ use std::{iter::zip, ops::Range};
 
 use rdst::{RadixKey, RadixSort};
 
-use super::{bvh::morton_code, object::ObjectSoa};
+use super::bvh::morton_code;
 use crate::{array2::Array2, vector2::Vector2};
 
 #[derive(Clone)]
@@ -15,12 +15,12 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn update(&mut self, objects: &ObjectSoa) {
+    pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64], indices: &[usize]) {
         let mut end = Vector2::new(f64::MIN, f64::MIN);
         self.position = Vector2::new(f64::MAX, f64::MAX);
         self.cell_size = 0.0;
 
-        for (position, radius) in zip(&objects.positions, &objects.radii) {
+        for (position, radius) in zip(positions, radii) {
             self.position.x = self.position.x.min(position.x - radius);
             self.position.y = self.position.y.min(position.y - radius);
             end.x = end.x.max(position.x + radius);
@@ -29,13 +29,13 @@ impl Grid {
         }
 
         if self.cell_size > 0.0 {
-            self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize;
-            self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize;
-            self.cell_records.resize(objects.len(), CellRecord::EMPTY);
-            for (object_index, &position) in objects.positions.iter().enumerate() {
-                let (x, y) = cell_at(position, self.position, self.cell_size);
-                self.cell_records[object_index] = CellRecord {
-                    object_index,
+            self.size.x = ((end.x - self.position.x) / self.cell_size).ceil() as usize + 1;
+            self.size.y = ((end.y - self.position.y) / self.cell_size).ceil() as usize + 1;
+            self.cell_records.resize(positions.len(), CellRecord::EMPTY);
+            for (i, &position) in positions.iter().enumerate() {
+                let Vector2 { x, y } = cell_at(position, self.position, self.cell_size);
+                self.cell_records[i] = CellRecord {
+                    object_index: indices[i],
                     cell_coords: (x, y),
                     radix_key: morton_code(x as u32, y as u32),
                 }
@@ -150,9 +150,16 @@ impl Default for Grid {
 }
 
 #[must_use]
-pub fn cell_at(position: Vector2<f64>, cells_start: Vector2<f64>, cell_size: f64) -> (usize, usize) {
-    (
-        ((position.x - cells_start.x) / cell_size) as usize,
-        ((position.y - cells_start.y) / cell_size) as usize,
-    )
+pub fn cell_at(position: Vector2<f64>, grid_position: Vector2<f64>, cell_size: f64) -> Vector2<usize> {
+    let x = if position.x >= grid_position.x {
+        ((position.x - grid_position.x) / cell_size) as usize
+    } else {
+        0
+    };
+    let y = if position.y >= grid_position.y {
+        ((position.y - grid_position.y) / cell_size) as usize
+    } else {
+        0
+    };
+    Vector2::new(x, y)
 }

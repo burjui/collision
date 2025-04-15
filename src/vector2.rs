@@ -234,9 +234,9 @@ impl From<(f64, f64)> for Vector2<f64> {
     }
 }
 
-impl fmt::Debug for Vector2<f64> {
+impl<T: fmt::Debug> fmt::Debug for Vector2<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.x, self.y)
+        write!(f, "({:?}, {:?})", self.x, self.y)
     }
 }
 
