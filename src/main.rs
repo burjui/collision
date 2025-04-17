@@ -173,7 +173,7 @@ fn simulation_thread(
     rendering_thread_ready: &Arc<Barrier>,
     rendering_result_receiver: &mpsc::Receiver<()>,
 ) -> PhysicsEngine {
-    const EDF_CELL_SIZE: f64 = 6.0;
+    const EDF_CELL_SIZE: f64 = 4.0;
     const EDF_SAMPLING_AREA_SIZE: usize = 3;
 
     let energy_field_job_queue = Box::leak(Box::new(ArrayQueue::new(1)));
@@ -635,7 +635,7 @@ fn draw_physics(
             for j in 0..height {
                 let energy_density = edf[(i, j)];
                 let energy_density_sqrt = energy_density.sqrt() as f32;
-                let color = spectrum(energy_density_sqrt, (0.9 * energy_density_sqrt) as f32);
+                let color = spectrum(energy_density_sqrt, 0.9 * energy_density_sqrt);
                 let offset = j * width * BYTES_PER_PIXEL + i * BYTES_PER_PIXEL;
                 for i in 0..4 {
                     image_data[offset + i] = (color.components[i] * 255.0) as u8;

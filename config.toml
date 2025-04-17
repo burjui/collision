@@ -7,8 +7,8 @@ height = 800
 # dt = { fixed = 0.001 }
 # speed_factor = 0.5
 # gpu_integration = true
-restitution_coefficient = 1
-# global_gravity = [0, 1000]
+restitution_coefficient = 0.998
+global_gravity = [0, 1000]
 gravitational_constant = 10000
 # time_limit = 0.2
 # time_limit_action = "pause"
@@ -20,8 +20,8 @@ randomize_positions = true
 randomize_position_factor = 1
 
 [[demo.bricks]]
-position = [500, 200]
-size = [500, 500]
+position = [500, 300]
+size = [400, 400]
 # velocity = [1, 0]
 particle_radius = 2
 particle_spacing = 0.01

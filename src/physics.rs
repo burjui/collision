@@ -1,7 +1,7 @@
 use core::{f64, fmt};
 use std::{
     iter::zip,
-    mem::{swap, take},
+    mem::take,
     time::{Duration, Instant},
 };
 
@@ -11,10 +11,11 @@ use grid::{CellRecord, Grid};
 use hshg::Hshg;
 use object::{ObjectPrototype, ObjectSoa};
 use opencl3::kernel::{ExecuteKernel, Kernel};
-use rand::seq::SliceRandom;
+use rand::{rng, seq::SliceRandom};
 
 use crate::{
     app_config::{CONFIG, DtSource},
+    fixed_vec::FixedVec,
     gpu::{GPU, GpuBufferAccessMode, GpuDeviceBuffer},
     ring_buffer::RingBuffer,
     vector2::Vector2,
@@ -25,6 +26,8 @@ pub mod grid;
 pub mod hshg;
 pub mod object;
 
+const MAX_CANDIDATES_PER_OBJECT: usize = 64;
+
 pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     pub broad_phase: BroadPhase,
@@ -33,7 +36,7 @@ pub struct PhysicsEngine {
     grid: Grid,
     bvh: Bvh,
     hshg: Hshg,
-    collision_candidates: Vec<CollisionPair>,
+    collision_candidates: Vec<FixedVec<usize, MAX_CANDIDATES_PER_OBJECT>>,
     time: f64,
     constraints: AABB,
     stats: Stats,
@@ -413,28 +416,32 @@ impl PhysicsEngine {
     }
 
     fn process_collisions(&mut self) {
+        let start = Instant::now();
         self.collision_candidates.clear();
-        self.collision_candidates.reserve(self.objects.len() * 2);
+        self.collision_candidates
+            .resize(self.objects.len(), FixedVec::default());
         match self.broad_phase {
             BroadPhase::Grid => self.find_collision_candidates_grid(),
             BroadPhase::Bvh => self.find_collision_candidates_bvh(),
             BroadPhase::Hhsg => self.find_collision_candidates_hshg(),
         }
-        self.process_collision_candidates();
+        println!(
+            "found {} candidates in {:?}",
+            self.collision_candidates.iter().map(|c| c.len()).sum::<usize>(),
+            start.elapsed(),
+        );
+        let mut collision_candidates = Vec::default();
+        for (object1_index, c) in self.collision_candidates.iter().enumerate() {
+            for &object2_index in c.as_slice() {
+                collision_candidates.push((object1_index, object2_index));
+            }
+        }
+        collision_candidates.shuffle(&mut rng());
+        self.process_collision_candidates(&collision_candidates);
     }
 
     fn find_collision_candidates_grid(&mut self) {
-        const AREA_CELL_OFFSETS: [(isize, isize); 9] = [
-            (-1, -1),
-            (-1, 0),
-            (-1, 1),
-            (0, -1),
-            (0, 0),
-            (0, 1),
-            (1, -1),
-            (1, 0),
-            (1, 1),
-        ];
+        const CANDIDATE_CELL_OFFSETS: [(isize, isize); 5] = [(0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
         for range in self.grid.cell_iter() {
             for &CellRecord {
                 object_index: object1_index,
@@ -442,25 +449,30 @@ impl PhysicsEngine {
                 ..
             } in &self.grid.cell_records[range]
             {
-                // println!("cell ({x}, {y})");
-                for (ox, oy) in AREA_CELL_OFFSETS {
-                    let x = x.checked_add_signed(ox);
-                    let y = y.checked_add_signed(oy);
-                    if let (Some(x), Some(y)) = (x, y) {
-                        if x < self.grid.size().x && y < self.grid.size().y {
-                            if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
-                                for &CellRecord {
-                                    object_index: object2_index,
-                                    ..
-                                } in &self.grid.cell_records[start..end]
-                                {
-                                    if object2_index != object1_index {
-                                        self.collision_candidates.push(CollisionPair {
-                                            object1_index,
-                                            object2_index,
-                                        });
-                                    }
-                                }
+                let width = self.grid.size().x;
+                let height = self.grid.size().y;
+                let candidate_cell_coords = CANDIDATE_CELL_OFFSETS
+                    .map(|(ox, oy)| {
+                        x.checked_add_signed(ox)
+                            .filter(|&x| x < width)
+                            .and_then(|x| y.checked_add_signed(oy).filter(|&y| y < height).map(|y| (x, y)))
+                    })
+                    .into_iter()
+                    .flatten()
+                    .collect::<FixedVec<_, 5>>();
+                for &(x, y) in candidate_cell_coords.as_slice() {
+                    if let Some((start, end)) = self.grid.coords_to_cells[(x, y)] {
+                        for &CellRecord {
+                            object_index: object2_index,
+                            ..
+                        } in &self.grid.cell_records[start..end]
+                        {
+                            if object2_index != object1_index {
+                                Self::add_collission_candidate(
+                                    object1_index,
+                                    object2_index,
+                                    &mut self.collision_candidates,
+                                );
                             }
                         }
                     }
@@ -472,36 +484,39 @@ impl PhysicsEngine {
     fn find_collision_candidates_bvh(&mut self) {
         for object_index in 0..self.objects.len() {
             self.bvh
-                .find_intersections(object_index, &mut self.collision_candidates);
+                .find_intersections(object_index, |(object1_index, object2_index)| {
+                    if object2_index != object1_index {
+                        Self::add_collission_candidate(object1_index, object2_index, &mut self.collision_candidates);
+                    }
+                });
         }
     }
 
     fn find_collision_candidates_hshg(&mut self) {
-        self.hshg.find_collision_candidates(&mut self.collision_candidates);
+        self.hshg.find_collision_candidates(|(object1_index, object2_index)| {
+            if object2_index != object1_index {
+                Self::add_collission_candidate(object1_index, object2_index, &mut self.collision_candidates);
+            }
+        });
     }
 
-    fn process_collision_candidates(&mut self) {
-        for CollisionPair {
+    fn add_collission_candidate(
+        object1_index: usize,
+        object2_index: usize,
+        candidates: &mut [FixedVec<usize, MAX_CANDIDATES_PER_OBJECT>],
+    ) {
+        let CollisionPair {
             object1_index,
             object2_index,
-        } in &mut self.collision_candidates
-        {
-            if *object1_index > *object2_index {
-                swap(object1_index, object2_index);
-            }
+        } = CollisionPair::new(object1_index, object2_index);
+        let cds = &mut candidates[object1_index];
+        if !cds.contains(&object2_index) {
+            cds.push(object2_index);
         }
-        self.collision_candidates.sort_by(|a, b| {
-            a.object1_index
-                .cmp(&b.object1_index)
-                .then(a.object2_index.cmp(&b.object2_index))
-        });
-        self.collision_candidates.dedup();
-        self.collision_candidates.shuffle(&mut rand::rng());
-        for &CollisionPair {
-            object1_index,
-            object2_index,
-        } in &self.collision_candidates
-        {
+    }
+
+    fn process_collision_candidates(&mut self, candidates: &[(usize, usize)]) {
+        for &(object1_index, object2_index) in candidates {
             let object1_position = self.objects.positions[object1_index];
             let object2_position = self.objects.positions[object2_index];
             let object1_radius = self.objects.radii[object1_index];
@@ -646,6 +661,22 @@ pub struct GpuComputeOptions {
 pub struct CollisionPair {
     object1_index: usize,
     object2_index: usize,
+}
+
+impl CollisionPair {
+    pub fn new(object1_index: usize, object2_index: usize) -> Self {
+        let variants = [
+            Self {
+                object1_index: object2_index,
+                object2_index: object1_index,
+            },
+            Self {
+                object1_index,
+                object2_index,
+            },
+        ];
+        variants[(object1_index > object2_index) as usize]
+    }
 }
 
 #[derive(Clone, Debug)]

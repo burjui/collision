@@ -2,7 +2,6 @@
 
 use rdst::{RadixKey, RadixSort};
 
-use super::CollisionPair;
 use crate::vector2::Vector2;
 
 #[derive(Default, Clone)]
@@ -41,28 +40,23 @@ impl Bvh {
         bvh
     }
 
-    pub fn find_intersections(&self, object_index: usize, collisions: &mut Vec<CollisionPair>) {
+    pub fn find_intersections(&self, object_index: usize, mut f: impl FnMut((usize, usize))) {
         if !self.nodes.is_empty() {
-            self.find_intersections_with(object_index, self.root, collisions);
+            self.find_intersections_with(object_index, self.root, &mut f);
         }
     }
 
-    fn find_intersections_with(&self, object1_index: usize, node_id: NodeId, collisions: &mut Vec<CollisionPair>) {
+    fn find_intersections_with(&self, object1_index: usize, node_id: NodeId, f: &mut impl FnMut((usize, usize))) {
         let object_aabb = self.object_aabbs[object1_index];
         let Node { aabb, kind, .. } = &self.nodes[node_id.0];
         if object_aabb.intersects(aabb) {
             match *kind {
                 NodeKind::Leaf(object2_index) => {
-                    if object2_index != object1_index {
-                        collisions.push(CollisionPair {
-                            object1_index,
-                            object2_index,
-                        });
-                    }
+                    f((object1_index, object2_index));
                 }
                 NodeKind::Tree { left, right } => {
-                    self.find_intersections_with(object1_index, left, collisions);
-                    self.find_intersections_with(object1_index, right, collisions);
+                    self.find_intersections_with(object1_index, left, f);
+                    self.find_intersections_with(object1_index, right, f);
                 }
             }
         }

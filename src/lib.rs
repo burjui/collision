@@ -10,6 +10,7 @@
 #![feature(lazy_get)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(coroutines, coroutine_trait)]
+#![feature(array_try_map)]
 
 pub mod app_config;
 pub mod array2;

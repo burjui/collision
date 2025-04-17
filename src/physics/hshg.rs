@@ -3,7 +3,6 @@ use std::iter::zip;
 use rdst::{RadixKey, RadixSort};
 
 use super::{
-    CollisionPair,
     bvh::AABB,
     grid::{CellRecord, Grid, cell_at},
 };
@@ -77,18 +76,18 @@ impl Hshg {
         hshg
     }
 
-    pub fn find_collision_candidates(&self, candidates: &mut Vec<CollisionPair>) {
+    pub fn find_collision_candidates(&self, mut f: impl FnMut((usize, usize))) {
         if !self.grids.is_empty() {
             for level in (0..self.grids.len()).rev() {
                 for &CellRecord { object_index, .. } in &self.grids[level].cell_records {
                     let aabb = self.items[self.object_item[object_index]].aabb;
-                    self.find_candidates(object_index, aabb, level, candidates);
+                    self.find_candidates(object_index, aabb, level, &mut f);
                 }
             }
         }
     }
 
-    pub fn find_candidates(&self, object1_index: usize, aabb: AABB, level: usize, candidates: &mut Vec<CollisionPair>) {
+    pub fn find_candidates(&self, object1_index: usize, aabb: AABB, level: usize, f: &mut impl FnMut((usize, usize))) {
         let grid = &self.grids[level];
         let mut topleft_cell = cell_at(aabb.topleft, grid.position(), grid.cell_size());
         topleft_cell.x = topleft_cell.x.saturating_sub(1);
@@ -104,18 +103,13 @@ impl Hshg {
                         ..
                     } in &grid.cell_records[start..end]
                     {
-                        if object2_index != object1_index {
-                            candidates.push(CollisionPair {
-                                object1_index,
-                                object2_index,
-                            });
-                        }
+                        f((object1_index, object2_index));
                     }
                 }
             }
         }
         if level > 0 {
-            self.find_candidates(object1_index, aabb, level - 1, candidates);
+            self.find_candidates(object1_index, aabb, level - 1, f);
         }
     }
 }
