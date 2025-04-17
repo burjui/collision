@@ -1,4 +1,3 @@
-use core::f64;
 use std::{
     iter::zip,
     time::{Duration, Instant},
@@ -11,20 +10,17 @@ use rand::{rng, seq::SliceRandom};
 use crate::{
     app_config::{CONFIG, DtSource},
     bvh::{AABB, Bvh},
-    fixed_vec::FixedVec,
     gpu::{GPU, GpuBufferAccessMode, GpuDeviceBuffer},
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
     vector2::Vector2,
 };
 
-const MAX_CANDIDATES_PER_OBJECT: usize = 16;
-
 pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     objects: ObjectSoa,
     bvh: Bvh,
-    collision_candidates: Vec<FixedVec<usize, MAX_CANDIDATES_PER_OBJECT>>,
+    collision_candidates: Vec<NormalizedCollisionPair>,
     time: f64,
     constraints: AABB,
     stats: Stats,
@@ -52,7 +48,7 @@ impl PhysicsEngine {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
             bvh: Bvh::default(),
-            collision_candidates: Vec::default(),
+            collision_candidates: Default::default(),
             time: 0.0,
             constraints,
             stats: Stats::default(),
@@ -360,22 +356,39 @@ impl PhysicsEngine {
     fn process_collisions(&mut self) {
         let start = Instant::now();
         self.collision_candidates.clear();
-        self.collision_candidates
-            .resize(self.objects.len(), FixedVec::default());
+        self.collision_candidates.reserve(self.objects.len() * 2);
         self.find_collision_candidates_bvh();
         println!(
             "found {} candidates in {:?}",
-            self.collision_candidates.iter().map(|c| c.len()).sum::<usize>(),
+            self.collision_candidates.len(),
             start.elapsed(),
         );
-        let mut collision_candidates = Vec::default();
-        for (object1_index, c) in self.collision_candidates.iter().enumerate() {
-            for &object2_index in c.as_slice() {
-                collision_candidates.push((object1_index, object2_index));
-            }
-        }
-        collision_candidates.shuffle(&mut rng());
-        self.process_collision_candidates(&collision_candidates);
+
+        let start = Instant::now();
+        self.collision_candidates.sort_unstable_by(|cp1, cp2| {
+            cp1.object1_index
+                .cmp(&cp2.object1_index)
+                .then(cp1.object2_index.cmp(&cp2.object2_index))
+        });
+        println!("candidates sort {:?}", start.elapsed());
+
+        let start = Instant::now();
+        self.collision_candidates.dedup();
+        println!("candidates dedup {:?} ", start.elapsed());
+
+        let start = Instant::now();
+        self.collision_candidates.shuffle(&mut rng());
+        println!("candidates shuffle {:?}", start.elapsed());
+
+        Self::process_collision_candidates(
+            &self.collision_candidates,
+            self.restitution_coefficient,
+            &mut self.objects.positions,
+            &mut self.objects.velocities,
+            &self.objects.radii,
+            &self.objects.masses,
+            &self.objects.is_planet,
+        );
     }
 
     fn find_collision_candidates_bvh(&mut self) {
@@ -383,33 +396,31 @@ impl PhysicsEngine {
             self.bvh
                 .find_intersections(object_index, |(object1_index, object2_index)| {
                     if object2_index != object1_index {
-                        Self::add_collission_candidate(object1_index, object2_index, &mut self.collision_candidates);
+                        self.collision_candidates
+                            .push(NormalizedCollisionPair::new(object1_index, object2_index));
                     }
                 });
         }
     }
 
-    fn add_collission_candidate(
-        object1_index: usize,
-        object2_index: usize,
-        candidates: &mut [FixedVec<usize, MAX_CANDIDATES_PER_OBJECT>],
+    fn process_collision_candidates(
+        candidates: &[NormalizedCollisionPair],
+        restitution_coefficient: f64,
+        positions: &mut [Vector2<f64>],
+        velocities: &mut [Vector2<f64>],
+        radii: &[f64],
+        masses: &[f64],
+        is_planet: &[bool],
     ) {
-        let CollisionPair {
+        for &NormalizedCollisionPair {
             object1_index,
             object2_index,
-        } = CollisionPair::new(object1_index, object2_index);
-        let cds = &mut candidates[object1_index];
-        if !cds.contains(&object2_index) {
-            cds.push(object2_index);
-        }
-    }
-
-    fn process_collision_candidates(&mut self, candidates: &[(usize, usize)]) {
-        for &(object1_index, object2_index) in candidates {
-            let object1_position = self.objects.positions[object1_index];
-            let object2_position = self.objects.positions[object2_index];
-            let object1_radius = self.objects.radii[object1_index];
-            let object2_radius = self.objects.radii[object2_index];
+        } in candidates
+        {
+            let object1_position = positions[object1_index];
+            let object2_position = positions[object2_index];
+            let object1_radius = radii[object1_index];
+            let object2_radius = radii[object2_index];
             let distance_squared = (object1_position - object2_position).magnitude_squared();
             let collision_distance = object1_radius + object2_radius;
             if distance_squared < collision_distance * collision_distance {
@@ -418,11 +429,11 @@ impl PhysicsEngine {
                     object2_index,
                     distance_squared,
                     collision_distance,
-                    self.restitution_coefficient,
-                    &mut self.objects.positions,
-                    &mut self.objects.velocities,
-                    &self.objects.masses,
-                    &self.objects.is_planet,
+                    restitution_coefficient,
+                    positions,
+                    velocities,
+                    masses,
+                    is_planet,
                 );
             }
         }
@@ -529,12 +540,12 @@ pub struct GpuComputeOptions {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct CollisionPair {
+pub struct NormalizedCollisionPair {
     object1_index: usize,
     object2_index: usize,
 }
 
-impl CollisionPair {
+impl NormalizedCollisionPair {
     pub fn new(object1_index: usize, object2_index: usize) -> Self {
         let variants = [
             Self {

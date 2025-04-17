@@ -16,7 +16,7 @@ gravitational_constant = 10000
 [demo]
 object_radius = 10
 # enable_planets = true
-# randomize_positions = true
+randomize_positions = true
 randomize_position_factor = 1
 randomize_radii = true
 randomize_radius_factor = 1
@@ -25,8 +25,8 @@ randomize_radius_factor = 1
 position = [500, 300]
 size = [400, 400]
 # velocity = [1, 0]
-particle_radius = 4
-particle_spacing = 0.01
+particle_radius = 1
+particle_spacing = 1
 particle_mass = 0.1
 
 # [[demo.bricks]]
