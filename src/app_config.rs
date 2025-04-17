@@ -169,6 +169,10 @@ pub struct DemoConfig {
     pub randomize_positions: bool,
     #[serde(default)]
     pub randomize_position_factor: f64,
+    #[serde(default)]
+    pub randomize_radii: bool,
+    #[serde(default)]
+    pub randomize_radius_factor: f64,
 
     #[serde(default)]
     pub bricks: Vec<Brick>,

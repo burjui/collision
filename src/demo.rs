@@ -8,11 +8,7 @@ use vello::peniko::{
     color::{ColorSpace, Hsl, Srgb, palette::css},
 };
 
-use crate::{
-    app_config::{self, AppConfig, CONFIG},
-    physics::{PhysicsEngine, object::ObjectPrototype},
-    vector2::Vector2,
-};
+use crate::{app_config::CONFIG, object::ObjectPrototype, physics::PhysicsEngine, vector2::Vector2};
 
 pub fn create_demo(physics: &mut PhysicsEngine) {
     if CONFIG.demo.enable_planets {
@@ -71,8 +67,8 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j))
                 + if CONFIG.demo.randomize_positions {
                     Vector2::new(
-                        random::<f64>() * brick.particle_radius * CONFIG.demo.randomize_position_factor,
-                        random::<f64>() * brick.particle_radius * CONFIG.demo.randomize_position_factor,
+                        brick.particle_radius * random::<f64>() * CONFIG.demo.randomize_position_factor,
+                        brick.particle_radius * random::<f64>() * CONFIG.demo.randomize_position_factor,
                     )
                 } else {
                     Vector2::default()
@@ -84,9 +80,15 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
                 let rgb = Hsl::convert::<Srgb>(hsl);
                 Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
             };
+            let radius = brick.particle_radius
+                + if CONFIG.demo.randomize_radii {
+                    brick.particle_radius * random::<f64>() * CONFIG.demo.randomize_radius_factor
+                } else {
+                    0.0
+                };
             let id = physics.add(ObjectPrototype {
                 velocity: brick.velocity,
-                radius: brick.particle_radius,
+                radius,
                 mass: brick.particle_mass,
                 color,
                 ..ObjectPrototype::new(position)
@@ -136,8 +138,14 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
                     let rgb = Hsl::convert::<Srgb>(hsl);
                     Some(Color::new([rgb[0], rgb[1], rgb[2], 1.0]))
                 };
+                let radius = ball.particle_radius
+                    + if CONFIG.demo.randomize_radii {
+                        ball.particle_radius * random::<f64>() * CONFIG.demo.randomize_radius_factor
+                    } else {
+                        0.0
+                    };
                 let mut object = ObjectPrototype {
-                    radius: ball.particle_radius,
+                    radius,
                     mass: ball.particle_mass,
                     color,
                     ..ObjectPrototype::new(position)

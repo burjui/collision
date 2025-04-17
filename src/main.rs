@@ -17,13 +17,10 @@ use anyhow::anyhow;
 use collision::{
     app_config::{CONFIG, ColorSource, TimeLimitAction},
     array2::Array2,
+    bvh::{AABB, Bvh, Node, NodeKind},
     demo::create_demo,
     fps::FpsCalculator,
-    physics::{
-        BroadPhase, DurationStat, GpuComputeOptions, PhysicsEngine, Stats,
-        bvh::{AABB, Bvh, Node, NodeKind},
-        hshg::Hshg,
-    },
+    physics::{DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
 };
@@ -35,7 +32,7 @@ use rayon::{
 };
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
-    kurbo::{Affine, Circle, Line, Rect, Stroke},
+    kurbo::{Affine, Circle, Rect, Stroke},
     peniko::{Blob, Color, Fill, Image, ImageFormat, color::palette::css},
     util::{DeviceHandle, RenderContext, RenderSurface},
     wgpu::{Maintain, PresentMode},
@@ -119,7 +116,6 @@ pub fn main() -> anyhow::Result<()> {
         simulation_event_sender,
         rendering_event_queue,
         stats: Stats::default(),
-        broad_phase: BroadPhase::Grid,
         ready_to_exit,
         gpu_compute_options,
         redraw_job_queue,
@@ -137,7 +133,6 @@ pub fn main() -> anyhow::Result<()> {
         &mut stats_buffer,
         (app.last_fps, app.min_fps),
         physics.stats(),
-        physics.broad_phase,
         app.gpu_compute_options,
     )?;
     print!("{stats_buffer}");
@@ -232,25 +227,6 @@ fn simulation_thread(
                     show_edf = !show_edf;
                     redraw_needed = true;
                 }
-                SimulationThreadEvent::CycleBroadPhase => {
-                    physics.broad_phase = match physics.broad_phase {
-                        BroadPhase::Grid => {
-                            physics.stats_mut().bvh_duration = DurationStat::default();
-                            BroadPhase::Bvh
-                        }
-                        BroadPhase::Bvh => {
-                            physics.stats_mut().hshg_duration = DurationStat::default();
-                            BroadPhase::Hhsg
-                        }
-                        BroadPhase::Hhsg => {
-                            physics.stats_mut().grid_duration = DurationStat::default();
-                            BroadPhase::Grid
-                        }
-                    };
-                    physics.stats_mut().collisions_duration = DurationStat::default();
-                    send_app_event(app_event_loop_proxy, AppEvent::BroadPhaseUpdated(physics.broad_phase));
-                    redraw_needed = true;
-                }
                 SimulationThreadEvent::SetGpuComputeOptions(options) => gpu_compute_options = options,
                 SimulationThreadEvent::UnidirectionalKick {
                     mouse_position,
@@ -325,16 +301,11 @@ fn simulation_thread(
                     color_source,
                     draw_ids,
                     draw_grid,
-                    grid_position: physics.grid().position(),
-                    grid_size: physics.grid().size(),
-                    grid_cell_size: physics.grid().cell_size(),
                     constraints: physics.constraints(),
                     draw_edf: show_edf,
                     edf: edf.clone(),
                     edf_cell_size: EDF_CELL_SIZE,
                     bvh: physics.bvh().clone(),
-                    hshg: physics.hshg().clone(),
-                    broad_phase: physics.broad_phase,
                 }));
             }
         }
@@ -469,31 +440,9 @@ fn rendering_thread(
             for subscene in scenes {
                 scene.append(&subscene, None);
             }
-            match rendering_data.broad_phase {
-                BroadPhase::Grid => {
-                    if rendering_data.draw_grid && rendering_data.grid_cell_size > 0.0 {
-                        draw_grid(
-                            &mut scene,
-                            rendering_data.grid_position,
-                            rendering_data.grid_size,
-                            rendering_data.grid_cell_size,
-                        );
-                    }
-                }
-                BroadPhase::Bvh => {
-                    if rendering_data.draw_grid && !rendering_data.bvh.nodes.is_empty() {
-                        draw_bvh(&mut scene, &rendering_data.bvh.nodes);
-                    }
-                }
-                BroadPhase::Hhsg => {
-                    if rendering_data.draw_grid && !rendering_data.hshg.grids.is_empty() {
-                        for grid in &rendering_data.hshg.grids {
-                            draw_grid(&mut scene, grid.position(), grid.size(), grid.cell_size());
-                        }
-                    }
-                }
+            if rendering_data.draw_grid && !rendering_data.bvh.nodes.is_empty() {
+                draw_bvh(&mut scene, &rendering_data.bvh.nodes);
             }
-
             redraw_job_queue.force_push(scene);
             let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
             rendering_result_queue.send(()).unwrap();
@@ -676,40 +625,6 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_i
     );
 }
 
-fn draw_grid(scene: &mut Scene, grid_position: Vector2<f64>, grid_size: Vector2<usize>, cell_size: f64) {
-    #![allow(clippy::cast_possible_truncation)]
-    #![allow(clippy::cast_precision_loss)]
-    #![allow(clippy::cast_sign_loss)]
-    {
-        let top = grid_position.y;
-        let bottom = top + grid_size.y as f64 * cell_size;
-        for i in 0..=grid_size.x {
-            let x = grid_position.x + i as f64 * cell_size;
-            scene.stroke(
-                &Stroke::default(),
-                Affine::IDENTITY,
-                css::LIGHT_GRAY,
-                None,
-                &Line::new((x, top), (x, bottom)),
-            );
-        }
-    }
-    {
-        let left = grid_position.x;
-        let right = left + grid_size.x as f64 * cell_size;
-        for j in 0..=grid_size.y {
-            let y = grid_position.y + j as f64 * cell_size;
-            scene.stroke(
-                &Stroke::default(),
-                Affine::IDENTITY,
-                css::LIGHT_GRAY,
-                None,
-                &Line::new((left, y), (right, y)),
-            );
-        }
-    }
-}
-
 fn draw_bvh(scene: &mut Scene, bvh: &[Node]) {
     for node in bvh {
         if let NodeKind::Tree { .. } = &node.kind {
@@ -734,13 +649,12 @@ fn draw_stats(
     text: &mut SimpleText,
     (fps, min_fps): (usize, usize),
     stats: &Stats,
-    broad_phase: BroadPhase,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
     const TEXT_SIZE: f32 = 16.0;
 
     let buffer = &mut String::new();
-    write_stats(buffer, (fps, min_fps), stats, broad_phase, gpu_compute_options)?;
+    write_stats(buffer, (fps, min_fps), stats, gpu_compute_options)?;
     text.add(
         scene,
         TEXT_SIZE,
@@ -756,7 +670,6 @@ fn draw_stats(
 #[derive(Clone)]
 enum AppEvent {
     StatsUpdated(Stats),
-    BroadPhaseUpdated(BroadPhase),
     RequestRedraw,
     Exit,
 }
@@ -766,7 +679,6 @@ impl Debug for AppEvent {
         write!(f, "AppEvent::")?;
         match self {
             Self::StatsUpdated(_) => write!(f, "StatsUpdated(...)"),
-            Self::BroadPhaseUpdated(bp) => write!(f, "BroadPhaseUpdated({bp})"),
             Self::RequestRedraw => f.write_str("RedrawRequest"),
             Self::Exit => f.write_str("Exit"),
         }
@@ -779,7 +691,6 @@ enum SimulationThreadEvent {
     ToggleAdvanceTime,
     ToggleDrawIds,
     ToggleDrawGrid,
-    CycleBroadPhase,
     SetColorSource(ColorSource),
     SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
@@ -814,16 +725,11 @@ struct RenderingData {
     color_source: ColorSource,
     draw_ids: bool,
     draw_grid: bool,
-    grid_position: Vector2<f64>,
-    grid_size: Vector2<usize>,
-    grid_cell_size: f64,
     constraints: AABB,
     draw_edf: bool,
     edf: Array2<f64>,
     edf_cell_size: f64,
     bvh: Bvh,
-    hshg: Hshg,
-    broad_phase: BroadPhase,
 }
 
 struct VelloApp<'s> {
@@ -845,7 +751,6 @@ struct VelloApp<'s> {
     simulation_event_sender: mpsc::Sender<SimulationThreadEvent>,
     rendering_event_queue: &'s SegQueue<RenderingThreadEvent>,
     stats: Stats,
-    broad_phase: BroadPhase,
     ready_to_exit: Arc<Barrier>,
     gpu_compute_options: GpuComputeOptions,
     redraw_job_queue: &'s ArrayQueue<Scene>,
@@ -940,11 +845,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::ToggleDrawIds)
                                 .unwrap();
                         }
-                        Key::Character("p") => {
-                            self.simulation_event_sender
-                                .send(SimulationThreadEvent::CycleBroadPhase)
-                                .unwrap();
-                        }
                         Key::Character("1") => {
                             self.simulation_event_sender
                                 .send(SimulationThreadEvent::SetColorSource(ColorSource::None))
@@ -1015,7 +915,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         &mut self.text,
                         (self.last_fps, self.min_fps),
                         &self.stats,
-                        self.broad_phase,
                         self.gpu_compute_options,
                     )
                     .expect("failed to draw stats");
@@ -1060,10 +959,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 self.stats = stats;
                 request_redraw(self.state.as_ref());
             }
-            AppEvent::BroadPhaseUpdated(bp) => {
-                self.broad_phase = bp;
-                request_redraw(self.state.as_ref());
-            }
             AppEvent::RequestRedraw => request_redraw(self.state.as_ref()),
             AppEvent::Exit => {
                 self.ready_to_exit.wait();
@@ -1100,14 +995,11 @@ fn write_stats(
         sim_time,
         object_count,
         integration_duration,
-        grid_duration,
         bvh_duration,
-        hshg_duration,
         collisions_duration,
         constraints_duration,
         total_duration: _,
     }: &Stats,
-    broad_phase: BroadPhase,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
     writeln!(buffer, "FPS: {fps} (min {min_fps})")?;
@@ -1128,10 +1020,8 @@ fn write_stats(
     )?;
     writeln!(buffer, "objects: {}", object_count)?;
     write_duration_stat(buffer, "integration", integration_duration)?;
-    write_duration_stat(buffer, &format!("collisions ({})", broad_phase), collisions_duration)?;
-    write_duration_stat(buffer, "grid", grid_duration)?;
+    write_duration_stat(buffer, "collisions", collisions_duration)?;
     write_duration_stat(buffer, "bvh", bvh_duration)?;
-    write_duration_stat(buffer, "hshg", hshg_duration)?;
     write_duration_stat(buffer, "constraints", constraints_duration)?;
     Ok(())
 }
