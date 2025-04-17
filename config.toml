@@ -60,5 +60,5 @@ particle_mass = 0.1
 # particle_mass = 0.1
 
 [rendering]
-color = "default"
+color = "dark"
 show_edf = true

@@ -206,6 +206,6 @@ pub enum ColorSource {
     #[serde(rename = "velocity")]
     Velocity,
 
-    #[serde(rename = "black")]
+    #[serde(rename = "dark")]
     Dark,
 }
