@@ -440,8 +440,8 @@ fn rendering_thread(
             for subscene in scenes {
                 scene.append(&subscene, None);
             }
-            if rendering_data.draw_grid && !rendering_data.bvh.nodes.is_empty() {
-                draw_bvh(&mut scene, &rendering_data.bvh.nodes);
+            if rendering_data.draw_grid && !rendering_data.bvh.nodes().is_empty() {
+                draw_bvh(&mut scene, rendering_data.bvh.nodes());
             }
             redraw_job_queue.force_push(scene);
             let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
