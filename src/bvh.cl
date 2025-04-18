@@ -37,7 +37,9 @@ bool intersects(const AABB *a, const AABB *b) {
         && a->bottomright.y >= b->topleft.y;
 }
 
-void find_intersections_with(
+#define MAX_CANDIDATES 10
+
+uint find_intersections_with(
     uint node_id,
     uint object1_index,
     global const Node *bvh_nodes,
@@ -45,7 +47,7 @@ void find_intersections_with(
     global const double2 *positions,
     global const double *radii,
     uint2 *candidates,
-    const uint2 *candidates_end
+    uint candidate_index
 ) {
     const Node node = bvh_nodes[node_id];
     const AABB object_aabb = object_aabbs[object1_index];
@@ -59,20 +61,21 @@ void find_intersections_with(
                     const double object2_radius = radii[object2_index];
                     const double d = distance(object1_position, object2_position);
                     const double collision_distance = object1_radius + object2_radius;
-                    if ((d < collision_distance) && (candidates < candidates_end)) {
+                    if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
                         if (object1_index < object2_index) {
-                            *candidates = (uint2)(object1_index, object2_index);
+                            candidates[candidate_index] = (uint2)(object1_index, object2_index);
                         } else {
-                            *candidates = (uint2)(object2_index, object1_index);
+                            candidates[candidate_index] = (uint2)(object2_index, object1_index);
                         }
-                        candidates += 1;
+                        candidate_index += 1;
                     }
                 }
         } else {
-            find_intersections_with(node.kind.tree.left, object1_index, bvh_nodes, object_aabbs, positions, radii, candidates, candidates_end);
-            find_intersections_with(node.kind.tree.right, object1_index, bvh_nodes, object_aabbs, positions, radii, candidates, candidates_end);
+            candidate_index = find_intersections_with(node.kind.tree.left, object1_index, bvh_nodes, object_aabbs, positions, radii, candidates, candidate_index);
+            candidate_index = find_intersections_with(node.kind.tree.right, object1_index, bvh_nodes, object_aabbs, positions, radii, candidates, candidate_index);
         }
     }
+    return candidate_index;
 }
 
 kernel void bvh_find_candidates(
@@ -81,17 +84,16 @@ kernel void bvh_find_candidates(
     global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
-    global uint2 *candidates,
+    global uint2 *global_candidates,
     const uint max_candidates
 ) {
     uint object1_index = get_global_id(0);
-    uint candidates_count = 0;
-    uint2 private_candidates[10];
-    for (uint i = 0; i < 10; ++i) {
-        private_candidates[i] = (uint2)(0, 0);
+    uint2 candidates[MAX_CANDIDATES];
+    for (uint i = 0; i < MAX_CANDIDATES; ++i) {
+        candidates[i] = (uint2)(0, 0);
     }
-    find_intersections_with(root, object1_index, bvh_nodes, object_aabbs, positions, radii, private_candidates, private_candidates + candidates_count);
-    for (uint i = 0; i < 10; ++i) {
-        candidates[object1_index * max_candidates + i] = private_candidates[i];
+    uint candidates_end = find_intersections_with(root, object1_index, bvh_nodes, object_aabbs, positions, radii, candidates, 0);
+    for (uint i = 0; i < candidates_end; ++i) {
+        global_candidates[object1_index * max_candidates] = candidates[i];
     }
 }
