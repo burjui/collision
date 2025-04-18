@@ -722,14 +722,11 @@ pub struct NormalizedCollisionPair {
 
 impl NormalizedCollisionPair {
     pub fn new(object1_index: usize, object2_index: usize) -> Self {
-        let (object1_index, object2_index) = if object1_index < object2_index {
-            (object1_index, object2_index)
-        } else {
-            (object2_index, object1_index)
-        };
+        let object1_index = u32::try_from(object1_index).unwrap();
+        let object2_index = u32::try_from(object2_index).unwrap();
         Self {
-            object1_index: u32::try_from(object1_index).unwrap(),
-            object2_index: u32::try_from(object2_index).unwrap(),
+            object1_index: object1_index.min(object2_index),
+            object2_index: object1_index.max(object2_index),
         }
     }
 }
