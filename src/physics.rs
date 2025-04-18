@@ -6,6 +6,10 @@ use std::{
 use anyhow::Context;
 use opencl3::kernel::{ExecuteKernel, Kernel};
 use rand::{rng, seq::SliceRandom};
+use rayon::{
+    ThreadPool, ThreadPoolBuilder,
+    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+};
 
 use crate::{
     app_config::{CONFIG, DtSource},
@@ -20,7 +24,7 @@ pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     objects: ObjectSoa,
     bvh: Bvh,
-    collision_candidates: Vec<NormalizedCollisionPair>,
+    candidates: Vec<Vec<NormalizedCollisionPair>>,
     time: f64,
     constraints: AABB,
     stats: Stats,
@@ -33,6 +37,7 @@ pub struct PhysicsEngine {
     integration_gpu_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
     gpu_planet_masses: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
+    thread_pool: ThreadPool,
 }
 
 impl PhysicsEngine {
@@ -44,11 +49,12 @@ impl PhysicsEngine {
         let integration_program = GPU.build_program("src/leapfrog_yoshida.cl")?;
         let integration_kernel =
             Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
+        let thread_count = num_cpus::get();
         Ok(Self {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
             bvh: Bvh::default(),
-            collision_candidates: Default::default(),
+            candidates: vec![Vec::default(); thread_count],
             time: 0.0,
             constraints,
             stats: Stats::default(),
@@ -61,6 +67,7 @@ impl PhysicsEngine {
             integration_gpu_planet_mass_buffer: None,
             gpu_planet_masses: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
+            thread_pool: ThreadPoolBuilder::new().num_threads(thread_count).build().unwrap(),
         })
     }
 
@@ -355,56 +362,66 @@ impl PhysicsEngine {
 
     fn process_collisions(&mut self) {
         let start = Instant::now();
-        self.collision_candidates.clear();
-        self.collision_candidates.reserve(self.objects.len() * 2);
-        self.find_collision_candidates_bvh();
-        println!(
-            "found {} candidates in {:?}",
-            self.collision_candidates.len(),
-            start.elapsed(),
-        );
-
-        let start = Instant::now();
-        self.collision_candidates.sort_unstable_by(|cp1, cp2| {
-            cp1.object1_index
-                .cmp(&cp2.object1_index)
-                .then(cp1.object2_index.cmp(&cp2.object2_index))
+        let chunk_size = self.objects.len().div_ceil(self.thread_pool.current_num_threads());
+        let object_count = self.objects.len();
+        let candidates = self.thread_pool.install(|| {
+            self.candidates
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(chunk_index, candidates)| {
+                    candidates.clear();
+                    for i in 0..chunk_size {
+                        let object_index = chunk_index * chunk_size + i;
+                        if object_index < object_count {
+                            self.bvh.find_intersections(object_index, candidates);
+                        }
+                    }
+                    candidates.sort_unstable();
+                    candidates.dedup();
+                });
+            self.candidates
+                .par_iter_mut()
+                .reduce_with(|result, v| {
+                    result.append(v);
+                    result
+                })
+                .unwrap()
         });
-        println!("candidates sort {:?}", start.elapsed());
+        println!("found {} candidates in {:?}", candidates.len(), start.elapsed());
 
         let start = Instant::now();
-        self.collision_candidates.dedup();
+        candidates.sort_unstable();
+        println!("candidates sort {:?} ", start.elapsed());
+
+        let start = Instant::now();
+        candidates.dedup();
         println!("candidates dedup {:?} ", start.elapsed());
 
         let start = Instant::now();
-        self.collision_candidates.shuffle(&mut rng());
-        println!("candidates shuffle {:?}", start.elapsed());
+        candidates.shuffle(&mut rng());
+        println!("candidates shuffle {:?} ", start.elapsed());
 
-        Self::process_collision_candidates(
-            &self.collision_candidates,
-            self.restitution_coefficient,
-            &mut self.objects.positions,
-            &mut self.objects.velocities,
-            &self.objects.radii,
-            &self.objects.masses,
-            &self.objects.is_planet,
-        );
-    }
-
-    fn find_collision_candidates_bvh(&mut self) {
-        for object_index in 0..self.objects.len() {
-            self.bvh
-                .find_intersections(object_index, |(object1_index, object2_index)| {
-                    if object2_index != object1_index {
-                        self.collision_candidates
-                            .push(NormalizedCollisionPair::new(object1_index, object2_index));
-                    }
-                });
+        for &mut NormalizedCollisionPair {
+            object1_index,
+            object2_index,
+        } in candidates
+        {
+            Self::process_collision_candidate(
+                object1_index,
+                object2_index,
+                self.restitution_coefficient,
+                &mut self.objects.positions,
+                &mut self.objects.velocities,
+                &self.objects.radii,
+                &self.objects.masses,
+                &self.objects.is_planet,
+            );
         }
     }
 
-    fn process_collision_candidates(
-        candidates: &[NormalizedCollisionPair],
+    fn process_collision_candidate(
+        object1_index: usize,
+        object2_index: usize,
         restitution_coefficient: f64,
         positions: &mut [Vector2<f64>],
         velocities: &mut [Vector2<f64>],
@@ -412,30 +429,24 @@ impl PhysicsEngine {
         masses: &[f64],
         is_planet: &[bool],
     ) {
-        for &NormalizedCollisionPair {
-            object1_index,
-            object2_index,
-        } in candidates
-        {
-            let object1_position = positions[object1_index];
-            let object2_position = positions[object2_index];
-            let object1_radius = radii[object1_index];
-            let object2_radius = radii[object2_index];
-            let distance_squared = (object1_position - object2_position).magnitude_squared();
-            let collision_distance = object1_radius + object2_radius;
-            if distance_squared < collision_distance * collision_distance {
-                Self::process_object_collision(
-                    object1_index,
-                    object2_index,
-                    distance_squared,
-                    collision_distance,
-                    restitution_coefficient,
-                    positions,
-                    velocities,
-                    masses,
-                    is_planet,
-                );
-            }
+        let object1_position = positions[object1_index];
+        let object2_position = positions[object2_index];
+        let object1_radius = radii[object1_index];
+        let object2_radius = radii[object2_index];
+        let distance_squared = (object1_position - object2_position).magnitude_squared();
+        let collision_distance = object1_radius + object2_radius;
+        if distance_squared < collision_distance * collision_distance {
+            Self::process_object_collision(
+                object1_index,
+                object2_index,
+                distance_squared,
+                collision_distance,
+                restitution_coefficient,
+                positions,
+                velocities,
+                masses,
+                is_planet,
+            );
         }
     }
 
@@ -539,7 +550,7 @@ pub struct GpuComputeOptions {
     pub integration: bool,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NormalizedCollisionPair {
     object1_index: usize,
     object2_index: usize,

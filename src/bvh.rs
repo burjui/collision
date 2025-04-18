@@ -1,8 +1,4 @@
-#![warn(clippy::mismatching_type_param_order)]
-
-use rdst::{RadixKey, RadixSort};
-
-use crate::vector2::Vector2;
+use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
@@ -35,28 +31,36 @@ impl Bvh {
             nodes: Vec::with_capacity(positions.len() * 2),
             root: NodeId::default(),
         };
-        items.radix_sort_unstable();
+        items.sort_unstable_by_key(|item| item.morton_code);
         bvh.root = bvh.create_subtree(&items);
         bvh
     }
 
-    pub fn find_intersections(&self, object_index: usize, mut f: impl FnMut((usize, usize))) {
+    pub fn find_intersections(&self, object_index: usize, candidates: &mut Vec<NormalizedCollisionPair>) {
         if !self.nodes.is_empty() {
-            self.find_intersections_with(object_index, self.root, &mut f);
+            self.find_intersections_with(0, object_index, self.root, candidates);
         }
     }
 
-    fn find_intersections_with(&self, object1_index: usize, node_id: NodeId, f: &mut impl FnMut((usize, usize))) {
+    fn find_intersections_with(
+        &self,
+        level: usize,
+        object1_index: usize,
+        node_id: NodeId,
+        candidates: &mut Vec<NormalizedCollisionPair>,
+    ) {
         let object_aabb = self.object_aabbs[object1_index];
         let Node { aabb, kind, .. } = &self.nodes[node_id.0];
         if object_aabb.intersects(aabb) {
             match *kind {
                 NodeKind::Leaf(object2_index) => {
-                    f((object1_index, object2_index));
+                    if object2_index != object1_index {
+                        candidates.push(NormalizedCollisionPair::new(object1_index, object2_index));
+                    }
                 }
                 NodeKind::Tree { left, right } => {
-                    self.find_intersections_with(object1_index, left, f);
-                    self.find_intersections_with(object1_index, right, f);
+                    self.find_intersections_with(level + 1, object1_index, left, candidates);
+                    self.find_intersections_with(level + 1, object1_index, right, candidates);
                 }
             }
         }
@@ -119,14 +123,6 @@ struct Item {
     object_index: usize,
     aabb: AABB,
     morton_code: u32,
-}
-
-impl RadixKey for Item {
-    const LEVELS: usize = u32::LEVELS;
-
-    fn get_level(&self, level: usize) -> u8 {
-        self.morton_code.get_level(level)
-    }
 }
 
 #[derive(Default, Clone, Copy)]
