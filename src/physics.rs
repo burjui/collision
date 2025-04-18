@@ -381,7 +381,10 @@ impl PhysicsEngine {
 
     fn process_collisions(&mut self) {
         let start = Instant::now();
+        println!("self.gpu_compute_options.bvh: {}", self.gpu_compute_options.bvh);
         if self.gpu_compute_options.bvh {
+            self.find_collision_candidates_gpu();
+        } else {
             Self::find_collision_candidates_cpu(
                 &self.bvh,
                 &self.thread_pool,
@@ -389,8 +392,6 @@ impl PhysicsEngine {
                 &mut self.candidates_flat,
                 self.objects.len(),
             );
-        } else {
-            self.find_collision_candidates_gpu();
         };
         println!(
             "found {} candidates in {:?}",
