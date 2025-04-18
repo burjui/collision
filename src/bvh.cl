@@ -53,7 +53,7 @@ uint find_intersections_with(
     const double2 object1_position = positions[object1_index];
     const double object1_radius = radii[object1_index];
 
-    #define STACK_SIZE 64
+    #define STACK_SIZE 16
     uint stack[STACK_SIZE];
     int sp = 0;
     stack[sp++] = root;
@@ -64,18 +64,18 @@ uint find_intersections_with(
         if (intersects(&object_aabb, &node.aabb)) {
             if (node.kind.tag == TAG_LEAF) {
                 uint object2_index = node.kind.leaf.object2_index;
-                    if (object2_index != object1_index) {
-                        const double2 object2_position = positions[object2_index];
-                        const double object2_radius = radii[object2_index];
-                        const double d = distance(object1_position, object2_position);
-                        const double collision_distance = object1_radius + object2_radius;
-                        if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
-                            uint min_i = min(object1_index, object2_index);
-                            uint max_i = max(object1_index, object2_index);
-                            candidates[candidate_index] = (uint2)(min_i, max_i);
-                            candidate_index += 1;
-                        }
+                if (object2_index != object1_index) {
+                    const double2 object2_position = positions[object2_index];
+                    const double object2_radius = radii[object2_index];
+                    const double d = distance(object1_position, object2_position);
+                    const double collision_distance = object1_radius + object2_radius;
+                    if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
+                        uint min_i = min(object1_index, object2_index);
+                        uint max_i = max(object1_index, object2_index);
+                        candidates[candidate_index] = (uint2)(min_i, max_i);
+                        candidate_index += 1;
                     }
+                }
             } else {
                 stack[sp++] = node.kind.tree.left;
                 stack[sp++] = node.kind.tree.right;
