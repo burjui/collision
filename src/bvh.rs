@@ -184,7 +184,7 @@ pub struct Node {
     pub kind: NodeKind,
 }
 
-#[repr(C, u8)]
+#[repr(C, u32)]
 #[derive(Clone, Copy)]
 pub enum NodeKind {
     Leaf(u32),

@@ -1,5 +1,6 @@
 use std::{
     iter::zip,
+    mem::swap,
     time::{Duration, Instant},
 };
 
@@ -382,6 +383,7 @@ impl PhysicsEngine {
         // let candidates =
         // Self::find_collision_candidates_cpu(&self.bvh, &self.thread_pool, &mut self.candidates, self.objects.len());
         let mut candidates = self.find_collision_candidates_gpu();
+        let candidates = &mut candidates;
         println!("found {} candidates in {:?}", candidates.len(), start.elapsed());
 
         let start = Instant::now();
@@ -416,7 +418,7 @@ impl PhysicsEngine {
         println!("candidates shuffle {:?} ", start.elapsed());
 
         let start = Instant::now();
-        for NormalizedCollisionPair {
+        for &mut NormalizedCollisionPair {
             object1_index,
             object2_index,
         } in candidates
@@ -468,7 +470,7 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_gpu(&mut self) -> Vec<NormalizedCollisionPair> {
-        const MAX_CANDIDATES: u32 = 16;
+        const MAX_CANDIDATES: u32 = 10;
 
         if self
             .gpu_bvh_nodes
@@ -515,6 +517,7 @@ impl PhysicsEngine {
         let gpu_bvh_object_positions = self.gpu_bvh_object_positions.as_mut().unwrap();
         let gpu_bvh_object_radii = self.gpu_bvh_object_radii.as_mut().unwrap();
         let gpu_bvh_object_candidates = self.gpu_bvh_object_candidates.as_mut().unwrap();
+        let start = Instant::now();
         GPU.enqueue_write_device_buffer(gpu_bvh_nodes, &self.bvh.nodes())
             .context("Failed to write gpu_bvh_nodes")
             .unwrap();
@@ -531,11 +534,15 @@ impl PhysicsEngine {
         GPU.enqueue_write_device_buffer(gpu_bvh_object_candidates, &candidates)
             .context("Failed to write gpu_bvh_object_candidates")
             .unwrap();
+        GPU.wait_for_queue_completion().unwrap();
+        println!("GPU BVH write buffers {:?}", start.elapsed());
+
+        let start = Instant::now();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
-            kernel.set_arg(gpu_bvh_nodes.buffer());
             kernel.set_arg(&self.bvh.root());
+            kernel.set_arg(gpu_bvh_nodes.buffer());
             kernel.set_arg(gpu_bvh_object_aabbs.buffer());
             kernel.set_arg(gpu_bvh_object_positions.buffer());
             kernel.set_arg(gpu_bvh_object_radii.buffer());
@@ -545,11 +552,19 @@ impl PhysicsEngine {
         GPU.enqueue_execute_kernel(&mut kernel)
             .context("Failed to execute kernel")
             .unwrap();
+        GPU.wait_for_queue_completion().unwrap();
+        println!("GPU BVH execute kernel {:?}", start.elapsed());
+
         GPU.enqueue_read_device_buffer(gpu_bvh_object_candidates, &mut candidates)
             .context("Failed to read gpu_bvh_object_candidates")
             .unwrap();
         GPU.wait_for_queue_completion().unwrap();
         candidates.retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
+        candidates.iter_mut().for_each(|pair| {
+            if pair.object1_index > pair.object2_index {
+                swap(&mut pair.object1_index, &mut pair.object2_index);
+            }
+        });
         candidates
     }
 
