@@ -56,6 +56,7 @@ pub fn main() -> anyhow::Result<()> {
     let ready_to_exit = Arc::new(Barrier::new(3));
     let gpu_compute_options = GpuComputeOptions {
         integration: CONFIG.simulation.gpu_integration,
+        bvh: CONFIG.simulation.gpu_bvh,
     };
     let rendering_thread_ready = Arc::new(Barrier::new(3));
     let (rendering_result_sender, rendering_result_receiver) = mpsc::channel();
@@ -870,8 +871,14 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::SetColorSource(ColorSource::Dark))
                                 .unwrap();
                         }
-                        Key::Character("a") => {
+                        Key::Character("l") => {
                             self.gpu_compute_options.integration = !self.gpu_compute_options.integration;
+                            self.simulation_event_sender
+                                .send(SimulationThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
+                                .unwrap();
+                        }
+                        Key::Character("p") => {
+                            self.gpu_compute_options.bvh = !self.gpu_compute_options.bvh;
                             self.simulation_event_sender
                                 .send(SimulationThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
                                 .unwrap();
@@ -1009,18 +1016,16 @@ fn write_stats(
         write!(buffer, " ({action} at {time_limit})")?;
     }
     writeln!(buffer)?;
+
+    const FLAG_NAMES: [&str; 2] = ["off", "on"];
     writeln!(
         buffer,
-        "gpu compute: {}",
-        if gpu_compute_options.integration {
-            "integration"
-        } else {
-            "off"
-        }
+        "gpu compute: integration {}, bvh {}",
+        FLAG_NAMES[gpu_compute_options.integration as usize], FLAG_NAMES[gpu_compute_options.bvh as usize]
     )?;
     writeln!(buffer, "objects: {}", object_count)?;
     write_duration_stat(buffer, "integration", integration_duration)?;
-    write_duration_stat(buffer, "collisions", collisions_duration)?;
+    write_duration_stat(buffer, "collision", collisions_duration)?;
     write_duration_stat(buffer, "bvh", bvh_duration)?;
     write_duration_stat(buffer, "constraints", constraints_duration)?;
     Ok(())

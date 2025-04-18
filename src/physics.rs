@@ -1,6 +1,5 @@
 use std::{
     iter::zip,
-    mem::swap,
     time::{Duration, Instant},
 };
 
@@ -27,6 +26,7 @@ pub struct PhysicsEngine {
     objects: ObjectSoa,
     bvh: Bvh,
     candidates: Vec<Vec<NormalizedCollisionPair>>,
+    candidates_flat: Vec<NormalizedCollisionPair>,
     time: f64,
     constraints: AABB,
     stats: Stats,
@@ -66,6 +66,7 @@ impl PhysicsEngine {
             objects: ObjectSoa::default(),
             bvh: Bvh::default(),
             candidates: vec![Vec::default(); thread_count],
+            candidates_flat: Vec::default(),
             time: 0.0,
             constraints,
             stats: Stats::default(),
@@ -380,18 +381,30 @@ impl PhysicsEngine {
 
     fn process_collisions(&mut self) {
         let start = Instant::now();
-        // let candidates =
-        // Self::find_collision_candidates_cpu(&self.bvh, &self.thread_pool, &mut self.candidates, self.objects.len());
-        let mut candidates = self.find_collision_candidates_gpu();
-        let candidates = &mut candidates;
-        println!("found {} candidates in {:?}", candidates.len(), start.elapsed());
+        if self.gpu_compute_options.bvh {
+            Self::find_collision_candidates_cpu(
+                &self.bvh,
+                &self.thread_pool,
+                &mut self.candidates,
+                &mut self.candidates_flat,
+                self.objects.len(),
+            );
+        } else {
+            self.find_collision_candidates_gpu();
+        };
+        println!(
+            "found {} candidates in {:?}",
+            self.candidates_flat.len(),
+            start.elapsed()
+        );
 
         let start = Instant::now();
-        self.thread_pool.install(|| candidates.par_sort_unstable());
+        self.thread_pool.install(|| self.candidates_flat.par_sort_unstable());
         println!("candidates sort {:?} ", start.elapsed());
 
         let start = Instant::now();
-        let max_candidates_per_object = candidates
+        let max_candidates_per_object = self
+            .candidates_flat
             .chunk_by(|a, b| a.object1_index == b.object1_index)
             .map(<[_]>::len)
             .max()
@@ -404,24 +417,24 @@ impl PhysicsEngine {
         );
 
         let start = Instant::now();
-        let previous_length = candidates.len();
-        candidates.dedup();
+        let previous_length = self.candidates_flat.len();
+        self.candidates_flat.dedup();
         println!(
             "candidates dedup {} -> {} {:?}",
             previous_length,
-            candidates.len(),
+            self.candidates_flat.len(),
             start.elapsed()
         );
 
         let start = Instant::now();
-        candidates.shuffle(&mut rng());
+        self.candidates_flat.shuffle(&mut rng());
         println!("candidates shuffle {:?} ", start.elapsed());
 
         let start = Instant::now();
-        for &mut NormalizedCollisionPair {
+        for &NormalizedCollisionPair {
             object1_index,
             object2_index,
-        } in candidates
+        } in &self.candidates_flat
         {
             Self::process_collision_candidate(
                 usize::try_from(object1_index).unwrap(),
@@ -441,8 +454,9 @@ impl PhysicsEngine {
         bvh: &Bvh,
         thread_pool: &ThreadPool,
         candidates: &'a mut Vec<Vec<NormalizedCollisionPair>>,
+        candidates_flat: &mut Vec<NormalizedCollisionPair>,
         object_count: usize,
-    ) -> &'a mut Vec<NormalizedCollisionPair> {
+    ) {
         let chunk_size = object_count.div_ceil(thread_pool.current_num_threads());
         thread_pool.install(|| {
             candidates
@@ -459,17 +473,20 @@ impl PhysicsEngine {
                     candidates.sort_unstable();
                     candidates.dedup();
                 });
-            candidates
-                .par_iter_mut()
-                .reduce_with(|result, v| {
-                    result.append(v);
-                    result
-                })
-                .unwrap()
+            candidates_flat.clear();
+            candidates_flat.append(
+                candidates
+                    .par_iter_mut()
+                    .reduce_with(|result, v| {
+                        result.append(v);
+                        result
+                    })
+                    .unwrap(),
+            );
         })
     }
 
-    fn find_collision_candidates_gpu(&mut self) -> Vec<NormalizedCollisionPair> {
+    fn find_collision_candidates_gpu(&mut self) {
         const MAX_CANDIDATES: u32 = 10;
 
         if self
@@ -517,7 +534,6 @@ impl PhysicsEngine {
         let gpu_bvh_object_positions = self.gpu_bvh_object_positions.as_mut().unwrap();
         let gpu_bvh_object_radii = self.gpu_bvh_object_radii.as_mut().unwrap();
         let gpu_bvh_object_candidates = self.gpu_bvh_object_candidates.as_mut().unwrap();
-        let start = Instant::now();
         GPU.enqueue_write_device_buffer(gpu_bvh_nodes, &self.bvh.nodes())
             .context("Failed to write gpu_bvh_nodes")
             .unwrap();
@@ -530,14 +546,16 @@ impl PhysicsEngine {
         GPU.enqueue_write_device_buffer(gpu_bvh_object_radii, &self.objects.radii)
             .context("Failed to write gpu_bvh_object_radii")
             .unwrap();
-        let mut candidates = vec![NormalizedCollisionPair::new(0, 0); gpu_bvh_object_candidates.len()];
-        GPU.enqueue_write_device_buffer(gpu_bvh_object_candidates, &candidates)
+        self.candidates_flat.clear();
+        self.candidates_flat
+            .resize(gpu_bvh_object_candidates.len(), NormalizedCollisionPair::new(0, 0));
+        GPU.enqueue_write_device_buffer(gpu_bvh_object_candidates, &self.candidates_flat)
             .context("Failed to write gpu_bvh_object_candidates")
             .unwrap();
-        GPU.wait_for_queue_completion().unwrap();
-        println!("GPU BVH write buffers {:?}", start.elapsed());
+        // GPU.wait_for_queue_completion().unwrap();
+        // println!("GPU BVH write buffers {:?}", start.elapsed());
 
-        let start = Instant::now();
+        // let start = Instant::now();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
@@ -552,20 +570,14 @@ impl PhysicsEngine {
         GPU.enqueue_execute_kernel(&mut kernel)
             .context("Failed to execute kernel")
             .unwrap();
-        GPU.wait_for_queue_completion().unwrap();
-        println!("GPU BVH execute kernel {:?}", start.elapsed());
-
-        GPU.enqueue_read_device_buffer(gpu_bvh_object_candidates, &mut candidates)
+        // GPU.wait_for_queue_completion().unwrap();
+        // println!("GPU BVH execute kernel {:?}", start.elapsed());
+        GPU.enqueue_read_device_buffer(gpu_bvh_object_candidates, &mut self.candidates_flat)
             .context("Failed to read gpu_bvh_object_candidates")
             .unwrap();
         GPU.wait_for_queue_completion().unwrap();
-        candidates.retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
-        candidates.iter_mut().for_each(|pair| {
-            if pair.object1_index > pair.object2_index {
-                swap(&mut pair.object1_index, &mut pair.object2_index);
-            }
-        });
-        candidates
+        self.candidates_flat
+            .retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
     }
 
     fn process_collision_candidate(
@@ -697,6 +709,7 @@ impl PhysicsEngine {
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GpuComputeOptions {
     pub integration: bool,
+    pub bvh: bool,
 }
 
 #[repr(C)]

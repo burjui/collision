@@ -114,6 +114,8 @@ pub struct SimulationConfig {
     pub speed_factor: f64,
     #[serde(default)]
     pub gpu_integration: bool,
+    #[serde(default)]
+    pub gpu_bvh: bool,
     pub restitution_coefficient: f64,
     #[serde(default)]
     pub global_gravity: (f64, f64),
