@@ -1,8 +1,15 @@
+use std::mem::swap;
+
+use itertools::Itertools;
+use rayon::slice::ParallelSliceMut;
+
 use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
     object_aabbs: Vec<AABB>,
+    object_positions: Vec<Vector2<f64>>,
+    object_radii: Vec<f64>,
     pub nodes: Vec<Node>,
     root: NodeId,
 }
@@ -22,29 +29,68 @@ impl Bvh {
             let morton_code = morton_code(position.x as u32, position.y as u32);
             items.push(Item {
                 object_index,
-                aabb,
                 morton_code,
             });
         }
-        let mut bvh = Bvh {
+        items.par_sort_unstable_by_key(|item| item.morton_code);
+        let mut nodes = Vec::with_capacity(positions.len() * 2);
+        for item in &items {
+            nodes.push(Node {
+                aabb: object_aabbs[item.object_index],
+                kind: NodeKind::Leaf(item.object_index),
+            });
+        }
+        let mut combine_area = (0..nodes.len()).map(NodeId).collect_vec();
+        let mut combine_area_tmp = Vec::with_capacity(combine_area.len().div_ceil(2));
+        let (mut combine_area, mut combine_area_tmp) = (&mut combine_area, &mut combine_area_tmp);
+        while combine_area.len() > 1 {
+            combine_area_tmp.clear();
+            for chunk in combine_area.chunks(2) {
+                let node_id = if chunk.len() == 1 {
+                    chunk[0]
+                } else {
+                    let node_id = NodeId(nodes.len());
+                    let left = chunk[0];
+                    let right = chunk[1];
+                    let left_aabb = nodes[left.0].aabb;
+                    let right_aabb = nodes[right.0].aabb;
+                    let aabb = AABB {
+                        topleft: Vector2::new(
+                            left_aabb.topleft.x.min(right_aabb.topleft.x),
+                            left_aabb.topleft.y.min(right_aabb.topleft.y),
+                        ),
+                        bottomright: Vector2::new(
+                            left_aabb.bottomright.x.max(right_aabb.bottomright.x),
+                            left_aabb.bottomright.y.max(right_aabb.bottomright.y),
+                        ),
+                    };
+                    nodes.push(Node {
+                        aabb,
+                        kind: NodeKind::Tree { left, right },
+                    });
+                    node_id
+                };
+                combine_area_tmp.push(node_id);
+            }
+            swap(&mut combine_area, &mut combine_area_tmp);
+        }
+        Bvh {
             object_aabbs,
-            nodes: Vec::with_capacity(positions.len() * 2),
-            root: NodeId::default(),
-        };
-        items.sort_unstable_by_key(|item| item.morton_code);
-        bvh.root = bvh.create_subtree(&items);
-        bvh
+            object_positions: positions.to_vec(),
+            object_radii: radii.to_vec(),
+            nodes,
+            root: combine_area[0],
+        }
     }
 
     pub fn find_intersections(&self, object_index: usize, candidates: &mut Vec<NormalizedCollisionPair>) {
         if !self.nodes.is_empty() {
-            self.find_intersections_with(0, object_index, self.root, candidates);
+            self.find_intersections_with(object_index, self.root, candidates);
         }
     }
 
     fn find_intersections_with(
         &self,
-        level: usize,
         object1_index: usize,
         node_id: NodeId,
         candidates: &mut Vec<NormalizedCollisionPair>,
@@ -55,53 +101,23 @@ impl Bvh {
             match *kind {
                 NodeKind::Leaf(object2_index) => {
                     if object2_index != object1_index {
-                        candidates.push(NormalizedCollisionPair::new(object1_index, object2_index));
+                        let object1_position = self.object_positions[object1_index];
+                        let object2_position = self.object_positions[object2_index];
+                        let object1_radius = self.object_radii[object1_index];
+                        let object2_radius = self.object_radii[object2_index];
+                        let distance_squared = (object1_position - object2_position).magnitude_squared();
+                        let collision_distance = object1_radius + object2_radius;
+                        if distance_squared < collision_distance * collision_distance {
+                            candidates.push(NormalizedCollisionPair::new(object1_index, object2_index));
+                        }
                     }
                 }
                 NodeKind::Tree { left, right } => {
-                    self.find_intersections_with(level + 1, object1_index, left, candidates);
-                    self.find_intersections_with(level + 1, object1_index, right, candidates);
+                    self.find_intersections_with(object1_index, left, candidates);
+                    self.find_intersections_with(object1_index, right, candidates);
                 }
             }
         }
-    }
-
-    fn create_subtree(&mut self, items: &[Item]) -> NodeId {
-        if items.len() == 1 {
-            let item = items[0];
-            self.add_node(Node {
-                aabb: item.aabb,
-                kind: NodeKind::Leaf(item.object_index),
-            })
-        } else {
-            let node_id = self.add_node(Node::PLACEHOLDER);
-            let middle = items.len() / 2;
-            let left = self.create_subtree(&items[..middle]);
-            let right = self.create_subtree(&items[middle..]);
-            let left_aabb = self.nodes[left.0].aabb;
-            let right_aabb = self.nodes[right.0].aabb;
-            let aabb = AABB {
-                topleft: Vector2::new(
-                    left_aabb.topleft.x.min(right_aabb.topleft.x),
-                    left_aabb.topleft.y.min(right_aabb.topleft.y),
-                ),
-                bottomright: Vector2::new(
-                    left_aabb.bottomright.x.max(right_aabb.bottomright.x),
-                    left_aabb.bottomright.y.max(right_aabb.bottomright.y),
-                ),
-            };
-            self.nodes[node_id.0] = Node {
-                aabb,
-                kind: NodeKind::Tree { left, right },
-            };
-            node_id
-        }
-    }
-
-    fn add_node(&mut self, node: Node) -> NodeId {
-        let id = self.nodes.len();
-        self.nodes.push(node);
-        NodeId(id)
     }
 }
 
@@ -121,7 +137,6 @@ fn expand_bits(mut x: u32) -> u32 {
 #[derive(Clone, Copy)]
 struct Item {
     object_index: usize,
-    aabb: AABB,
     morton_code: u32,
 }
 
@@ -132,11 +147,6 @@ pub struct AABB {
 }
 
 impl AABB {
-    const PLACEHOLDER: Self = Self {
-        topleft: Vector2::new(f64::NAN, f64::NAN),
-        bottomright: Vector2::new(f64::NAN, f64::NAN),
-    };
-
     fn intersects(&self, other: &AABB) -> bool {
         self.topleft.x <= other.bottomright.x
             && self.bottomright.x >= other.topleft.x
@@ -152,13 +162,6 @@ pub struct NodeId(usize);
 pub struct Node {
     pub aabb: AABB,
     pub kind: NodeKind,
-}
-
-impl Node {
-    const PLACEHOLDER: Self = Self {
-        aabb: AABB::PLACEHOLDER,
-        kind: NodeKind::Leaf(0),
-    };
 }
 
 #[derive(Clone, Copy)]

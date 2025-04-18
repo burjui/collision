@@ -9,6 +9,7 @@ use rand::{rng, seq::SliceRandom};
 use rayon::{
     ThreadPool, ThreadPoolBuilder,
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    slice::ParallelSliceMut,
 };
 
 use crate::{
@@ -38,6 +39,7 @@ pub struct PhysicsEngine {
     gpu_planet_masses: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
     thread_pool: ThreadPool,
+    max_candidates_per_object: usize,
 }
 
 impl PhysicsEngine {
@@ -68,6 +70,7 @@ impl PhysicsEngine {
             gpu_planet_masses: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
             thread_pool: ThreadPoolBuilder::new().num_threads(thread_count).build().unwrap(),
+            max_candidates_per_object: 0,
         })
     }
 
@@ -390,17 +393,37 @@ impl PhysicsEngine {
         println!("found {} candidates in {:?}", candidates.len(), start.elapsed());
 
         let start = Instant::now();
-        candidates.sort_unstable();
+        self.thread_pool.install(|| candidates.par_sort_unstable());
         println!("candidates sort {:?} ", start.elapsed());
 
         let start = Instant::now();
+        let max_candidates_per_object = candidates
+            .chunk_by(|a, b| a.object1_index == b.object1_index)
+            .map(<[_]>::len)
+            .max()
+            .unwrap_or(0);
+        self.max_candidates_per_object = self.max_candidates_per_object.max(max_candidates_per_object);
+        println!(
+            "max candidates per object {} {:?}",
+            self.max_candidates_per_object,
+            start.elapsed()
+        );
+
+        let start = Instant::now();
+        let previous_length = candidates.len();
         candidates.dedup();
-        println!("candidates dedup {:?} ", start.elapsed());
+        println!(
+            "candidates dedup {} -> {} {:?}",
+            previous_length,
+            candidates.len(),
+            start.elapsed()
+        );
 
         let start = Instant::now();
         candidates.shuffle(&mut rng());
         println!("candidates shuffle {:?} ", start.elapsed());
 
+        let start = Instant::now();
         for &mut NormalizedCollisionPair {
             object1_index,
             object2_index,
@@ -417,6 +440,7 @@ impl PhysicsEngine {
                 &self.objects.is_planet,
             );
         }
+        println!("candidates processed {:?} ", start.elapsed());
     }
 
     fn process_collision_candidate(
