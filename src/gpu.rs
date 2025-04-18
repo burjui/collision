@@ -13,7 +13,7 @@ use opencl3::{
     types::{CL_FALSE, cl_mem_flags},
 };
 
-pub static GPU: LazyLock<Gpu> = LazyLock::new(|| Gpu::first_available(10).unwrap());
+pub static GPU: LazyLock<Gpu> = LazyLock::new(|| Gpu::first_available(20).unwrap());
 
 pub struct Gpu {
     context: Context,

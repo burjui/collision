@@ -97,6 +97,11 @@ impl Bvh {
         &self.nodes
     }
 
+    pub fn root(&self) -> NodeId {
+        let id = self.nodes.len().checked_sub(1).unwrap();
+        NodeId(u32::try_from(id).unwrap())
+    }
+
     pub fn object_aabbs(&self) -> &[AABB] {
         &self.object_aabbs
     }
