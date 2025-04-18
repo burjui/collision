@@ -85,11 +85,7 @@ impl Bvh {
 
     pub fn find_intersections(&self, object_index: usize, candidates: &mut Vec<NormalizedCollisionPair>) {
         if !self.nodes.is_empty() {
-            self.find_intersections_with(
-                object_index,
-                NodeId(u32::try_from(self.nodes.len() - 1).unwrap()),
-                candidates,
-            );
+            self.find_intersections_with(object_index, candidates);
         }
     }
 
@@ -106,33 +102,40 @@ impl Bvh {
         &self.object_aabbs
     }
 
-    fn find_intersections_with(
-        &self,
-        object1_index: usize,
-        node_id: NodeId,
-        candidates: &mut Vec<NormalizedCollisionPair>,
-    ) {
-        let object_aabb = self.object_aabbs[object1_index];
-        let Node { aabb, kind, .. } = &self.nodes[usize::try_from(node_id.0).unwrap()];
-        if object_aabb.intersects(aabb) {
-            match *kind {
-                NodeKind::Leaf(object2_index) => {
-                    let object2_index = usize::try_from(object2_index).unwrap();
-                    if object2_index != object1_index {
-                        let object1_position = self.object_positions[object1_index];
-                        let object2_position = self.object_positions[object2_index];
-                        let object1_radius = self.object_radii[object1_index];
-                        let object2_radius = self.object_radii[object2_index];
-                        let distance_squared = (object1_position - object2_position).magnitude_squared();
-                        let collision_distance = object1_radius + object2_radius;
-                        if distance_squared < collision_distance * collision_distance {
-                            candidates.push(NormalizedCollisionPair::new(object1_index, object2_index));
+    fn find_intersections_with(&self, object1_index: usize, candidates: &mut Vec<NormalizedCollisionPair>) {
+        const STACK_SIZE: usize = 16;
+        let mut stack = [NodeId(0); STACK_SIZE];
+        let mut sp = 0;
+        stack[sp] = self.root();
+        sp += 1;
+
+        while sp > 0 {
+            sp -= 1;
+            let node_id = stack[sp];
+            let object_aabb = self.object_aabbs[object1_index];
+            let Node { aabb, kind, .. } = &self.nodes[usize::try_from(node_id.0).unwrap()];
+            if object_aabb.intersects(aabb) {
+                match *kind {
+                    NodeKind::Leaf(object2_index) => {
+                        let object2_index = usize::try_from(object2_index).unwrap();
+                        if object2_index != object1_index {
+                            let object1_position = self.object_positions[object1_index];
+                            let object2_position = self.object_positions[object2_index];
+                            let object1_radius = self.object_radii[object1_index];
+                            let object2_radius = self.object_radii[object2_index];
+                            let distance_squared = (object1_position - object2_position).magnitude_squared();
+                            let collision_distance = object1_radius + object2_radius;
+                            if distance_squared < collision_distance * collision_distance {
+                                candidates.push(NormalizedCollisionPair::new(object1_index, object2_index));
+                            }
                         }
                     }
-                }
-                NodeKind::Tree { left, right } => {
-                    self.find_intersections_with(object1_index, left, candidates);
-                    self.find_intersections_with(object1_index, right, candidates);
+                    NodeKind::Tree { left, right } => {
+                        stack[sp] = left;
+                        sp += 1;
+                        stack[sp] = right;
+                        sp += 1;
+                    }
                 }
             }
         }
