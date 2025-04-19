@@ -127,7 +127,7 @@ impl Bvh {
         object_index: usize,
         positions: &[Vector2<f64>],
         radii: &[f64],
-        candidates: &mut Vec<NormalizedCollisionPair>,
+        candidates: &mut [NormalizedCollisionPair],
     ) {
         if !self.node_aabbs.is_empty() {
             self.find_intersections_with(object_index, positions, radii, candidates);
@@ -139,7 +139,7 @@ impl Bvh {
         object1_index: usize,
         positions: &[Vector2<f64>],
         radii: &[f64],
-        candidates: &mut Vec<NormalizedCollisionPair>,
+        candidates: &mut [NormalizedCollisionPair],
     ) {
         const STACK_SIZE: usize = 32;
         let mut stack = [NodeId(0); STACK_SIZE];
@@ -147,6 +147,7 @@ impl Bvh {
         stack[sp] = self.root();
         sp += 1;
 
+        let mut candidate_index = 0;
         while sp > 0 {
             sp -= 1;
             let node_id = stack[sp];
@@ -166,7 +167,9 @@ impl Bvh {
                             let distance_squared = (object1_position - object2_position).magnitude_squared();
                             let collision_distance = object1_radius + object2_radius;
                             if distance_squared < collision_distance * collision_distance {
-                                candidates.push(NormalizedCollisionPair::new(object1_index, object2_index));
+                                candidates[candidate_index] =
+                                    NormalizedCollisionPair::new(object1_index, object2_index);
+                                candidate_index += 1;
                             }
                         }
                     }

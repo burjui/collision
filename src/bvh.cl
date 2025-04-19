@@ -16,7 +16,7 @@ bool intersects(const AABB *a, const AABB *b) {
         && a->bottomright.y >= b->topleft.y;
 }
 
-#define MAX_CANDIDATES 10
+#define MAX_CANDIDATES 16
 
 uint find_intersections_with(
     uint root,

@@ -12,6 +12,7 @@
 #![feature(coroutines, coroutine_trait)]
 #![feature(array_try_map)]
 #![feature(iter_chain)]
+#![feature(array_chunks)]
 
 pub mod app_config;
 pub mod array2;

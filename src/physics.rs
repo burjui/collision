@@ -8,7 +8,7 @@ use opencl3::kernel::{ExecuteKernel, Kernel};
 use rand::{rng, seq::SliceRandom};
 use rayon::{
     ThreadPool, ThreadPoolBuilder,
-    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 
@@ -29,8 +29,7 @@ pub struct PhysicsEngine {
     pub enable_constraint_bouncing: bool,
     objects: ObjectSoa,
     bvh: Bvh,
-    candidates: Vec<Vec<NormalizedCollisionPair>>,
-    candidates_flat: Vec<NormalizedCollisionPair>,
+    candidates: Vec<NormalizedCollisionPair>,
     time: f64,
     constraints: AABB,
     stats: Stats,
@@ -57,6 +56,8 @@ pub struct PhysicsEngine {
     gpu_bvh_object_candidates: Option<GpuHostPtrBuffer<NormalizedCollisionPair>>,
 }
 
+const MAX_CANDIDATES: usize = 16;
+
 impl PhysicsEngine {
     pub fn new() -> anyhow::Result<Self> {
         let constraints = AABB {
@@ -73,8 +74,7 @@ impl PhysicsEngine {
             enable_constraint_bouncing: true,
             objects: ObjectSoa::default(),
             bvh: Bvh::default(),
-            candidates: vec![Vec::default(); thread_count],
-            candidates_flat: Vec::default(),
+            candidates: Vec::default(),
             time: 0.0,
             constraints,
             stats: Stats::default(),
@@ -332,6 +332,8 @@ impl PhysicsEngine {
 
     fn process_collisions(&mut self) {
         let start = Instant::now();
+        self.candidates.clear();
+        self.candidates.resize(self.objects.len() * MAX_CANDIDATES, NormalizedCollisionPair::new(0, 0));
         if self.gpu_compute_options.bvh {
             self.find_collision_candidates_gpu();
         } else {
@@ -339,37 +341,37 @@ impl PhysicsEngine {
                 &self.bvh,
                 &self.thread_pool,
                 &mut self.candidates,
-                &mut self.candidates_flat,
                 &self.objects.positions,
                 &self.objects.radii,
             );
         };
-        println!("found {} candidates in {:?}", self.candidates_flat.len(), start.elapsed());
+        self.candidates.retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
+        println!("found {} candidates in {:?}", self.candidates.len(), start.elapsed());
 
         let start = Instant::now();
-        self.thread_pool.install(|| self.candidates_flat.par_sort_unstable());
+        self.thread_pool.install(|| self.candidates.par_sort_unstable());
         println!("candidates sort {:?} ", start.elapsed());
 
         let start = Instant::now();
         let max_candidates_per_object =
-            self.candidates_flat.chunk_by(|a, b| a.object1_index == b.object1_index).map(<[_]>::len).max().unwrap_or(0);
+            self.candidates.chunk_by(|a, b| a.object1_index == b.object1_index).map(<[_]>::len).max().unwrap_or(0);
         self.max_candidates_per_object = self.max_candidates_per_object.max(max_candidates_per_object);
         println!("max candidates per object {} {:?}", self.max_candidates_per_object, start.elapsed());
 
         let start = Instant::now();
-        let previous_length = self.candidates_flat.len();
-        self.candidates_flat.dedup();
-        println!("candidates dedup {} -> {} {:?}", previous_length, self.candidates_flat.len(), start.elapsed());
+        let previous_length = self.candidates.len();
+        self.candidates.dedup();
+        println!("candidates dedup {} -> {} {:?}", previous_length, self.candidates.len(), start.elapsed());
 
         let start = Instant::now();
-        self.candidates_flat.shuffle(&mut rng());
+        self.candidates.shuffle(&mut rng());
         println!("candidates shuffle {:?} ", start.elapsed());
 
         let start = Instant::now();
         for &NormalizedCollisionPair {
             object1_index,
             object2_index,
-        } in &self.candidates_flat
+        } in &self.candidates
         {
             Self::process_collision_candidate(
                 usize::try_from(object1_index).unwrap(),
@@ -385,43 +387,25 @@ impl PhysicsEngine {
         println!("candidates processed {:?} ", start.elapsed());
     }
 
-    fn find_collision_candidates_cpu<'a>(
+    fn find_collision_candidates_cpu(
         bvh: &Bvh,
         thread_pool: &ThreadPool,
-        candidates: &'a mut Vec<Vec<NormalizedCollisionPair>>,
-        candidates_flat: &mut Vec<NormalizedCollisionPair>,
+        candidates: &mut [NormalizedCollisionPair],
         positions: &[Vector2<f64>],
         radii: &[f64],
     ) {
-        let chunk_size = positions.len().div_ceil(thread_pool.current_num_threads());
+        let chunk_size = (positions.len()).div_ceil(thread_pool.current_num_threads());
         thread_pool.install(|| {
-            candidates.par_iter_mut().enumerate().for_each(|(chunk_index, candidates)| {
-                candidates.clear();
-                for i in 0..chunk_size {
+            candidates.par_chunks_mut(chunk_size * MAX_CANDIDATES).enumerate().for_each(|(chunk_index, candidates)| {
+                for (i, candidates) in candidates.array_chunks_mut::<MAX_CANDIDATES>().enumerate() {
                     let object_index = chunk_index * chunk_size + i;
-                    if object_index < positions.len() {
-                        bvh.find_intersections(object_index, positions, radii, candidates);
-                    }
+                    bvh.find_intersections(object_index, positions, radii, candidates);
                 }
-                candidates.sort_unstable();
-                candidates.dedup();
             });
-            candidates_flat.clear();
-            candidates_flat.append(
-                candidates
-                    .par_iter_mut()
-                    .reduce_with(|result, v| {
-                        result.append(v);
-                        result
-                    })
-                    .unwrap(),
-            );
-        })
+        });
     }
 
     fn find_collision_candidates_gpu(&mut self) {
-        const MAX_CANDIDATES: u32 = 10;
-
         self.gpu_bvh_node_aabbs.init(self.bvh.node_aabbs(), ReadOnly, "gpu_bvh_node_aabbs");
         self.gpu_bvh_node_tags.init(self.bvh.node_tags(), ReadOnly, "gpu_bvh_node_tags");
         self.gpu_bvh_node_leaf_indices.init(self.bvh.node_leaf_indices(), ReadOnly, "gpu_bvh_node_leaf_indices");
@@ -430,11 +414,7 @@ impl PhysicsEngine {
         self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
         self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
         self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
-        // TODO zero the remainder on the GPU side instead
-        let candidates_length = self.objects.len() * usize::try_from(MAX_CANDIDATES).unwrap();
-        self.candidates_flat.clear();
-        self.candidates_flat.resize(candidates_length, NormalizedCollisionPair::new(0, 0));
-        self.gpu_bvh_object_candidates.init(&mut self.candidates_flat, WriteOnly, "gpu_bvh_object_candidates");
+        self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
 
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
@@ -450,11 +430,10 @@ impl PhysicsEngine {
             self.gpu_bvh_object_positions.set_arg(&mut kernel);
             self.gpu_bvh_object_radii.set_arg(&mut kernel);
             self.gpu_bvh_object_candidates.set_arg(&mut kernel);
-            kernel.set_arg(&MAX_CANDIDATES);
+            kernel.set_arg(&u32::try_from(MAX_CANDIDATES).unwrap());
         }
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.wait_for_queue_completion().unwrap();
-        self.candidates_flat.retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
     }
 
     fn process_collision_candidate(
