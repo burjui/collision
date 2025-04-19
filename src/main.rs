@@ -17,7 +17,7 @@ use anyhow::anyhow;
 use collision::{
     app_config::{CONFIG, ColorSource, TimeLimitAction},
     array2::Array2,
-    bvh::{AABB, Bvh},
+    bvh::{AABB, Bvh, Node},
     demo::create_demo,
     fps::FpsCalculator,
     physics::{DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
@@ -432,8 +432,8 @@ fn rendering_thread(
             for subscene in scenes {
                 scene.append(&subscene, None);
             }
-            if rendering_data.draw_grid && !rendering_data.bvh.node_aabbs().is_empty() {
-                draw_aabbs(&mut scene, rendering_data.bvh.node_aabbs());
+            if rendering_data.draw_grid && !rendering_data.bvh.nodes().is_empty() {
+                draw_aabbs(&mut scene, rendering_data.bvh.nodes());
             }
             redraw_job_queue.force_push(scene);
             let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
@@ -585,8 +585,8 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_i
     );
 }
 
-fn draw_aabbs(scene: &mut Scene, aabbs: &[AABB]) {
-    for aabb in aabbs {
+fn draw_aabbs(scene: &mut Scene, nodes: &[Node]) {
+    for &Node { aabb, .. } in nodes {
         scene.stroke(
             &Stroke::default(),
             Affine::IDENTITY,
@@ -754,8 +754,6 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
             Some(render_state)
         };
     }
-
-    // TODO fix hang on exit
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
         let Some(render_state) = &mut self.state else {

@@ -14,11 +14,11 @@ use rayon::{
 
 use crate::{
     app_config::{CONFIG, DtSource},
-    bvh::{AABB, Bvh, NodeId, NodeTag},
+    bvh::{AABB, Bvh, Node},
     gpu::{
         GPU,
-        GpuBufferAccessMode::{self, ReadOnly, ReadWrite, WriteOnly},
-        GpuHostPtrBuffer,
+        GpuBufferAccessMode::{ReadOnly, ReadWrite, WriteOnly},
+        GpuHostPtrBuffer, GpuHostPtrBufferUtils,
     },
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
@@ -45,11 +45,7 @@ pub struct PhysicsEngine {
     thread_pool: ThreadPool,
     max_candidates_per_object: usize,
     gpu_bvh_kernel: Kernel,
-    gpu_bvh_node_aabbs: Option<GpuHostPtrBuffer<AABB>>,
-    gpu_bvh_node_tags: Option<GpuHostPtrBuffer<NodeTag>>,
-    gpu_bvh_node_leaf_indices: Option<GpuHostPtrBuffer<u32>>,
-    gpu_bvh_node_tree_left: Option<GpuHostPtrBuffer<NodeId>>,
-    gpu_bvh_node_tree_right: Option<GpuHostPtrBuffer<NodeId>>,
+    gpu_bvh_nodes: Option<GpuHostPtrBuffer<Node>>,
     gpu_bvh_object_aabbs: Option<GpuHostPtrBuffer<AABB>>,
     gpu_bvh_object_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
     gpu_bvh_object_radii: Option<GpuHostPtrBuffer<f64>>,
@@ -90,11 +86,7 @@ impl PhysicsEngine {
             thread_pool: ThreadPoolBuilder::new().num_threads(thread_count).build().unwrap(),
             max_candidates_per_object: 0,
             gpu_bvh_kernel,
-            gpu_bvh_node_aabbs: None,
-            gpu_bvh_node_tags: None,
-            gpu_bvh_node_leaf_indices: None,
-            gpu_bvh_node_tree_left: None,
-            gpu_bvh_node_tree_right: None,
+            gpu_bvh_nodes: None,
             gpu_bvh_object_aabbs: None,
             gpu_bvh_object_positions: None,
             gpu_bvh_object_radii: None,
@@ -406,26 +398,17 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_gpu(&mut self) {
-        self.gpu_bvh_node_aabbs.init(self.bvh.node_aabbs(), ReadOnly, "gpu_bvh_node_aabbs");
-        self.gpu_bvh_node_tags.init(self.bvh.node_tags(), ReadOnly, "gpu_bvh_node_tags");
-        self.gpu_bvh_node_leaf_indices.init(self.bvh.node_leaf_indices(), ReadOnly, "gpu_bvh_node_leaf_indices");
-        self.gpu_bvh_node_tree_left.init(self.bvh.node_tree_left(), ReadOnly, "gpu_bvh_node_tree_left");
-        self.gpu_bvh_node_tree_right.init(self.bvh.node_tree_right(), ReadOnly, "gpu_bvh_node_tree_right");
+        self.gpu_bvh_nodes.init(self.bvh.nodes(), ReadOnly, "gpu_bvh_nodes");
         self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
         self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
         self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
         self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
-
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
         kernel.set_local_work_size(64);
         unsafe {
             kernel.set_arg(&self.bvh.root());
-            self.gpu_bvh_node_aabbs.set_arg(&mut kernel);
-            self.gpu_bvh_node_tags.set_arg(&mut kernel);
-            self.gpu_bvh_node_leaf_indices.set_arg(&mut kernel);
-            self.gpu_bvh_node_tree_left.set_arg(&mut kernel);
-            self.gpu_bvh_node_tree_right.set_arg(&mut kernel);
+            self.gpu_bvh_nodes.set_arg(&mut kernel);
             self.gpu_bvh_object_aabbs.set_arg(&mut kernel);
             self.gpu_bvh_object_positions.set_arg(&mut kernel);
             self.gpu_bvh_object_radii.set_arg(&mut kernel);
@@ -558,37 +541,6 @@ impl PhysicsEngine {
                 *velocity *= self.restitution_coefficient;
             }
         }
-    }
-}
-
-trait GpuHostPtrBufferUtils<T> {
-    fn init(
-        &mut self,
-        data: &mut [T],
-        access_mode: GpuBufferAccessMode,
-        name: &'static str,
-    ) -> &mut GpuHostPtrBuffer<T>;
-
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
-}
-
-impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
-    fn init(
-        &mut self,
-        data: &mut [T],
-        access_mode: GpuBufferAccessMode,
-        name: &'static str,
-    ) -> &mut GpuHostPtrBuffer<T> {
-        self.replace(unsafe {
-            GPU.create_host_ptr_buffer(data, access_mode)
-                .with_context(|| format!("failed to create GPU device buffer {name}"))
-                .unwrap()
-        });
-        self.as_mut().unwrap()
-    }
-
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
-        unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
     }
 }
 

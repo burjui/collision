@@ -7,11 +7,7 @@ use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
-    node_aabbs: Vec<AABB>,
-    node_tags: Vec<NodeTag>,
-    node_leaf_indices: Vec<u32>,
-    node_tree_left: Vec<NodeId>,
-    node_tree_right: Vec<NodeId>,
+    nodes: Vec<Node>,
     object_aabbs: Vec<AABB>,
 }
 
@@ -35,20 +31,18 @@ impl Bvh {
         }
         items.par_sort_unstable_by_key(|item| item.morton_code);
 
-        let mut node_aabbs = Vec::default();
-        let mut node_tags = Vec::default();
-        let mut node_leaf_indices = Vec::default();
-        let mut node_tree_left = Vec::default();
-        let mut node_tree_right = Vec::default();
+        let mut nodes = Vec::default();
         for item in &items {
-            node_aabbs.push(object_aabbs[item.object_index]);
-            node_tags.push(NodeTag::Leaf);
-            node_leaf_indices.push(u32::try_from(item.object_index).unwrap());
-            node_tree_left.push(NodeId::INVALID);
-            node_tree_right.push(NodeId::INVALID);
+            nodes.push(Node {
+                aabb: object_aabbs[item.object_index],
+                tag: NodeTag::Leaf,
+                data: NodeData {
+                    leaf_object_index: u32::try_from(item.object_index).unwrap(),
+                },
+            });
         }
 
-        let mut combine_area = (0..node_aabbs.len()).map(|i| NodeId(u32::try_from(i).unwrap())).collect_vec();
+        let mut combine_area = (0..nodes.len()).map(|i| NodeId(u32::try_from(i).unwrap())).collect_vec();
         let mut combine_area_tmp = Vec::with_capacity(combine_area.len().div_ceil(2));
         let (mut combine_area, mut combine_area_tmp) = (&mut combine_area, &mut combine_area_tmp);
         while combine_area.len() > 1 {
@@ -59,54 +53,40 @@ impl Bvh {
                 } else {
                     let left = chunk[0];
                     let right = chunk[1];
-                    let left_aabb = node_aabbs[usize::try_from(left.0).unwrap()];
-                    let right_aabb = node_aabbs[usize::try_from(right.0).unwrap()];
+                    let left_aabb = nodes[usize::try_from(left.0).unwrap()].aabb;
+                    let right_aabb = nodes[usize::try_from(right.0).unwrap()].aabb;
                     let aabb = left_aabb.union(&right_aabb);
-                    let node_id = NodeId(u32::try_from(node_aabbs.len()).unwrap());
-                    node_aabbs.push(aabb);
-                    node_tags.push(NodeTag::Tree);
-                    node_leaf_indices.push(u32::MAX);
-                    node_tree_left.push(left);
-                    node_tree_right.push(right);
+                    let node_id = NodeId(u32::try_from(nodes.len()).unwrap());
+                    nodes.push(Node {
+                        aabb,
+                        tag: NodeTag::Tree,
+                        data: NodeData {
+                            tree: Tree { left, right },
+                        },
+                    });
                     node_id
                 };
                 combine_area_tmp.push(node_id);
             }
             swap(&mut combine_area, &mut combine_area_tmp);
         }
-        Bvh {
-            node_aabbs,
-            node_tags,
-            node_leaf_indices,
-            node_tree_left,
-            node_tree_right,
-            object_aabbs,
+        nodes.reverse();
+        let node_count = u32::try_from(nodes.len()).unwrap();
+        for Node { tag, data, .. } in &mut nodes {
+            if let NodeTag::Tree = tag {
+                data.tree.left.0 = node_count - unsafe { data.tree.left.0 } - 1;
+                data.tree.right.0 = node_count - unsafe { data.tree.right.0 } - 1;
+            }
         }
+        Bvh { nodes, object_aabbs }
     }
 
-    pub fn node_aabbs(&mut self) -> &mut [AABB] {
-        &mut self.node_aabbs
-    }
-
-    pub fn node_tags(&mut self) -> &mut [NodeTag] {
-        &mut self.node_tags
-    }
-
-    pub fn node_leaf_indices(&mut self) -> &mut [u32] {
-        &mut self.node_leaf_indices
-    }
-
-    pub fn node_tree_left(&mut self) -> &mut [NodeId] {
-        &mut self.node_tree_left
-    }
-
-    pub fn node_tree_right(&mut self) -> &mut [NodeId] {
-        &mut self.node_tree_right
+    pub fn nodes(&mut self) -> &mut [Node] {
+        &mut self.nodes
     }
 
     pub fn root(&self) -> NodeId {
-        let id = self.node_aabbs.len().checked_sub(1).unwrap();
-        NodeId(u32::try_from(id).unwrap())
+        NodeId(0)
     }
 
     pub fn object_aabbs(&mut self) -> &mut [AABB] {
@@ -120,7 +100,7 @@ impl Bvh {
         radii: &[f64],
         candidates: &mut [NormalizedCollisionPair],
     ) {
-        if !self.node_aabbs.is_empty() {
+        if !self.nodes.is_empty() {
             self.find_intersections_with(object_index, positions, radii, candidates);
         }
     }
@@ -144,12 +124,13 @@ impl Bvh {
             let node_id = stack[sp];
             let object_aabb = self.object_aabbs[object1_index];
             let node_id = usize::try_from(node_id.0).unwrap();
-            let aabb = self.node_aabbs[node_id];
+            let aabb = self.nodes[node_id].aabb;
             if object_aabb.intersects(&aabb) {
-                let tag = self.node_tags[node_id];
+                let tag = self.nodes[node_id].tag;
                 match tag {
                     NodeTag::Leaf => {
-                        let object2_index = usize::try_from(self.node_leaf_indices[node_id]).unwrap();
+                        let object2_index =
+                            usize::try_from(unsafe { self.nodes[node_id].data.leaf_object_index }).unwrap();
                         if object2_index != object1_index {
                             let object1_position = positions[object1_index];
                             let object2_position = positions[object2_index];
@@ -165,8 +146,8 @@ impl Bvh {
                         }
                     }
                     NodeTag::Tree => {
-                        stack[sp] = self.node_tree_left[node_id];
-                        stack[sp + 1] = self.node_tree_right[node_id];
+                        stack[sp] = unsafe { self.nodes[node_id].data.tree.left };
+                        stack[sp + 1] = unsafe { self.nodes[node_id].data.tree.right };
                         sp += 2;
                     }
                 }
@@ -223,8 +204,12 @@ impl AABB {
 #[derive(Default, Debug, Clone, Copy)]
 pub struct NodeId(u32);
 
-impl NodeId {
-    const INVALID: Self = Self(u32::MAX);
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Node {
+    pub aabb: AABB,
+    tag: NodeTag,
+    data: NodeData,
 }
 
 #[repr(C)]
@@ -232,4 +217,18 @@ impl NodeId {
 pub enum NodeTag {
     Leaf,
     Tree,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union NodeData {
+    leaf_object_index: u32,
+    tree: Tree,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Tree {
+    left: NodeId,
+    right: NodeId,
 }

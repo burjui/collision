@@ -177,6 +177,37 @@ impl<T> GpuHostPtrBuffer<T> {
     }
 }
 
+pub trait GpuHostPtrBufferUtils<T> {
+    fn init(
+        &mut self,
+        data: &mut [T],
+        access_mode: GpuBufferAccessMode,
+        name: &'static str,
+    ) -> &mut GpuHostPtrBuffer<T>;
+
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
+}
+
+impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
+    fn init(
+        &mut self,
+        data: &mut [T],
+        access_mode: GpuBufferAccessMode,
+        name: &'static str,
+    ) -> &mut GpuHostPtrBuffer<T> {
+        self.replace(unsafe {
+            GPU.create_host_ptr_buffer(data, access_mode)
+                .with_context(|| format!("failed to create GPU device buffer {name}"))
+                .unwrap()
+        });
+        self.as_mut().unwrap()
+    }
+
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
+    }
+}
+
 pub struct GpuHostBuffer<T> {
     data: Vec<T>,
     buffer: Buffer<T>,

@@ -8,7 +8,23 @@ typedef enum {
     TAG_TREE
 } NodeTag;
 
+typedef struct Tree {
+    uint left;
+    uint right;
+} Tree;
 
+typedef union {
+    uint leaf_object_index;
+    Tree tree;
+} NodeData;
+
+typedef struct  {
+    AABB aabb;
+    NodeTag tag;
+    NodeData data;
+} Node;
+
+#pragma(inline)
 bool intersects(const AABB *a, const AABB *b) {
     return a->topleft.x <= b->bottomright.x
         && a->bottomright.x >= b->topleft.x
@@ -18,14 +34,11 @@ bool intersects(const AABB *a, const AABB *b) {
 
 #define MAX_CANDIDATES 16
 
+#pragma(inline)
 uint find_intersections_with(
     uint root,
     uint object1_index,
-    global const AABB *bvh_node_aabbs,
-    global const NodeTag *bvh_node_tags,
-    global const uint *bvh_node_leaf_indices,
-    global const uint *bvh_node_tree_left,
-    global const uint *bvh_node_tree_right,
+    global const Node *nodes,
     global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
@@ -41,27 +54,29 @@ uint find_intersections_with(
     int sp = 0;
     stack[sp++] = root;
 
+    // TODO fetch N nodes into private memory
+
     while (sp > 0) {
         uint node_id = stack[--sp];
-        const AABB aabb = bvh_node_aabbs[node_id];
-        if (intersects(&object_aabb, &aabb)) {
-            if (bvh_node_tags[node_id] == TAG_LEAF) {
-                uint object2_index = bvh_node_leaf_indices[node_id];
+        const Node node = nodes[node_id];
+        if (intersects(&object_aabb, &node.aabb)) {
+            if (node.tag == TAG_LEAF) {
+                uint object2_index = node.data.leaf_object_index;
                 if (object2_index != object1_index) {
                     const double2 object2_position = positions[object2_index];
                     const double object2_radius = radii[object2_index];
                     const double d = distance(object1_position, object2_position);
                     const double collision_distance = object1_radius + object2_radius;
                     if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
-                        uint min_i = min(object1_index, object2_index);
-                        uint max_i = max(object1_index, object2_index);
+                        const uint min_i = min(object1_index, object2_index);
+                        const uint max_i = max(object1_index, object2_index);
                         candidates[candidate_index] = (uint2)(min_i, max_i);
                         candidate_index += 1;
                     }
                 }
             } else {
-                stack[sp] = bvh_node_tree_left[node_id];
-                stack[sp + 1] = bvh_node_tree_right[node_id];
+                stack[sp] = node.data.tree.left;
+                stack[sp + 1] = node.data.tree.right;
                 sp += 2;
             }
         }
@@ -71,11 +86,7 @@ uint find_intersections_with(
 
 kernel void bvh_find_candidates(
     const uint root,
-    global const AABB *bvh_node_aabbs,
-    global const NodeTag *bvh_node_tags,
-    global const uint *bvh_node_leaf_indices,
-    global const uint *bvh_node_tree_left,
-    global const uint *bvh_node_tree_right,
+    global const Node *nodes,
     global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
@@ -83,25 +94,19 @@ kernel void bvh_find_candidates(
     const uint max_candidates
 ) {
     uint object1_index = get_global_id(0);
-    uint2 candidates[MAX_CANDIDATES];
-    for (uint i = 0; i < MAX_CANDIDATES; ++i) {
-        candidates[i] = (uint2)(0, 0);
-    }
+    uint2 candidates[MAX_CANDIDATES] = { 0 };
     uint candidates_end = find_intersections_with(
         root,
         object1_index,
-        bvh_node_aabbs,
-        bvh_node_tags,
-        bvh_node_leaf_indices,
-        bvh_node_tree_left,
-        bvh_node_tree_right,
+        nodes,
         object_aabbs,
         positions,
         radii,
         candidates,
         0
     );
+    uint offset = object1_index * MAX_CANDIDATES;
     for (uint i = 0; i < candidates_end; ++i) {
-        global_candidates[object1_index * max_candidates + i] = candidates[i];
+        global_candidates[offset + i] = candidates[i];
     }
 }
