@@ -26,6 +26,7 @@ use collision::{
 };
 use crossbeam::queue::{ArrayQueue, SegQueue};
 use itertools::Itertools;
+use pollster::block_on;
 use rayon::{
     ThreadPoolBuilder,
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -35,7 +36,7 @@ use vello::{
     kurbo::{Affine, Circle, Rect, Stroke},
     peniko::{Blob, Color, Fill, Image, ImageFormat, color::palette::css},
     util::{DeviceHandle, RenderContext, RenderSurface},
-    wgpu::{Maintain, PresentMode},
+    wgpu::{self, Maintain, PresentMode},
 };
 use winit::{
     application::ApplicationHandler,
@@ -726,7 +727,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
         let surface_future =
             self.context.create_surface(window.clone(), size.width, size.height, PresentMode::AutoVsync);
         // We need to block here, in case a Suspended event appeared
-        let surface = pollster::block_on(surface_future).expect("failed to create surface");
+        let surface = block_on(surface_future).expect("failed to create surface");
         self.state = {
             let render_state = RenderState { surface, window };
             self.renderers.resize_with(self.context.devices.len(), || None);
@@ -866,10 +867,15 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
 
                     let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
                     let device_handle = &self.context.devices[surface.dev_id];
-                    render_scene(&self.scene, surface, renderer, device_handle);
+                    let surface_texture =
+                        surface.surface.get_current_texture().expect("failed to get current surface texture");
+                    render_scene(&self.scene, surface, &surface_texture, renderer, device_handle);
+                    surface_texture.present();
+                    device_handle.device.poll(Maintain::Poll);
+
                     self.redraw_result_queue.force_push(());
                     self.frame_count += 1;
-                }
+                };
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Vector2::new(position.x, position.y);
@@ -985,7 +991,13 @@ fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) -> 
     Ok(())
 }
 
-fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer, device_handle: &DeviceHandle) {
+fn render_scene(
+    scene: &Scene,
+    surface: &RenderSurface,
+    surface_texture: &wgpu::SurfaceTexture,
+    renderer: &mut Renderer,
+    device_handle: &DeviceHandle,
+) {
     let width = surface.config.width;
     let height = surface.config.height;
     let render_params = RenderParams {
@@ -994,10 +1006,7 @@ fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer,
         height,
         antialiasing_method: AaConfig::Area,
     };
-    let surface_texture = surface.surface.get_current_texture().expect("failed to get current surface texture");
     renderer
-        .render_to_surface(&device_handle.device, &device_handle.queue, scene, &surface_texture, &render_params)
+        .render_to_surface(&device_handle.device, &device_handle.queue, scene, surface_texture, &render_params)
         .expect("failed to render to surface");
-    surface_texture.present();
-    device_handle.device.poll(Maintain::Poll);
 }

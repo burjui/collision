@@ -26,9 +26,7 @@ impl Gpu {
         println!("Available OpenCLplatforms:");
         for platform in &platforms {
             println!("Platform: {}", platform.name().context("Failed to get platform name")?);
-            let devices = platform
-                .get_devices(CL_DEVICE_TYPE_GPU)
-                .context("No GPU device found")?;
+            let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
             for device_id in devices {
                 let device = Device::from(device_id);
                 println!("  Device: {}", device.name().context("Failed to get device name")?);
@@ -36,9 +34,7 @@ impl Gpu {
         }
         // panic!();
         for platform in platforms {
-            let devices = platform
-                .get_devices(CL_DEVICE_TYPE_GPU)
-                .context("No GPU device found")?;
+            let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
             if let Some(device_id) = devices.first().copied() {
                 let device = Device::from(device_id);
                 let context = Context::from_device(&device).context("Failed to create context")?;
@@ -54,12 +50,8 @@ impl Gpu {
         let binary_path = path.as_ref().with_extension("bin");
         if let anyhow::Result::Ok(binary_metadata) = std::fs::metadata(&binary_path) {
             if let anyhow::Result::Ok(source_metadata) = std::fs::metadata(&path) {
-                let source_modified = source_metadata
-                    .modified()
-                    .context("Failed to get source modified time")?;
-                let binary_modified = binary_metadata
-                    .modified()
-                    .context("Failed to get binary modified time")?;
+                let source_modified = source_metadata.modified().context("Failed to get source modified time")?;
+                let binary_modified = binary_metadata.modified().context("Failed to get binary modified time")?;
                 if binary_modified >= source_modified {
                     return self.load_program_binary(binary_path);
                 }

@@ -8,11 +8,8 @@ use serde_derive::Deserialize;
 
 use crate::demo::{Ball, Brick};
 
-pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
-    AppConfig::from_file(Path::new("config.toml"))
-        .context("load config")
-        .unwrap()
-});
+pub static CONFIG: LazyLock<AppConfig> =
+    LazyLock::new(|| AppConfig::from_file(Path::new("config.toml")).context("load config").unwrap());
 
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
