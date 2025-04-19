@@ -36,7 +36,7 @@ uint find_intersections_with(
     const double2 object1_position = positions[object1_index];
     const double object1_radius = radii[object1_index];
 
-    #define STACK_SIZE 16
+    #define STACK_SIZE 32
     uint stack[STACK_SIZE];
     int sp = 0;
     stack[sp++] = root;

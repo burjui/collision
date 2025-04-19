@@ -93,24 +93,24 @@ impl Bvh {
         }
     }
 
-    pub fn node_aabbs(&self) -> &[AABB] {
-        &self.node_aabbs
+    pub fn node_aabbs(&mut self) -> &mut [AABB] {
+        &mut self.node_aabbs
     }
 
-    pub fn node_tags(&self) -> &[NodeTag] {
-        &self.node_tags
+    pub fn node_tags(&mut self) -> &mut [NodeTag] {
+        &mut self.node_tags
     }
 
-    pub fn node_leaf_indices(&self) -> &[u32] {
-        &self.node_leaf_indices
+    pub fn node_leaf_indices(&mut self) -> &mut [u32] {
+        &mut self.node_leaf_indices
     }
 
-    pub fn node_tree_left(&self) -> &[NodeId] {
-        &self.node_tree_left
+    pub fn node_tree_left(&mut self) -> &mut [NodeId] {
+        &mut self.node_tree_left
     }
 
-    pub fn node_tree_right(&self) -> &[NodeId] {
-        &self.node_tree_right
+    pub fn node_tree_right(&mut self) -> &mut [NodeId] {
+        &mut self.node_tree_right
     }
 
     pub fn root(&self) -> NodeId {
@@ -118,8 +118,8 @@ impl Bvh {
         NodeId(u32::try_from(id).unwrap())
     }
 
-    pub fn object_aabbs(&self) -> &[AABB] {
-        &self.object_aabbs
+    pub fn object_aabbs(&mut self) -> &mut [AABB] {
+        &mut self.object_aabbs
     }
 
     pub fn find_intersections(
@@ -141,7 +141,7 @@ impl Bvh {
         radii: &[f64],
         candidates: &mut Vec<NormalizedCollisionPair>,
     ) {
-        const STACK_SIZE: usize = 16;
+        const STACK_SIZE: usize = 32;
         let mut stack = [NodeId(0); STACK_SIZE];
         let mut sp = 0;
         stack[sp] = self.root();

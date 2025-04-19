@@ -69,6 +69,26 @@ impl Gpu {
         Program::create_and_build_from_binary(&self.context, &[binary], "").map_err(|e| anyhow!("{e}"))
     }
 
+    pub unsafe fn create_host_ptr_buffer<T>(
+        &self,
+        data: &mut [T],
+        access_mode: GpuBufferAccessMode,
+    ) -> anyhow::Result<GpuHostPtrBuffer<T>> {
+        let buffer = unsafe {
+            Buffer::create(
+                &self.context,
+                access_mode.cl_mem_flags() | CL_MEM_USE_HOST_PTR,
+                data.len(),
+                data.as_ptr() as *mut _,
+            )
+        }
+        .context("Failed to create host ptr buffer")?;
+        Ok(GpuHostPtrBuffer {
+            buffer,
+            len: data.len(),
+        })
+    }
+
     pub fn create_host_buffer<T>(
         &self,
         data: Vec<T>,
@@ -137,6 +157,23 @@ impl GpuBufferAccessMode {
             GpuBufferAccessMode::WriteOnly => CL_MEM_WRITE_ONLY,
             GpuBufferAccessMode::ReadWrite => CL_MEM_READ_WRITE,
         }
+    }
+}
+
+pub struct GpuHostPtrBuffer<T> {
+    buffer: Buffer<T>,
+    len: usize,
+}
+
+impl<T> GpuHostPtrBuffer<T> {
+    #[must_use]
+    pub fn buffer(&self) -> &Buffer<T> {
+        &self.buffer
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.len
     }
 }
 
