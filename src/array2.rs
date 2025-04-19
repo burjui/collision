@@ -52,22 +52,14 @@ impl<T> AsRef<[T]> for Array2<T> {
 impl<T> std::ops::Index<(usize, usize)> for Array2<T> {
     type Output = T;
     fn index(&self, index: (usize, usize)) -> &Self::Output {
-        assert!(
-            index.0 < self.size.0 && index.1 < self.size.1,
-            "index {index:?} is out of bounds {:?}",
-            self.size
-        );
+        assert!(index.0 < self.size.0 && index.1 < self.size.1, "index {index:?} is out of bounds {:?}", self.size);
         &self.data[index.1 * self.size.0 + index.0]
     }
 }
 
 impl<T> std::ops::IndexMut<(usize, usize)> for Array2<T> {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
-        assert!(
-            index.0 < self.size.0 && index.1 < self.size.1,
-            "index {index:?} is out of bounds {:?}",
-            self.size
-        );
+        assert!(index.0 < self.size.0 && index.1 < self.size.1, "index {index:?} is out of bounds {:?}", self.size);
         &mut self.data[index.1 * self.size.0 + index.0]
     }
 }

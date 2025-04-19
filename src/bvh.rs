@@ -1,4 +1,4 @@
-use std::mem::swap;
+use std::{mem::swap, u32};
 
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
@@ -7,10 +7,12 @@ use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
-    nodes: Vec<Node>,
+    node_aabbs: Vec<AABB>,
+    node_tags: Vec<NodeTag>,
+    node_leaf_indices: Vec<u32>,
+    node_tree_left: Vec<NodeId>,
+    node_tree_right: Vec<NodeId>,
     object_aabbs: Vec<AABB>,
-    object_positions: Vec<Vector2<f64>>,
-    object_radii: Vec<f64>,
 }
 
 impl Bvh {
@@ -32,16 +34,21 @@ impl Bvh {
             });
         }
         items.par_sort_unstable_by_key(|item| item.morton_code);
-        let mut nodes = Vec::with_capacity(positions.len() * 2);
+
+        let mut node_aabbs = Vec::default();
+        let mut node_tags = Vec::default();
+        let mut node_leaf_indices = Vec::default();
+        let mut node_tree_left = Vec::default();
+        let mut node_tree_right = Vec::default();
         for item in &items {
-            nodes.push(Node {
-                aabb: object_aabbs[item.object_index],
-                kind: NodeKind::Leaf(u32::try_from(item.object_index).unwrap()),
-            });
+            node_aabbs.push(object_aabbs[item.object_index]);
+            node_tags.push(NodeTag::Leaf);
+            node_leaf_indices.push(u32::try_from(item.object_index).unwrap());
+            node_tree_left.push(NodeId::INVALID);
+            node_tree_right.push(NodeId::INVALID);
         }
-        let mut combine_area = (0..nodes.len())
-            .map(|i| NodeId(u32::try_from(i).unwrap()))
-            .collect_vec();
+
+        let mut combine_area = (0..node_aabbs.len()).map(|i| NodeId(u32::try_from(i).unwrap())).collect_vec();
         let mut combine_area_tmp = Vec::with_capacity(combine_area.len().div_ceil(2));
         let (mut combine_area, mut combine_area_tmp) = (&mut combine_area, &mut combine_area_tmp);
         while combine_area.len() > 1 {
@@ -52,8 +59,8 @@ impl Bvh {
                 } else {
                     let left = chunk[0];
                     let right = chunk[1];
-                    let left_aabb = nodes[usize::try_from(left.0).unwrap()].aabb;
-                    let right_aabb = nodes[usize::try_from(right.0).unwrap()].aabb;
+                    let left_aabb = node_aabbs[usize::try_from(left.0).unwrap()];
+                    let right_aabb = node_aabbs[usize::try_from(right.0).unwrap()];
                     let aabb = AABB {
                         topleft: Vector2::new(
                             left_aabb.topleft.x.min(right_aabb.topleft.x),
@@ -64,11 +71,12 @@ impl Bvh {
                             left_aabb.bottomright.y.max(right_aabb.bottomright.y),
                         ),
                     };
-                    let node_id = NodeId(u32::try_from(nodes.len()).unwrap());
-                    nodes.push(Node {
-                        aabb,
-                        kind: NodeKind::Tree { left, right },
-                    });
+                    let node_id = NodeId(u32::try_from(node_aabbs.len()).unwrap());
+                    node_aabbs.push(aabb);
+                    node_tags.push(NodeTag::Tree);
+                    node_leaf_indices.push(u32::MAX);
+                    node_tree_left.push(left);
+                    node_tree_right.push(right);
                     node_id
                 };
                 combine_area_tmp.push(node_id);
@@ -76,25 +84,37 @@ impl Bvh {
             swap(&mut combine_area, &mut combine_area_tmp);
         }
         Bvh {
+            node_aabbs,
+            node_tags,
+            node_leaf_indices,
+            node_tree_left,
+            node_tree_right,
             object_aabbs,
-            object_positions: positions.to_vec(),
-            object_radii: radii.to_vec(),
-            nodes,
         }
     }
 
-    pub fn find_intersections(&self, object_index: usize, candidates: &mut Vec<NormalizedCollisionPair>) {
-        if !self.nodes.is_empty() {
-            self.find_intersections_with(object_index, candidates);
-        }
+    pub fn node_aabbs(&self) -> &[AABB] {
+        &self.node_aabbs
     }
 
-    pub fn nodes(&self) -> &[Node] {
-        &self.nodes
+    pub fn node_tags(&self) -> &[NodeTag] {
+        &self.node_tags
+    }
+
+    pub fn node_leaf_indices(&self) -> &[u32] {
+        &self.node_leaf_indices
+    }
+
+    pub fn node_tree_left(&self) -> &[NodeId] {
+        &self.node_tree_left
+    }
+
+    pub fn node_tree_right(&self) -> &[NodeId] {
+        &self.node_tree_right
     }
 
     pub fn root(&self) -> NodeId {
-        let id = self.nodes.len().checked_sub(1).unwrap();
+        let id = self.node_aabbs.len().checked_sub(1).unwrap();
         NodeId(u32::try_from(id).unwrap())
     }
 
@@ -102,7 +122,25 @@ impl Bvh {
         &self.object_aabbs
     }
 
-    fn find_intersections_with(&self, object1_index: usize, candidates: &mut Vec<NormalizedCollisionPair>) {
+    pub fn find_intersections(
+        &self,
+        object_index: usize,
+        positions: &[Vector2<f64>],
+        radii: &[f64],
+        candidates: &mut Vec<NormalizedCollisionPair>,
+    ) {
+        if !self.node_aabbs.is_empty() {
+            self.find_intersections_with(object_index, positions, radii, candidates);
+        }
+    }
+
+    fn find_intersections_with(
+        &self,
+        object1_index: usize,
+        positions: &[Vector2<f64>],
+        radii: &[f64],
+        candidates: &mut Vec<NormalizedCollisionPair>,
+    ) {
         const STACK_SIZE: usize = 16;
         let mut stack = [NodeId(0); STACK_SIZE];
         let mut sp = 0;
@@ -113,16 +151,18 @@ impl Bvh {
             sp -= 1;
             let node_id = stack[sp];
             let object_aabb = self.object_aabbs[object1_index];
-            let Node { aabb, kind, .. } = &self.nodes[usize::try_from(node_id.0).unwrap()];
-            if object_aabb.intersects(aabb) {
-                match *kind {
-                    NodeKind::Leaf(object2_index) => {
-                        let object2_index = usize::try_from(object2_index).unwrap();
+            let node_id = usize::try_from(node_id.0).unwrap();
+            let aabb = self.node_aabbs[node_id];
+            if object_aabb.intersects(&aabb) {
+                let tag = self.node_tags[node_id];
+                match tag {
+                    NodeTag::Leaf => {
+                        let object2_index = usize::try_from(self.node_leaf_indices[node_id]).unwrap();
                         if object2_index != object1_index {
-                            let object1_position = self.object_positions[object1_index];
-                            let object2_position = self.object_positions[object2_index];
-                            let object1_radius = self.object_radii[object1_index];
-                            let object2_radius = self.object_radii[object2_index];
+                            let object1_position = positions[object1_index];
+                            let object2_position = positions[object2_index];
+                            let object1_radius = radii[object1_index];
+                            let object2_radius = radii[object2_index];
                             let distance_squared = (object1_position - object2_position).magnitude_squared();
                             let collision_distance = object1_radius + object2_radius;
                             if distance_squared < collision_distance * collision_distance {
@@ -130,10 +170,10 @@ impl Bvh {
                             }
                         }
                     }
-                    NodeKind::Tree { left, right } => {
-                        stack[sp] = left;
+                    NodeTag::Tree => {
+                        stack[sp] = self.node_tree_left[node_id];
                         sp += 1;
-                        stack[sp] = right;
+                        stack[sp] = self.node_tree_right[node_id];
                         sp += 1;
                     }
                 }
@@ -179,6 +219,17 @@ impl AABB {
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct NodeId(u32);
+
+impl NodeId {
+    const INVALID: Self = Self(u32::MAX);
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum NodeTag {
+    Leaf,
+    Tree,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]

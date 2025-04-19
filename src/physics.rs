@@ -14,8 +14,12 @@ use rayon::{
 
 use crate::{
     app_config::{CONFIG, DtSource},
-    bvh::{AABB, Bvh, Node},
-    gpu::{GPU, GpuBufferAccessMode, GpuDeviceBuffer},
+    bvh::{AABB, Bvh, NodeId, NodeTag},
+    gpu::{
+        GPU,
+        GpuBufferAccessMode::{self, ReadOnly, ReadWrite, WriteOnly},
+        GpuDeviceBuffer,
+    },
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
     vector2::Vector2,
@@ -34,15 +38,19 @@ pub struct PhysicsEngine {
     global_gravity: Vector2<f64>,
     gravitational_constant: f64,
     gpu_integration_kernel: Kernel,
-    gpu_integration_position_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    gpu_integration_velocity_buffer: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    gpu_integration_planet_mass_buffer: Option<GpuDeviceBuffer<f64>>,
+    gpu_integration_positions: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    gpu_integration_velocities: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    gpu_integration_planet_masses: Option<GpuDeviceBuffer<f64>>,
     gpu_planet_masses: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
     thread_pool: ThreadPool,
     max_candidates_per_object: usize,
     gpu_bvh_kernel: Kernel,
-    gpu_bvh_nodes: Option<GpuDeviceBuffer<Node>>,
+    gpu_bvh_node_aabbs: Option<GpuDeviceBuffer<AABB>>,
+    gpu_bvh_node_tags: Option<GpuDeviceBuffer<NodeTag>>,
+    gpu_bvh_node_leaf_indices: Option<GpuDeviceBuffer<u32>>,
+    gpu_bvh_node_tree_left: Option<GpuDeviceBuffer<NodeId>>,
+    gpu_bvh_node_tree_right: Option<GpuDeviceBuffer<NodeId>>,
     gpu_bvh_object_aabbs: Option<GpuDeviceBuffer<AABB>>,
     gpu_bvh_object_positions: Option<GpuDeviceBuffer<Vector2<f64>>>,
     gpu_bvh_object_radii: Option<GpuDeviceBuffer<f64>>,
@@ -74,15 +82,19 @@ impl PhysicsEngine {
             global_gravity: Vector2::from(CONFIG.simulation.global_gravity),
             gravitational_constant: CONFIG.simulation.gravitational_constant,
             gpu_integration_kernel,
-            gpu_integration_position_buffer: None,
-            gpu_integration_velocity_buffer: None,
-            gpu_integration_planet_mass_buffer: None,
+            gpu_integration_positions: None,
+            gpu_integration_velocities: None,
+            gpu_integration_planet_masses: None,
             gpu_planet_masses: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
             thread_pool: ThreadPoolBuilder::new().num_threads(thread_count).build().unwrap(),
             max_candidates_per_object: 0,
             gpu_bvh_kernel,
-            gpu_bvh_nodes: None,
+            gpu_bvh_node_aabbs: None,
+            gpu_bvh_node_tags: None,
+            gpu_bvh_node_leaf_indices: None,
+            gpu_bvh_node_tree_left: None,
+            gpu_bvh_node_tree_right: None,
             gpu_bvh_object_aabbs: None,
             gpu_bvh_object_positions: None,
             gpu_bvh_object_radii: None,
@@ -145,10 +157,7 @@ impl PhysicsEngine {
                     zip(self.objects.velocities.iter(), self.objects.radii.iter()).fold(
                         (0.0_f64, f64::MAX),
                         |(max_velocity_squared, min_object_size), (velocity, radius)| {
-                            (
-                                max_velocity_squared.max(velocity.magnitude_squared()),
-                                min_object_size.min(radius * 2.0),
-                            )
+                            (max_velocity_squared.max(velocity.magnitude_squared()), min_object_size.min(radius * 2.0))
                         },
                     );
                 let velocity_factor = if min_object_size == f64::MAX {
@@ -282,38 +291,33 @@ impl PhysicsEngine {
     }
 
     fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
-        self.gpu_integration_position_buffer
-            .as_ref()
-            .is_none_or(|b| b.len() != self.objects.len())
+        self.gpu_integration_positions.as_ref().is_none_or(|b| b.len() != self.objects.len())
     }
 
     fn allocate_gpu_integration_buffers(&mut self) {
-        self.gpu_integration_position_buffer.replace(
-            GPU.create_device_buffer(self.objects.positions.len(), GpuBufferAccessMode::ReadWrite)
+        self.gpu_integration_positions.replace(
+            GPU.create_device_buffer(self.objects.positions.len(), ReadWrite)
                 .context("Failed to create position buffer")
                 .unwrap(),
         );
-        self.gpu_integration_velocity_buffer.replace(
-            GPU.create_device_buffer(self.objects.velocities.len(), GpuBufferAccessMode::ReadWrite)
+        self.gpu_integration_velocities.replace(
+            GPU.create_device_buffer(self.objects.velocities.len(), ReadWrite)
                 .context("Failed to create velocity buffer")
                 .unwrap(),
         );
-        self.gpu_integration_planet_mass_buffer.replace(
-            GPU.create_device_buffer(
-                self.objects.planet_count + 1, /* cannot create an empty buffer */
-                GpuBufferAccessMode::ReadOnly,
-            )
-            .context("Failed to create planet mass buffer")
-            .unwrap(),
+        self.gpu_integration_planet_masses.replace(
+            GPU.create_device_buffer(self.objects.planet_count + 1 /* cannot create an empty buffer */, ReadOnly)
+                .context("Failed to create planet mass buffer")
+                .unwrap(),
         );
         self.gpu_planet_masses.resize(self.objects.planet_count + 1, 0.0);
     }
 
     fn execute_integration_kernel(&mut self, dt: f64) {
         self.write_integration_gpu_buffers();
-        let position_buffer = self.gpu_integration_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.gpu_integration_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.gpu_integration_planet_mass_buffer.as_mut().unwrap();
+        let position_buffer = self.gpu_integration_positions.as_mut().unwrap();
+        let velocity_buffer = self.gpu_integration_velocities.as_mut().unwrap();
+        let planet_mass_buffer = self.gpu_integration_planet_masses.as_mut().unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_integration_kernel);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
@@ -326,9 +330,7 @@ impl PhysicsEngine {
             kernel.set_arg(&u32::try_from(self.objects.planet_count).unwrap());
             kernel.set_arg(&self.gravitational_constant);
         }
-        GPU.enqueue_execute_kernel(&mut kernel)
-            .context("Failed to execute kernel")
-            .unwrap();
+        GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
             .context("Failed to read position buffer")
             .unwrap();
@@ -339,9 +341,9 @@ impl PhysicsEngine {
     }
 
     fn write_integration_gpu_buffers(&mut self) {
-        let position_buffer = self.gpu_integration_position_buffer.as_mut().unwrap();
-        let velocity_buffer = self.gpu_integration_velocity_buffer.as_mut().unwrap();
-        let planet_mass_buffer = self.gpu_integration_planet_mass_buffer.as_mut().unwrap();
+        let position_buffer = self.gpu_integration_positions.as_mut().unwrap();
+        let velocity_buffer = self.gpu_integration_velocities.as_mut().unwrap();
+        let planet_mass_buffer = self.gpu_integration_planet_masses.as_mut().unwrap();
         assert!(position_buffer.len() == self.objects.positions.len());
         assert!(velocity_buffer.len() == self.objects.velocities.len());
         assert!(planet_mass_buffer.len() == self.objects.planet_count + 1);
@@ -390,42 +392,26 @@ impl PhysicsEngine {
                 &self.thread_pool,
                 &mut self.candidates,
                 &mut self.candidates_flat,
-                self.objects.len(),
+                &self.objects.positions,
+                &self.objects.radii,
             );
         };
-        println!(
-            "found {} candidates in {:?}",
-            self.candidates_flat.len(),
-            start.elapsed()
-        );
+        println!("found {} candidates in {:?}", self.candidates_flat.len(), start.elapsed());
 
         let start = Instant::now();
         self.thread_pool.install(|| self.candidates_flat.par_sort_unstable());
         println!("candidates sort {:?} ", start.elapsed());
 
         let start = Instant::now();
-        let max_candidates_per_object = self
-            .candidates_flat
-            .chunk_by(|a, b| a.object1_index == b.object1_index)
-            .map(<[_]>::len)
-            .max()
-            .unwrap_or(0);
+        let max_candidates_per_object =
+            self.candidates_flat.chunk_by(|a, b| a.object1_index == b.object1_index).map(<[_]>::len).max().unwrap_or(0);
         self.max_candidates_per_object = self.max_candidates_per_object.max(max_candidates_per_object);
-        println!(
-            "max candidates per object {} {:?}",
-            self.max_candidates_per_object,
-            start.elapsed()
-        );
+        println!("max candidates per object {} {:?}", self.max_candidates_per_object, start.elapsed());
 
         let start = Instant::now();
         let previous_length = self.candidates_flat.len();
         self.candidates_flat.dedup();
-        println!(
-            "candidates dedup {} -> {} {:?}",
-            previous_length,
-            self.candidates_flat.len(),
-            start.elapsed()
-        );
+        println!("candidates dedup {} -> {} {:?}", previous_length, self.candidates_flat.len(), start.elapsed());
 
         let start = Instant::now();
         self.candidates_flat.shuffle(&mut rng());
@@ -456,24 +442,22 @@ impl PhysicsEngine {
         thread_pool: &ThreadPool,
         candidates: &'a mut Vec<Vec<NormalizedCollisionPair>>,
         candidates_flat: &mut Vec<NormalizedCollisionPair>,
-        object_count: usize,
+        positions: &[Vector2<f64>],
+        radii: &[f64],
     ) {
-        let chunk_size = object_count.div_ceil(thread_pool.current_num_threads());
+        let chunk_size = positions.len().div_ceil(thread_pool.current_num_threads());
         thread_pool.install(|| {
-            candidates
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(chunk_index, candidates)| {
-                    candidates.clear();
-                    for i in 0..chunk_size {
-                        let object_index = chunk_index * chunk_size + i;
-                        if object_index < object_count {
-                            bvh.find_intersections(object_index, candidates);
-                        }
+            candidates.par_iter_mut().enumerate().for_each(|(chunk_index, candidates)| {
+                candidates.clear();
+                for i in 0..chunk_size {
+                    let object_index = chunk_index * chunk_size + i;
+                    if object_index < positions.len() {
+                        bvh.find_intersections(object_index, positions, radii, candidates);
                     }
-                    candidates.sort_unstable();
-                    candidates.dedup();
-                });
+                }
+                candidates.sort_unstable();
+                candidates.dedup();
+            });
             candidates_flat.clear();
             candidates_flat.append(
                 candidates
@@ -490,95 +474,49 @@ impl PhysicsEngine {
     fn find_collision_candidates_gpu(&mut self) {
         const MAX_CANDIDATES: u32 = 10;
 
-        if self
-            .gpu_bvh_nodes
-            .as_ref()
-            .is_none_or(|b| b.len() != self.bvh.nodes().len())
-        {
-            self.gpu_bvh_nodes.replace(
-                GPU.create_device_buffer(self.bvh.nodes().len(), GpuBufferAccessMode::ReadWrite)
-                    .context("Failed to create position buffer")
-                    .unwrap(),
-            );
-            self.gpu_bvh_object_aabbs.replace(
-                GPU.create_device_buffer(self.bvh.object_aabbs().len(), GpuBufferAccessMode::ReadWrite)
-                    .context("Failed to create position buffer")
-                    .unwrap(),
-            );
-        }
-        if self
-            .gpu_bvh_object_positions
-            .as_ref()
-            .is_none_or(|b| b.len() != self.objects.len())
-        {
-            self.gpu_bvh_object_positions.replace(
-                GPU.create_device_buffer(self.objects.len(), GpuBufferAccessMode::ReadWrite)
-                    .context("Failed to create position buffer")
-                    .unwrap(),
-            );
-            self.gpu_bvh_object_radii.replace(
-                GPU.create_device_buffer(self.objects.len(), GpuBufferAccessMode::ReadWrite)
-                    .context("Failed to create position buffer")
-                    .unwrap(),
-            );
-            self.gpu_bvh_object_candidates.replace(
-                GPU.create_device_buffer(
-                    self.objects.len() * usize::try_from(MAX_CANDIDATES).unwrap(),
-                    GpuBufferAccessMode::ReadWrite,
-                )
-                .context("Failed to create position buffer")
-                .unwrap(),
-            );
-        }
-        let gpu_bvh_nodes = self.gpu_bvh_nodes.as_mut().unwrap();
-        let gpu_bvh_object_aabbs = self.gpu_bvh_object_aabbs.as_mut().unwrap();
-        let gpu_bvh_object_positions = self.gpu_bvh_object_positions.as_mut().unwrap();
-        let gpu_bvh_object_radii = self.gpu_bvh_object_radii.as_mut().unwrap();
-        let gpu_bvh_object_candidates = self.gpu_bvh_object_candidates.as_mut().unwrap();
-        GPU.enqueue_write_device_buffer(gpu_bvh_nodes, &self.bvh.nodes())
-            .context("Failed to write gpu_bvh_nodes")
-            .unwrap();
-        GPU.enqueue_write_device_buffer(gpu_bvh_object_aabbs, &self.bvh.object_aabbs())
-            .context("Failed to write gpu_bvh_object_aabbs")
-            .unwrap();
-        GPU.enqueue_write_device_buffer(gpu_bvh_object_positions, &self.objects.positions)
-            .context("Failed to write gpu_bvh_object_positions")
-            .unwrap();
-        GPU.enqueue_write_device_buffer(gpu_bvh_object_radii, &self.objects.radii)
-            .context("Failed to write gpu_bvh_object_radii")
-            .unwrap();
-        self.candidates_flat.clear();
-        self.candidates_flat
-            .resize(gpu_bvh_object_candidates.len(), NormalizedCollisionPair::new(0, 0));
-        GPU.enqueue_write_device_buffer(gpu_bvh_object_candidates, &self.candidates_flat)
-            .context("Failed to write gpu_bvh_object_candidates")
-            .unwrap();
-        // GPU.wait_for_queue_completion().unwrap();
-        // println!("GPU BVH write buffers {:?}", start.elapsed());
+        self.gpu_bvh_node_aabbs.init(self.bvh.node_aabbs().len(), ReadOnly, "gpu_bvh_node_aabbs");
+        self.gpu_bvh_node_tags.init(self.bvh.node_tags().len(), ReadOnly, "gpu_bvh_node_tags");
+        self.gpu_bvh_node_leaf_indices.init(self.bvh.node_leaf_indices().len(), ReadOnly, "gpu_bvh_node_leaf_indices");
+        self.gpu_bvh_node_tree_left.init(self.bvh.node_tree_left().len(), ReadOnly, "gpu_bvh_node_tree_left");
+        self.gpu_bvh_node_tree_right.init(self.bvh.node_tree_right().len(), ReadOnly, "gpu_bvh_node_tree_right");
+        self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs().len(), ReadOnly, "gpu_bvh_object_aabbs");
+        self.gpu_bvh_object_positions.init(self.objects.len(), ReadOnly, "gpu_bvh_object_positions");
+        self.gpu_bvh_object_radii.init(self.objects.len(), ReadOnly, "gpu_bvh_object_radii");
+        let candidates_length = self.objects.len() * usize::try_from(MAX_CANDIDATES).unwrap();
+        self.gpu_bvh_object_candidates.init(candidates_length, WriteOnly, "gpu_bvh_object_candidates");
 
-        // let start = Instant::now();
+        self.gpu_bvh_node_aabbs.enque_write(self.bvh.node_aabbs(), "gpu_bvh_node_aabbs");
+        self.gpu_bvh_node_tags.enque_write(self.bvh.node_tags(), "gpu_bvh_node_tags");
+        self.gpu_bvh_node_leaf_indices.enque_write(self.bvh.node_leaf_indices(), "gpu_bvh_node_leaf_indices");
+        self.gpu_bvh_node_tree_left.enque_write(self.bvh.node_tree_left(), "gpu_bvh_node_tree_left");
+        self.gpu_bvh_node_tree_right.enque_write(self.bvh.node_tree_right(), "gpu_bvh_node_tree_right");
+        self.gpu_bvh_object_aabbs.enque_write(self.bvh.object_aabbs(), "gpu_bvh_object_aabbs");
+        self.gpu_bvh_object_positions.enque_write(&self.objects.positions, "gpu_bvh_object_positions");
+        self.gpu_bvh_object_radii.enque_write(&self.objects.radii, "gpu_bvh_object_radii");
+        // TODO zero the remainder on the GPU side instead
+        self.candidates_flat.clear();
+        self.candidates_flat.resize(candidates_length, NormalizedCollisionPair::new(0, 0));
+        self.gpu_bvh_object_candidates.enque_write(&self.candidates_flat, "gpu_bvh_object_candidates");
+
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
             kernel.set_arg(&self.bvh.root());
-            kernel.set_arg(gpu_bvh_nodes.buffer());
-            kernel.set_arg(gpu_bvh_object_aabbs.buffer());
-            kernel.set_arg(gpu_bvh_object_positions.buffer());
-            kernel.set_arg(gpu_bvh_object_radii.buffer());
-            kernel.set_arg(gpu_bvh_object_candidates.buffer());
+            self.gpu_bvh_node_aabbs.set_arg(&mut kernel);
+            self.gpu_bvh_node_tags.set_arg(&mut kernel);
+            self.gpu_bvh_node_leaf_indices.set_arg(&mut kernel);
+            self.gpu_bvh_node_tree_left.set_arg(&mut kernel);
+            self.gpu_bvh_node_tree_right.set_arg(&mut kernel);
+            self.gpu_bvh_object_aabbs.set_arg(&mut kernel);
+            self.gpu_bvh_object_positions.set_arg(&mut kernel);
+            self.gpu_bvh_object_radii.set_arg(&mut kernel);
+            self.gpu_bvh_object_candidates.set_arg(&mut kernel);
             kernel.set_arg(&MAX_CANDIDATES);
         }
-        GPU.enqueue_execute_kernel(&mut kernel)
-            .context("Failed to execute kernel")
-            .unwrap();
-        // GPU.wait_for_queue_completion().unwrap();
-        // println!("GPU BVH execute kernel {:?}", start.elapsed());
-        GPU.enqueue_read_device_buffer(gpu_bvh_object_candidates, &mut self.candidates_flat)
-            .context("Failed to read gpu_bvh_object_candidates")
-            .unwrap();
+        GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
+        self.gpu_bvh_object_candidates.enque_read(&mut self.candidates_flat, "gpu_bvh_object_candidates");
         GPU.wait_for_queue_completion().unwrap();
-        self.candidates_flat
-            .retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
+        self.candidates_flat.retain(|pair| pair.object1_index > 0 || pair.object2_index > 0);
     }
 
     fn process_collision_candidate(
@@ -671,10 +609,9 @@ impl PhysicsEngine {
 
     fn apply_constraints(&mut self) {
         let cb = self.constraints;
-        for ((position, velocity), radius) in zip(
-            zip(&mut self.objects.positions, &mut self.objects.velocities),
-            &self.objects.radii,
-        ) {
+        for ((position, velocity), radius) in
+            zip(zip(&mut self.objects.positions, &mut self.objects.velocities), &self.objects.radii)
+        {
             let initial_velocity = *velocity;
             if position.x - radius < cb.topleft.x {
                 position.x = cb.topleft.x + radius;
@@ -704,6 +641,42 @@ impl PhysicsEngine {
                 *velocity *= self.restitution_coefficient;
             }
         }
+    }
+}
+
+trait GpuDeviceBufferUtils<T> {
+    fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T>;
+    fn enque_write(&mut self, data: &[T], name: &'static str);
+    fn enque_read(&mut self, data: &mut [T], name: &'static str);
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
+}
+
+impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
+    fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T> {
+        if self.as_ref().is_none_or(|b| b.len() != length) {
+            self.replace(
+                GPU.create_device_buffer(length, access_mode)
+                    .with_context(|| format!("failed to create GPU device buffer {name}"))
+                    .unwrap(),
+            );
+        }
+        self.as_mut().unwrap()
+    }
+
+    fn enque_write(&mut self, data: &[T], name: &'static str) {
+        GPU.enqueue_write_device_buffer(self.as_mut().unwrap(), data)
+            .with_context(|| format!("failed to enqueue write GPU device buffer {name}"))
+            .unwrap();
+    }
+
+    fn enque_read(&mut self, data: &mut [T], name: &'static str) {
+        GPU.enqueue_read_device_buffer(self.as_mut().unwrap(), data)
+            .with_context(|| format!("failed to enqueue read GPU device buffer {name}"))
+            .unwrap();
+    }
+
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
     }
 }
 

@@ -17,7 +17,7 @@ use anyhow::anyhow;
 use collision::{
     app_config::{CONFIG, ColorSource, TimeLimitAction},
     array2::Array2,
-    bvh::{AABB, Bvh, Node, NodeKind},
+    bvh::{AABB, Bvh},
     demo::create_demo,
     fps::FpsCalculator,
     physics::{DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
@@ -130,20 +130,12 @@ pub fn main() -> anyhow::Result<()> {
     rendering_thread.join().expect("failed to join rendering thread");
     let physics = simulation_thread.join().expect("failed to join simulation thread");
     let mut stats_buffer = String::new();
-    write_stats(
-        &mut stats_buffer,
-        (app.last_fps, app.min_fps),
-        physics.stats(),
-        app.gpu_compute_options,
-    )?;
+    write_stats(&mut stats_buffer, (app.last_fps, app.min_fps), physics.stats(), app.gpu_compute_options)?;
     print!("{stats_buffer}");
     let sim_total_duration_guard = sim_total_duration.lock().unwrap();
     println!("total simulation duration: {:?}", *sim_total_duration_guard);
     if *sim_total_duration_guard > Duration::ZERO {
-        println!(
-            "relative speed: {}",
-            physics.time() / sim_total_duration_guard.as_secs_f64()
-        );
+        println!("relative speed: {}", physics.time() / sim_total_duration_guard.as_secs_f64());
     }
     println!("Total app running duration: {:?}", start.elapsed());
 
@@ -397,12 +389,7 @@ fn energy_density_field_thread(
                     }
                     *avg /= count;
                 });
-                let max_energy_density = edf_avg
-                    .data()
-                    .par_iter()
-                    .max_by(|a, b| a.total_cmp(b))
-                    .unwrap()
-                    .max(1.0);
+                let max_energy_density = edf_avg.data().par_iter().max_by(|a, b| a.total_cmp(b)).unwrap().max(1.0);
                 edf_avg.data_mut().par_iter_mut().for_each(|energy_density| {
                     *energy_density = (*energy_density / max_energy_density).max(0.0);
                 });
@@ -441,8 +428,8 @@ fn rendering_thread(
             for subscene in scenes {
                 scene.append(&subscene, None);
             }
-            if rendering_data.draw_grid && !rendering_data.bvh.nodes().is_empty() {
-                draw_bvh(&mut scene, rendering_data.bvh.nodes());
+            if rendering_data.draw_grid && !rendering_data.bvh.node_aabbs().is_empty() {
+                draw_aabbs(&mut scene, rendering_data.bvh.node_aabbs());
             }
             redraw_job_queue.force_push(scene);
             let _ = app_event_loop_proxy.send_event(AppEvent::RequestRedraw);
@@ -470,23 +457,11 @@ fn draw_physics(
     }: &RenderingData,
 ) -> Vec<Scene> {
     fn draw_circle(scene: &mut Scene, transform: Affine, position: Vector2<f64>, radius: f64, color: Color) {
-        scene.fill(
-            Fill::NonZero,
-            transform,
-            color,
-            None,
-            &Circle::new((position.x, position.y), radius.max(1.0)),
-        );
+        scene.fill(Fill::NonZero, transform, color, None, &Circle::new((position.x, position.y), radius.max(1.0)));
     }
 
     fn draw_text(scene: &mut Scene, transform: Affine, text: &mut SimpleText, position: Vector2<f64>, s: &str) {
-        text.add(
-            scene,
-            10.0,
-            None,
-            Affine::translate((position.x, position.y)) * transform,
-            s,
-        );
+        text.add(scene, 10.0, None, Affine::translate((position.x, position.y)) * transform, s);
     }
 
     let transform = Affine::IDENTITY;
@@ -514,23 +489,11 @@ fn draw_physics(
                             ColorSource::Dark => Some(Color::new([0.2, 0.2, 0.2, 1.0])),
                         };
                         if let Some(color) = color {
-                            draw_circle(
-                                &mut scene,
-                                transform,
-                                particle_position,
-                                radii[object_index].max(1.0),
-                                color,
-                            );
+                            draw_circle(&mut scene, transform, particle_position, radii[object_index].max(1.0), color);
                         }
 
                         if *draw_ids {
-                            draw_text(
-                                &mut scene,
-                                transform,
-                                &mut text,
-                                particle_position,
-                                &format!("{object_index}"),
-                            );
+                            draw_text(&mut scene, transform, &mut text, particle_position, &format!("{object_index}"));
                         }
                     }
                     scene
@@ -542,19 +505,11 @@ fn draw_physics(
 
     let scene = scenes.last_mut().unwrap();
     let mut text = SimpleText::new();
-    for (object_index, ((&planet_position, &planet_radius), color)) in zip(
-        zip(&positions[planet_range.clone()], &radii[planet_range.clone()]),
-        &colors[planet_range.clone()],
-    )
-    .enumerate()
+    for (object_index, ((&planet_position, &planet_radius), color)) in
+        zip(zip(&positions[planet_range.clone()], &radii[planet_range.clone()]), &colors[planet_range.clone()])
+            .enumerate()
     {
-        draw_circle(
-            scene,
-            transform,
-            planet_position,
-            planet_radius.max(1.0),
-            color.unwrap_or(css::WHITE),
-        );
+        draw_circle(scene, transform, planet_position, planet_radius.max(1.0), color.unwrap_or(css::WHITE));
         if *draw_ids {
             draw_text(scene, transform, &mut text, planet_position, &format!("{object_index}"));
         }
@@ -626,22 +581,20 @@ fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_i
     );
 }
 
-fn draw_bvh(scene: &mut Scene, bvh: &[Node]) {
-    for node in bvh {
-        if let NodeKind::Tree { .. } = &node.kind {
-            scene.stroke(
-                &Stroke::default(),
-                Affine::IDENTITY,
-                css::LIGHT_GRAY,
-                None,
-                &Rect {
-                    x0: node.aabb.topleft.x,
-                    y0: node.aabb.topleft.y,
-                    x1: node.aabb.bottomright.x,
-                    y1: node.aabb.bottomright.y,
-                },
-            );
-        }
+fn draw_aabbs(scene: &mut Scene, aabbs: &[AABB]) {
+    for aabb in aabbs {
+        scene.stroke(
+            &Stroke::default(),
+            Affine::IDENTITY,
+            css::LIGHT_GRAY,
+            None,
+            &Rect {
+                x0: aabb.topleft.x,
+                y0: aabb.topleft.y,
+                x1: aabb.bottomright.x,
+                y1: aabb.bottomright.y,
+            },
+        );
     }
 }
 
@@ -656,13 +609,7 @@ fn draw_stats(
 
     let buffer = &mut String::new();
     write_stats(buffer, (fps, min_fps), stats, gpu_compute_options)?;
-    text.add(
-        scene,
-        TEXT_SIZE,
-        None,
-        Affine::translate((0.0, f64::from(TEXT_SIZE))),
-        buffer,
-    );
+    text.add(scene, TEXT_SIZE, None, Affine::translate((0.0, f64::from(TEXT_SIZE))), buffer);
 
     Ok(())
 }
@@ -777,8 +724,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
         });
         let size = window.inner_size();
         let surface_future =
-            self.context
-                .create_surface(window.clone(), size.width, size.height, PresentMode::AutoVsync);
+            self.context.create_surface(window.clone(), size.width, size.height, PresentMode::AutoVsync);
         // We need to block here, in case a Suspended event appeared
         let surface = pollster::block_on(surface_future).expect("failed to create surface");
         self.state = {
@@ -832,19 +778,13 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                             event_loop.exit();
                         }
                         Key::Named(NamedKey::Space) => {
-                            self.simulation_event_sender
-                                .send(SimulationThreadEvent::ToggleAdvanceTime)
-                                .unwrap();
+                            self.simulation_event_sender.send(SimulationThreadEvent::ToggleAdvanceTime).unwrap();
                         }
                         Key::Character("g") => {
-                            self.simulation_event_sender
-                                .send(SimulationThreadEvent::ToggleDrawGrid)
-                                .unwrap();
+                            self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawGrid).unwrap();
                         }
                         Key::Character("i") => {
-                            self.simulation_event_sender
-                                .send(SimulationThreadEvent::ToggleDrawIds)
-                                .unwrap();
+                            self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawIds).unwrap();
                         }
                         Key::Character("1") => {
                             self.simulation_event_sender
@@ -884,9 +824,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .unwrap();
                         }
                         Key::Character("e") => {
-                            self.simulation_event_sender
-                                .send(SimulationThreadEvent::ToggleDrawEdf)
-                                .unwrap();
+                            self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawEdf).unwrap();
                         }
                         _ => {}
                     }
@@ -1056,18 +994,9 @@ fn render_scene(scene: &Scene, surface: &RenderSurface, renderer: &mut Renderer,
         height,
         antialiasing_method: AaConfig::Area,
     };
-    let surface_texture = surface
-        .surface
-        .get_current_texture()
-        .expect("failed to get current surface texture");
+    let surface_texture = surface.surface.get_current_texture().expect("failed to get current surface texture");
     renderer
-        .render_to_surface(
-            &device_handle.device,
-            &device_handle.queue,
-            scene,
-            &surface_texture,
-            &render_params,
-        )
+        .render_to_surface(&device_handle.device, &device_handle.queue, scene, &surface_texture, &render_params)
         .expect("failed to render to surface");
     surface_texture.present();
     device_handle.device.poll(Maintain::Poll);

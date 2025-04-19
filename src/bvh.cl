@@ -3,32 +3,11 @@ typedef struct {
     double2 bottomright;
 } AABB;
 
-enum {
+typedef enum {
     TAG_LEAF,
     TAG_TREE
-};
+} NodeTag;
 
-typedef struct {
-    uint object2_index;
-} Leaf;
-
-typedef struct {
-    uint left;
-    uint right;
-} Tree;
-
-typedef struct {
-    uint tag;
-    union {
-        Leaf leaf;
-        Tree tree;
-    };
-} NodeKind;
-
-typedef struct {
-    AABB aabb;
-    NodeKind kind;
-} Node;
 
 bool intersects(const AABB *a, const AABB *b) {
     return a->topleft.x <= b->bottomright.x
@@ -42,7 +21,11 @@ bool intersects(const AABB *a, const AABB *b) {
 uint find_intersections_with(
     uint root,
     uint object1_index,
-    global const Node *bvh_nodes,
+    global const AABB *bvh_node_aabbs,
+    global const NodeTag *bvh_node_tags,
+    global const uint *bvh_node_leaf_indices,
+    global const uint *bvh_node_tree_left,
+    global const uint *bvh_node_tree_right,
     global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
@@ -60,10 +43,10 @@ uint find_intersections_with(
 
     while (sp > 0) {
         uint node_id = stack[--sp];
-        const Node node = bvh_nodes[node_id];
-        if (intersects(&object_aabb, &node.aabb)) {
-            if (node.kind.tag == TAG_LEAF) {
-                uint object2_index = node.kind.leaf.object2_index;
+        const AABB aabb = bvh_node_aabbs[node_id];
+        if (intersects(&object_aabb, &aabb)) {
+            if (bvh_node_tags[node_id] == TAG_LEAF) {
+                uint object2_index = bvh_node_leaf_indices[node_id];
                 if (object2_index != object1_index) {
                     const double2 object2_position = positions[object2_index];
                     const double object2_radius = radii[object2_index];
@@ -77,8 +60,8 @@ uint find_intersections_with(
                     }
                 }
             } else {
-                stack[sp++] = node.kind.tree.left;
-                stack[sp++] = node.kind.tree.right;
+                stack[sp++] = bvh_node_tree_left[node_id];
+                stack[sp++] = bvh_node_tree_right[node_id];
             }
         }
     }
@@ -87,7 +70,11 @@ uint find_intersections_with(
 
 kernel void bvh_find_candidates(
     const uint root,
-    global const Node *bvh_nodes,
+    global const AABB *bvh_node_aabbs,
+    global const NodeTag *bvh_node_tags,
+    global const uint *bvh_node_leaf_indices,
+    global const uint *bvh_node_tree_left,
+    global const uint *bvh_node_tree_right,
     global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
@@ -99,7 +86,20 @@ kernel void bvh_find_candidates(
     for (uint i = 0; i < MAX_CANDIDATES; ++i) {
         candidates[i] = (uint2)(0, 0);
     }
-    uint candidates_end = find_intersections_with(root, object1_index, bvh_nodes, object_aabbs, positions, radii, candidates, 0);
+    uint candidates_end = find_intersections_with(
+        root,
+        object1_index,
+        bvh_node_aabbs,
+        bvh_node_tags,
+        bvh_node_leaf_indices,
+        bvh_node_tree_left,
+        bvh_node_tree_right,
+        object_aabbs,
+        positions,
+        radii,
+        candidates,
+        0
+    );
     for (uint i = 0; i < candidates_end; ++i) {
         global_candidates[object1_index * max_candidates + i] = candidates[i];
     }
