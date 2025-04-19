@@ -1,4 +1,4 @@
-use std::{mem::swap, u32};
+use std::mem::swap;
 
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
@@ -61,16 +61,7 @@ impl Bvh {
                     let right = chunk[1];
                     let left_aabb = node_aabbs[usize::try_from(left.0).unwrap()];
                     let right_aabb = node_aabbs[usize::try_from(right.0).unwrap()];
-                    let aabb = AABB {
-                        topleft: Vector2::new(
-                            left_aabb.topleft.x.min(right_aabb.topleft.x),
-                            left_aabb.topleft.y.min(right_aabb.topleft.y),
-                        ),
-                        bottomright: Vector2::new(
-                            left_aabb.bottomright.x.max(right_aabb.bottomright.x),
-                            left_aabb.bottomright.y.max(right_aabb.bottomright.y),
-                        ),
-                    };
+                    let aabb = left_aabb.union(&right_aabb);
                     let node_id = NodeId(u32::try_from(node_aabbs.len()).unwrap());
                     node_aabbs.push(aabb);
                     node_tags.push(NodeTag::Tree);
@@ -175,9 +166,8 @@ impl Bvh {
                     }
                     NodeTag::Tree => {
                         stack[sp] = self.node_tree_left[node_id];
-                        sp += 1;
-                        stack[sp] = self.node_tree_right[node_id];
-                        sp += 1;
+                        stack[sp + 1] = self.node_tree_right[node_id];
+                        sp += 2;
                     }
                 }
             }
@@ -218,6 +208,16 @@ impl AABB {
             && self.topleft.y <= other.bottomright.y
             && self.bottomright.y >= other.topleft.y
     }
+
+    fn union(&self, other: &AABB) -> AABB {
+        AABB {
+            topleft: Vector2::new(self.topleft.x.min(other.topleft.x), self.topleft.y.min(other.topleft.y)),
+            bottomright: Vector2::new(
+                self.bottomright.x.max(other.bottomright.x),
+                self.bottomright.y.max(other.bottomright.y),
+            ),
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -232,18 +232,4 @@ impl NodeId {
 pub enum NodeTag {
     Leaf,
     Tree,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Node {
-    pub aabb: AABB,
-    pub kind: NodeKind,
-}
-
-#[repr(C, u32)]
-#[derive(Clone, Copy)]
-pub enum NodeKind {
-    Leaf(u32),
-    Tree { left: NodeId, right: NodeId },
 }
