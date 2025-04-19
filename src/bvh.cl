@@ -60,8 +60,9 @@ uint find_intersections_with(
                     }
                 }
             } else {
-                stack[sp++] = bvh_node_tree_left[node_id];
-                stack[sp++] = bvh_node_tree_right[node_id];
+                stack[sp] = bvh_node_tree_left[node_id];
+                stack[sp + 1] = bvh_node_tree_right[node_id];
+                sp += 2;
             }
         }
     }
