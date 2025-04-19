@@ -183,11 +183,18 @@ pub struct DemoConfig {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct RenderConfig {
+    #[serde(default = "default_rendering_enabled")]
+    pub enabled: bool,
+
     #[serde(rename = "color", default = "default_color_source")]
     pub color_source: ColorSource,
 
     #[serde(default)]
     pub show_edf: bool,
+}
+
+fn default_rendering_enabled() -> bool {
+    true
 }
 
 fn default_color_source() -> ColorSource {

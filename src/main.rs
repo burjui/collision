@@ -122,6 +122,7 @@ pub fn main() -> anyhow::Result<()> {
         gpu_compute_options,
         redraw_job_queue,
         redraw_result_queue,
+        rendering_enabled: CONFIG.rendering.enabled,
     };
 
     rendering_thread_ready.wait();
@@ -413,17 +414,19 @@ fn rendering_thread(
 ) {
     let mut rendering_data = RenderingData::default();
     rendering_thread_ready.wait();
+    let mut rendering_enabled = CONFIG.rendering.enabled;
     'main_loop: loop {
         while let Some(event) = rendering_event_queue.pop() {
             match event {
                 RenderingThreadEvent::Draw(data) => rendering_data = data,
+                RenderingThreadEvent::SetRendering(enabled) => rendering_enabled = enabled,
                 RenderingThreadEvent::Exit => {
                     ready_to_exit.wait();
                     break 'main_loop;
                 }
             }
         }
-        if !rendering_data.positions.is_empty() && redraw_job_queue.is_empty() {
+        if rendering_enabled && !rendering_data.positions.is_empty() && redraw_job_queue.is_empty() {
             let mut scenes = draw_physics(&rendering_data);
             let mut scene = scenes.remove(0);
             for subscene in scenes {
@@ -651,15 +654,17 @@ enum SimulationThreadEvent {
 
 enum RenderingThreadEvent {
     Draw(RenderingData),
+    SetRendering(bool),
     Exit,
 }
 
 impl Debug for RenderingThreadEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            RenderingThreadEvent::Draw(_) => "SetData(...)",
-            RenderingThreadEvent::Exit => "Exit",
-        })
+        match self {
+            RenderingThreadEvent::Draw(_) => f.write_str("SetData(...)"),
+            RenderingThreadEvent::SetRendering(enabled) => write!(f, "EnableRendering({enabled})"),
+            RenderingThreadEvent::Exit => f.write_str("Exit"),
+        }
     }
 }
 
@@ -704,6 +709,7 @@ struct VelloApp<'s> {
     gpu_compute_options: GpuComputeOptions,
     redraw_job_queue: &'s ArrayQueue<Scene>,
     redraw_result_queue: &'s ArrayQueue<()>,
+    rendering_enabled: bool,
 }
 
 impl ApplicationHandler<AppEvent> for VelloApp<'_> {
@@ -824,6 +830,10 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                                 .send(SimulationThreadEvent::SetGpuComputeOptions(self.gpu_compute_options))
                                 .unwrap();
                         }
+                        Key::Character("r") => {
+                            self.rendering_enabled = !self.rendering_enabled;
+                            self.rendering_event_queue.push(RenderingThreadEvent::SetRendering(self.rendering_enabled));
+                        }
                         Key::Character("e") => {
                             self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawEdf).unwrap();
                         }
@@ -846,34 +856,36 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         self.last_fps = fps;
                         self.min_fps = self.min_fps.min(fps);
                     }
-                    self.scene.reset();
-                    self.scene.fill(
-                        Fill::NonZero,
-                        Affine::IDENTITY,
-                        css::BLACK,
-                        None,
-                        &Rect::new(0.0, 0.0, CONFIG.window.width as f64, CONFIG.window.height as f64),
-                    );
-                    self.scene.append(&self.simulation_scene, None);
-                    draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
-                    draw_stats(
-                        &mut self.scene,
-                        &mut self.text,
-                        (self.last_fps, self.min_fps),
-                        &self.stats,
-                        self.gpu_compute_options,
-                    )
-                    .expect("failed to draw stats");
+                    if self.rendering_enabled {
+                        self.scene.reset();
+                        self.scene.fill(
+                            Fill::NonZero,
+                            Affine::IDENTITY,
+                            css::BLACK,
+                            None,
+                            &Rect::new(0.0, 0.0, CONFIG.window.width as f64, CONFIG.window.height as f64),
+                        );
+                        self.scene.append(&self.simulation_scene, None);
+                        draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
+                        draw_stats(
+                            &mut self.scene,
+                            &mut self.text,
+                            (self.last_fps, self.min_fps),
+                            &self.stats,
+                            self.gpu_compute_options,
+                        )
+                        .expect("failed to draw stats");
 
-                    let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
-                    let device_handle = &self.context.devices[surface.dev_id];
-                    let surface_texture =
-                        surface.surface.get_current_texture().expect("failed to get current surface texture");
-                    render_scene(&self.scene, surface, &surface_texture, renderer, device_handle);
-                    surface_texture.present();
-                    device_handle.device.poll(Maintain::Poll);
+                        let renderer = self.renderers[surface.dev_id].as_mut().expect("failed to get renderer");
+                        let device_handle = &self.context.devices[surface.dev_id];
+                        let surface_texture =
+                            surface.surface.get_current_texture().expect("failed to get current surface texture");
+                        render_scene(&self.scene, surface, &surface_texture, renderer, device_handle);
+                        surface_texture.present();
+                        device_handle.device.poll(Maintain::Poll);
 
-                    self.redraw_result_queue.force_push(());
+                        self.redraw_result_queue.force_push(());
+                    }
                     self.frame_count += 1;
                 };
             }
