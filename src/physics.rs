@@ -38,10 +38,10 @@ pub struct PhysicsEngine {
     global_gravity: Vector2<f64>,
     gravitational_constant: f64,
     gpu_integration_kernel: Kernel,
-    gpu_integration_positions: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    gpu_integration_velocities: Option<GpuDeviceBuffer<Vector2<f64>>>,
-    gpu_integration_planet_masses: Option<GpuDeviceBuffer<f64>>,
-    gpu_planet_masses: Vec<f64>,
+    gpu_leapfrog_positions: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    gpu_leapfrog_velocities: Option<GpuDeviceBuffer<Vector2<f64>>>,
+    gpu_leapfrog_planet_masses: Option<GpuDeviceBuffer<f64>>,
+    gpu_planet_masses_tmp: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
     thread_pool: ThreadPool,
     max_candidates_per_object: usize,
@@ -82,10 +82,10 @@ impl PhysicsEngine {
             global_gravity: Vector2::from(CONFIG.simulation.global_gravity),
             gravitational_constant: CONFIG.simulation.gravitational_constant,
             gpu_integration_kernel,
-            gpu_integration_positions: None,
-            gpu_integration_velocities: None,
-            gpu_integration_planet_masses: None,
-            gpu_planet_masses: Vec::default(),
+            gpu_leapfrog_positions: None,
+            gpu_leapfrog_velocities: None,
+            gpu_leapfrog_planet_masses: None,
+            gpu_planet_masses_tmp: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
             thread_pool: ThreadPoolBuilder::new().num_threads(thread_count).build().unwrap(),
             max_candidates_per_object: 0,
@@ -284,81 +284,49 @@ impl PhysicsEngine {
     }
 
     fn integrate_gpu(&mut self, dt: f64) {
-        if self.integration_gpu_buffers_are_outdated() {
-            self.allocate_gpu_integration_buffers();
-        }
+        self.gpu_leapfrog_positions.init(self.objects.positions.len(), ReadWrite, "gpu_leapfrog_positions");
+        self.gpu_leapfrog_velocities.init(self.objects.velocities.len(), ReadWrite, "gpu_leapfrog_velocities");
+        self.gpu_planet_masses_tmp.resize(self.objects.planet_count + 1 /* cannot create an empty buffer */, 0.0);
+        self.gpu_leapfrog_planet_masses.init(self.gpu_planet_masses_tmp.len(), ReadOnly, "gpu_leapfrog_planet_masses");
         self.execute_integration_kernel(dt);
-    }
-
-    fn integration_gpu_buffers_are_outdated(&mut self) -> bool {
-        self.gpu_integration_positions.as_ref().is_none_or(|b| b.len() != self.objects.len())
-    }
-
-    fn allocate_gpu_integration_buffers(&mut self) {
-        self.gpu_integration_positions.replace(
-            GPU.create_device_buffer(self.objects.positions.len(), ReadWrite)
-                .context("Failed to create position buffer")
-                .unwrap(),
-        );
-        self.gpu_integration_velocities.replace(
-            GPU.create_device_buffer(self.objects.velocities.len(), ReadWrite)
-                .context("Failed to create velocity buffer")
-                .unwrap(),
-        );
-        self.gpu_integration_planet_masses.replace(
-            GPU.create_device_buffer(self.objects.planet_count + 1 /* cannot create an empty buffer */, ReadOnly)
-                .context("Failed to create planet mass buffer")
-                .unwrap(),
-        );
-        self.gpu_planet_masses.resize(self.objects.planet_count + 1, 0.0);
     }
 
     fn execute_integration_kernel(&mut self, dt: f64) {
         self.write_integration_gpu_buffers();
-        let position_buffer = self.gpu_integration_positions.as_mut().unwrap();
-        let velocity_buffer = self.gpu_integration_velocities.as_mut().unwrap();
-        let planet_mass_buffer = self.gpu_integration_planet_masses.as_mut().unwrap();
+        self.gpu_leapfrog_positions.as_mut().unwrap();
+        self.gpu_leapfrog_velocities.as_mut().unwrap();
+        self.gpu_leapfrog_planet_masses.as_mut().unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_integration_kernel);
         kernel.set_global_work_size(self.objects.len());
         unsafe {
-            kernel.set_arg(position_buffer.buffer());
-            kernel.set_arg(velocity_buffer.buffer());
+            self.gpu_leapfrog_positions.set_arg(&mut kernel);
+            self.gpu_leapfrog_velocities.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.objects.len()).unwrap());
             kernel.set_arg(&dt);
             kernel.set_arg(&self.global_gravity);
-            kernel.set_arg(planet_mass_buffer.buffer());
+            self.gpu_leapfrog_planet_masses.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.objects.planet_count).unwrap());
             kernel.set_arg(&self.gravitational_constant);
         }
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
-        GPU.enqueue_read_device_buffer(position_buffer, &mut self.objects.positions)
-            .context("Failed to read position buffer")
-            .unwrap();
-        GPU.enqueue_read_device_buffer(velocity_buffer, &mut self.objects.velocities)
-            .context("Failed to read velocity buffer")
-            .unwrap();
+        self.gpu_leapfrog_positions.enque_read(&mut self.objects.positions, "gpu_leapfrog_positions");
+        self.gpu_leapfrog_velocities.enque_read(&mut self.objects.velocities, "gpu_leapfrog_velocities");
         GPU.wait_for_queue_completion().unwrap();
     }
 
     fn write_integration_gpu_buffers(&mut self) {
-        let position_buffer = self.gpu_integration_positions.as_mut().unwrap();
-        let velocity_buffer = self.gpu_integration_velocities.as_mut().unwrap();
-        let planet_mass_buffer = self.gpu_integration_planet_masses.as_mut().unwrap();
-        assert!(position_buffer.len() == self.objects.positions.len());
-        assert!(velocity_buffer.len() == self.objects.velocities.len());
-        assert!(planet_mass_buffer.len() == self.objects.planet_count + 1);
-        assert!(self.gpu_planet_masses.len() == self.objects.planet_count + 1);
-        GPU.enqueue_write_device_buffer(position_buffer, &self.objects.positions)
-            .context("Failed to write position buffer")
-            .unwrap();
-        GPU.enqueue_write_device_buffer(velocity_buffer, &self.objects.velocities)
-            .context("Failed to write velocity buffer")
-            .unwrap();
-        self.gpu_planet_masses[..self.objects.planet_count]
+        self.gpu_leapfrog_positions.as_mut().unwrap();
+        self.gpu_leapfrog_velocities.as_mut().unwrap();
+        self.gpu_leapfrog_planet_masses.as_mut().unwrap();
+        assert_eq!(self.gpu_leapfrog_positions.len(), self.objects.positions.len());
+        assert_eq!(self.gpu_leapfrog_velocities.len(), self.objects.velocities.len());
+        assert_eq!(self.gpu_leapfrog_planet_masses.len(), self.gpu_planet_masses_tmp.len());
+        assert_eq!(self.gpu_planet_masses_tmp.len(), self.objects.planet_count + 1);
+        self.gpu_leapfrog_positions.enque_write(&self.objects.positions, "gpu_leapfrog_positions");
+        self.gpu_leapfrog_velocities.enque_write(&self.objects.velocities, "gpu_leapfrog_velocities");
+        self.gpu_planet_masses_tmp[..self.objects.planet_count]
             .copy_from_slice(&self.objects.masses[self.objects.planet_range()]);
-        GPU.enqueue_write_device_buffer(planet_mass_buffer, &self.gpu_planet_masses)
-            .context("Failed to write planet mass buffer")
-            .unwrap();
+        self.gpu_leapfrog_planet_masses.enque_write(&self.gpu_planet_masses_tmp, "gpu_leapfrog_planet_masses");
     }
 
     fn gravity_acceleration(
@@ -383,7 +351,6 @@ impl PhysicsEngine {
 
     fn process_collisions(&mut self) {
         let start = Instant::now();
-        println!("self.gpu_compute_options.bvh: {}", self.gpu_compute_options.bvh);
         if self.gpu_compute_options.bvh {
             self.find_collision_candidates_gpu();
         } else {
@@ -646,6 +613,7 @@ impl PhysicsEngine {
 
 trait GpuDeviceBufferUtils<T> {
     fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T>;
+    fn len(&self) -> usize;
     fn enque_write(&mut self, data: &[T], name: &'static str);
     fn enque_read(&mut self, data: &mut [T], name: &'static str);
     unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
@@ -661,6 +629,10 @@ impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
             );
         }
         self.as_mut().unwrap()
+    }
+
+    fn len(&self) -> usize {
+        self.as_ref().unwrap().len()
     }
 
     fn enque_write(&mut self, data: &[T], name: &'static str) {
