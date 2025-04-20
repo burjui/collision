@@ -7,14 +7,17 @@ use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
-    nodes: Vec<Node>,
+    items: Vec<Item>,
     object_aabbs: Vec<AABB>,
+    nodes: Vec<Node>,
 }
 
 impl Bvh {
-    pub fn new(positions: &[Vector2<f64>], radii: &[f64]) -> Self {
-        let mut items = Vec::with_capacity(positions.len());
-        let mut object_aabbs = Vec::with_capacity(positions.len());
+    pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64], morton_codes: &[u32]) {
+        self.items.clear();
+        self.object_aabbs.clear();
+        self.nodes.clear();
+
         for object_index in 0..positions.len() {
             let position = positions[object_index];
             let radius = radii[object_index];
@@ -22,19 +25,17 @@ impl Bvh {
                 topleft: position - radius,
                 bottomright: position + radius,
             };
-            object_aabbs.push(aabb);
-            let morton_code = morton_code(position.x as u32, position.y as u32);
-            items.push(Item {
+            self.items.push(Item {
                 object_index,
-                morton_code,
+                morton_code: morton_codes[object_index],
             });
+            self.object_aabbs.push(aabb);
         }
-        items.par_sort_unstable_by_key(|item| item.morton_code);
+        self.items.par_sort_unstable_by_key(|item| item.morton_code);
 
-        let mut nodes = Vec::default();
-        for item in &items {
-            nodes.push(Node {
-                aabb: object_aabbs[item.object_index],
+        for item in &self.items {
+            self.nodes.push(Node {
+                aabb: self.object_aabbs[item.object_index],
                 tag: NodeTag::Leaf,
                 data: NodeData {
                     leaf_object_index: u32::try_from(item.object_index).unwrap(),
@@ -42,7 +43,7 @@ impl Bvh {
             });
         }
 
-        let mut combine_area = (0..nodes.len()).map(|i| NodeId(u32::try_from(i).unwrap())).collect_vec();
+        let mut combine_area = (0..self.nodes.len()).map(|i| NodeId(u32::try_from(i).unwrap())).collect_vec();
         let mut combine_area_tmp = Vec::with_capacity(combine_area.len().div_ceil(2));
         let (mut combine_area, mut combine_area_tmp) = (&mut combine_area, &mut combine_area_tmp);
         while combine_area.len() > 1 {
@@ -53,11 +54,11 @@ impl Bvh {
                 } else {
                     let left = chunk[0];
                     let right = chunk[1];
-                    let left_aabb = nodes[usize::try_from(left.0).unwrap()].aabb;
-                    let right_aabb = nodes[usize::try_from(right.0).unwrap()].aabb;
+                    let left_aabb = self.nodes[usize::try_from(left.0).unwrap()].aabb;
+                    let right_aabb = self.nodes[usize::try_from(right.0).unwrap()].aabb;
                     let aabb = left_aabb.union(&right_aabb);
-                    let node_id = NodeId(u32::try_from(nodes.len()).unwrap());
-                    nodes.push(Node {
+                    let node_id = NodeId(u32::try_from(self.nodes.len()).unwrap());
+                    self.nodes.push(Node {
                         aabb,
                         tag: NodeTag::Tree,
                         data: NodeData {
@@ -70,15 +71,15 @@ impl Bvh {
             }
             swap(&mut combine_area, &mut combine_area_tmp);
         }
-        nodes.reverse();
-        let node_count = u32::try_from(nodes.len()).unwrap();
-        for Node { tag, data, .. } in &mut nodes {
+
+        self.nodes.reverse();
+        let node_count = u32::try_from(self.nodes.len()).unwrap();
+        for Node { tag, data, .. } in &mut self.nodes {
             if let NodeTag::Tree = tag {
                 data.tree.left.0 = node_count - unsafe { data.tree.left.0 } - 1;
                 data.tree.right.0 = node_count - unsafe { data.tree.right.0 } - 1;
             }
         }
-        Bvh { nodes, object_aabbs }
     }
 
     pub fn nodes(&mut self) -> &mut [Node] {
@@ -156,7 +157,9 @@ impl Bvh {
     }
 }
 
-pub fn morton_code(x: u32, y: u32) -> u32 {
+pub fn morton_code(position: Vector2<f64>) -> u32 {
+    let x = position.x as u32;
+    let y = position.y as u32;
     expand_bits(x) | (expand_bits(y) << 1)
 }
 

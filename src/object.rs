@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use vello::peniko::Color;
 
-use crate::vector2::Vector2;
+use crate::{bvh::morton_code, vector2::Vector2};
 
 #[derive(Default)]
 pub struct ObjectSoa {
@@ -29,25 +29,15 @@ impl ObjectSoa {
             !object.is_planet || object_index == self.planet_count,
             "planets must be added before any other objects"
         );
-
         self.positions.push(object.position);
         self.velocities.push(object.velocity);
         self.radii.push(object.radius);
         self.masses.push(object.mass);
         self.colors.push(object.color);
         self.is_planet.push(object.is_planet);
-
+        self.morton_codes.push(morton_code(object.position));
         self.planet_count += usize::from(object.is_planet);
         object_index
-    }
-
-    pub fn resize(&mut self, size: usize) {
-        self.positions.resize(size, Vector2::default());
-        self.velocities.resize(size, Vector2::default());
-        self.radii.resize(size, 0.0);
-        self.masses.resize(size, 0.0);
-        self.colors.resize(size, None);
-        self.is_planet.resize(size, false);
     }
 
     #[must_use]
