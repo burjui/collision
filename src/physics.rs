@@ -409,6 +409,7 @@ impl PhysicsEngine {
         unsafe {
             kernel.set_arg(&self.bvh.root());
             self.gpu_bvh_nodes.set_arg(&mut kernel);
+            kernel.set_arg(&u32::try_from(self.gpu_bvh_nodes.len()).unwrap());
             self.gpu_bvh_object_aabbs.set_arg(&mut kernel);
             self.gpu_bvh_object_positions.set_arg(&mut kernel);
             self.gpu_bvh_object_radii.set_arg(&mut kernel);

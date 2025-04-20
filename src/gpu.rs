@@ -185,6 +185,7 @@ pub trait GpuHostPtrBufferUtils<T> {
         name: &'static str,
     ) -> &mut GpuHostPtrBuffer<T>;
 
+    fn len(&self) -> usize;
     unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
 }
 
@@ -201,6 +202,10 @@ impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
                 .unwrap()
         });
         self.as_mut().unwrap()
+    }
+
+    fn len(&self) -> usize {
+        self.as_ref().unwrap().len
     }
 
     unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
