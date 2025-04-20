@@ -258,11 +258,13 @@ pub trait GpuDeviceBufferUtils<T> {
 
 impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
     fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T> {
-        self.replace(
-            GPU.create_device_buffer(length, access_mode)
-                .with_context(|| format!("failed to create GPU device buffer {name}"))
-                .unwrap(),
-        );
+        if self.as_ref().is_none_or(|b| b.len() != length) {
+            self.replace(
+                GPU.create_device_buffer(length, access_mode)
+                    .with_context(|| format!("failed to create GPU device buffer {name}"))
+                    .unwrap(),
+            );
+        }
         self.as_mut().unwrap()
     }
 
