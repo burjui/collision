@@ -18,7 +18,7 @@ use crate::{
     gpu::{
         GPU,
         GpuBufferAccessMode::{ReadOnly, ReadWrite, WriteOnly},
-        GpuHostPtrBuffer, GpuHostPtrBufferUtils,
+        GpuDeviceBuffer, GpuDeviceBufferUtils, GpuHostPtrBuffer, GpuHostPtrBufferUtils,
     },
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
@@ -45,7 +45,7 @@ pub struct PhysicsEngine {
     thread_pool: ThreadPool,
     max_candidates_per_object: usize,
     gpu_bvh_kernel: Kernel,
-    gpu_bvh_nodes: Option<GpuHostPtrBuffer<Node>>,
+    gpu_bvh_nodes: Option<GpuDeviceBuffer<Node>>,
     gpu_bvh_object_aabbs: Option<GpuHostPtrBuffer<AABB>>,
     gpu_bvh_object_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
     gpu_bvh_object_radii: Option<GpuHostPtrBuffer<f64>>,
@@ -398,7 +398,7 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_gpu(&mut self) {
-        self.gpu_bvh_nodes.init(self.bvh.nodes(), ReadOnly, "gpu_bvh_nodes");
+        self.gpu_bvh_nodes.init(self.bvh.nodes().len(), ReadOnly, "gpu_bvh_nodes");
         self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
         self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
         self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
@@ -416,6 +416,7 @@ impl PhysicsEngine {
             self.gpu_bvh_object_candidates.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(MAX_CANDIDATES).unwrap());
         }
+        self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), "gpu_bvh_nodes");
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.wait_for_queue_completion().unwrap();
     }

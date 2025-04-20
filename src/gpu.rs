@@ -23,13 +23,13 @@ pub struct Gpu {
 impl Gpu {
     pub fn first_available(queue_length: u32) -> anyhow::Result<Self> {
         let platforms = get_platforms().context("No platforms found")?;
-        println!("Available OpenCLplatforms:");
-        for platform in &platforms {
-            println!("Platform: {}", platform.name().context("Failed to get platform name")?);
+        println!("Available OpenCL platforms:");
+        for (i, platform) in platforms.iter().enumerate() {
+            println!("Platform {i}: {}", platform.name().context("Failed to get platform name")?);
             let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
-            for device_id in devices {
+            for (i, &device_id) in devices.iter().enumerate() {
                 let device = Device::from(device_id);
-                println!("  Device: {}", device.name().context("Failed to get device name")?);
+                println!("  Device {i}: {}", device.name().context("Failed to get device name")?);
             }
         }
         // panic!();
@@ -85,7 +85,7 @@ impl Gpu {
         .context("Failed to create host ptr buffer")?;
         Ok(GpuHostPtrBuffer {
             buffer,
-            len: data.len(),
+            length: data.len(),
         })
     }
 
@@ -124,11 +124,7 @@ impl Gpu {
         }
     }
 
-    pub fn enqueue_read_device_buffer<T>(
-        &self,
-        buffer: &mut GpuDeviceBuffer<T>,
-        dst: &mut [T],
-    ) -> anyhow::Result<Event> {
+    pub fn enqueue_read_device_buffer<T>(&self, buffer: &GpuDeviceBuffer<T>, dst: &mut [T]) -> anyhow::Result<Event> {
         unsafe { self.queue.enqueue_read_buffer(&buffer.buffer, CL_FALSE, 0, dst, &[]) }
             .context("Failed to read device buffer")
     }
@@ -162,7 +158,7 @@ impl GpuBufferAccessMode {
 
 pub struct GpuHostPtrBuffer<T> {
     buffer: Buffer<T>,
-    len: usize,
+    length: usize,
 }
 
 impl<T> GpuHostPtrBuffer<T> {
@@ -173,7 +169,7 @@ impl<T> GpuHostPtrBuffer<T> {
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.len
+        self.length
     }
 }
 
@@ -205,7 +201,7 @@ impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
     }
 
     fn len(&self) -> usize {
-        self.as_ref().unwrap().len
+        self.as_ref().unwrap().length
     }
 
     unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
@@ -249,5 +245,44 @@ impl<T> GpuDeviceBuffer<T> {
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.length
+    }
+}
+
+pub trait GpuDeviceBufferUtils<T> {
+    fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T>;
+    fn len(&self) -> usize;
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
+    fn enqueue_write(&mut self, data: &[T], name: &'static str);
+    fn enqueue_read(&self, data: &mut [T], name: &'static str);
+}
+
+impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
+    fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T> {
+        self.replace(
+            GPU.create_device_buffer(length, access_mode)
+                .with_context(|| format!("failed to create GPU device buffer {name}"))
+                .unwrap(),
+        );
+        self.as_mut().unwrap()
+    }
+
+    fn len(&self) -> usize {
+        self.as_ref().unwrap().length
+    }
+
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
+    }
+
+    fn enqueue_write(&mut self, data: &[T], name: &'static str) {
+        GPU.enqueue_write_device_buffer(self.as_mut().unwrap(), data)
+            .with_context(|| format!("failed to enqueue write GPU device buffer {name}"))
+            .unwrap();
+    }
+
+    fn enqueue_read(&self, data: &mut [T], name: &'static str) {
+        GPU.enqueue_read_device_buffer(self.as_ref().unwrap(), data)
+            .with_context(|| format!("failed to enqueue read GPU device buffer {name}"))
+            .unwrap();
     }
 }

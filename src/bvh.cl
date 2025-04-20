@@ -33,7 +33,7 @@ bool intersects(const AABB a, const AABB b) {
 
 #define MAX_CANDIDATES 16
 #define STACK_SIZE 32
-#define MAX_PRIVATE_AABBS ((uint) 2)
+#define MAX_PRIVATE_AABBS ((uint) 3)
 
 kernel void bvh_find_candidates(
     const uint root,
