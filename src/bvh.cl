@@ -32,7 +32,7 @@ bool intersects(const AABB a, const AABB b) {
 }
 
 #define MAX_CANDIDATES 16
-#define STACK_SIZE 32
+#define STACK_SIZE 64
 #define MAX_PRIVATE_AABBS ((uint) 3)
 
 kernel void bvh_find_candidates(
@@ -65,32 +65,34 @@ kernel void bvh_find_candidates(
     uint candidate_index = 0;
     while (sp > 0) {
         const uint node_id = stack[--sp];
-        if (node_id < MAX_PRIVATE_AABBS) {
+        if (node_id < private_node_aabb_count) {
             aabb = private_node_aabbs[node_id];
         } else {
             aabb = nodes[node_id].aabb;
         }
-        if (intersects(object_aabb, aabb)) {
-            const Node node = nodes[node_id];
-            if (node.tag == TAG_LEAF) {
-                const uint object2_index = node.data.leaf_object_index;
-                if (object2_index != object1_index) {
-                    const double2 object2_position = positions[object2_index];
-                    const double object2_radius = radii[object2_index];
-                    const double d = distance(object1_position, object2_position);
-                    const double collision_distance = object1_radius + object2_radius;
-                    if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
-                        const uint min_i = min(object1_index, object2_index);
-                        const uint max_i = max(object1_index, object2_index);
-                        private_candidates[candidate_index] = (uint2)(min_i, max_i);
-                        candidate_index += 1;
-                    }
+        if (!intersects(object_aabb, aabb)) {
+            continue;
+        }
+
+        const Node node = nodes[node_id];
+        if (node.tag == TAG_LEAF) {
+            const uint object2_index = node.data.leaf_object_index;
+            if (object2_index != object1_index) {
+                const double2 object2_position = positions[object2_index];
+                const double object2_radius = radii[object2_index];
+                const double d = distance(object1_position, object2_position);
+                const double collision_distance = object1_radius + object2_radius;
+                if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
+                    const uint min_i = min(object1_index, object2_index);
+                    const uint max_i = max(object1_index, object2_index);
+                    private_candidates[candidate_index] = (uint2)(min_i, max_i);
+                    candidate_index += 1;
                 }
-            } else {
-                stack[sp] = node.data.tree.left;
-                stack[sp + 1] = node.data.tree.right;
-                sp += 2;
             }
+        } else {
+            stack[sp] = node.data.tree.left;
+            stack[sp + 1] = node.data.tree.right;
+            sp += 2;
         }
     }
     uint offset = object1_index * MAX_CANDIDATES;
