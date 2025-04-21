@@ -1,4 +1,4 @@
-use std::mem::swap;
+use std::{iter::zip, mem::swap};
 
 use rayon::slice::ParallelSliceMut;
 
@@ -16,7 +16,7 @@ pub struct Bvh {
 impl Bvh {
     pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64], morton_codes: &[u32]) {
         self.object_indices.clear();
-        self.object_indices.extend(0..positions.len());
+        self.object_aabbs.reserve(positions.len());
 
         self.object_aabbs.clear();
         self.object_aabbs.reserve(positions.len());
@@ -30,15 +30,12 @@ impl Bvh {
         self.fold_buffer_b.clear();
         self.fold_buffer_b.reserve(positions.len() * 2);
 
-        for object_index in 0..positions.len() {
-            let position = positions[object_index];
-            let radius = radii[object_index];
-            let aabb = AABB {
-                topleft: position - radius,
-                bottomright: position + radius,
-            };
-            self.object_aabbs.push(aabb);
-        }
+        self.object_aabbs.extend(zip(positions, radii).map(|(&position, &radius)| AABB {
+            topleft: position - radius,
+            bottomright: position + radius,
+        }));
+
+        self.object_indices.extend(0..positions.len());
         self.object_indices.par_sort_unstable_by_key(|&object_index| morton_codes[object_index]);
 
         for &object_index in &self.object_indices {
@@ -53,6 +50,7 @@ impl Bvh {
 
         let (mut src, mut dst) = (&mut self.fold_buffer_a, &mut self.fold_buffer_b);
         src.extend(0..self.nodes.len());
+
         while src.len() > 1 {
             dst.clear();
             for chunk in src.chunks(2) {
@@ -102,45 +100,58 @@ impl Bvh {
         radii: &[f64],
         candidates: &mut [NormalizedCollisionPair],
     ) {
-        if !self.nodes.is_empty() {
-            const STACK_SIZE: usize = 32;
-            let mut stack = [NodeId(0); STACK_SIZE];
-            let mut sp = 0;
-            stack[sp] = self.root();
-            sp += 1;
+        if self.nodes.is_empty() {
+            return;
+        }
 
-            let mut candidate_index = 0;
-            while sp > 0 {
-                sp -= 1;
-                let node_id = stack[sp];
-                let object_aabb = self.object_aabbs[object1_index];
-                let node_id = usize::try_from(node_id.0).unwrap();
-                let aabb = self.nodes[node_id].aabb;
-                if object_aabb.intersects(&aabb) {
-                    let tag = self.nodes[node_id].tag;
-                    match tag {
-                        NodeTag::Leaf => {
-                            let object2_index =
-                                usize::try_from(unsafe { self.nodes[node_id].data.leaf_object_index }).unwrap();
-                            if object2_index != object1_index {
-                                let object1_position = positions[object1_index];
-                                let object2_position = positions[object2_index];
-                                let object1_radius = radii[object1_index];
-                                let object2_radius = radii[object2_index];
-                                let distance_squared = (object1_position - object2_position).magnitude_squared();
-                                let collision_distance = object1_radius + object2_radius;
-                                if distance_squared < collision_distance * collision_distance {
-                                    candidates[candidate_index] =
-                                        NormalizedCollisionPair::new(object1_index, object2_index);
-                                    candidate_index += 1;
-                                }
-                            }
+        const STACK_SIZE: usize = 64;
+        let mut stack = [NodeId(0); STACK_SIZE];
+        let mut sp = 0;
+        stack[sp] = self.root();
+        sp += 1;
+
+        let object1_aabb = self.object_aabbs[object1_index];
+        let object1_position = positions[object1_index];
+        let object1_radius = radii[object1_index];
+        let mut candidate_index = 0;
+
+        while sp > 0 {
+            sp -= 1;
+            let node_id = stack[sp];
+            let node_idx = node_id.0 as usize;
+
+            if !object1_aabb.intersects(&self.nodes[node_idx].aabb) {
+                continue;
+            }
+
+            match self.nodes[node_idx].tag {
+                NodeTag::Leaf => {
+                    let object2_index =
+                        usize::try_from(unsafe { self.nodes[node_idx].data.leaf_object_index }).unwrap();
+                    if object2_index == object1_index {
+                        continue;
+                    }
+
+                    let object2_position = positions[object2_index];
+                    let object2_radius = radii[object2_index];
+                    let dx = object1_position.x - object2_position.x;
+                    let dy = object1_position.y - object2_position.y;
+                    let distance_squared = dx * dx + dy * dy;
+                    let collision_distance = object1_radius + object2_radius;
+
+                    if distance_squared < collision_distance * collision_distance {
+                        if candidate_index < candidates.len() {
+                            candidates[candidate_index] = NormalizedCollisionPair::new(object1_index, object2_index);
+                            candidate_index += 1;
                         }
-                        NodeTag::Tree => {
-                            stack[sp] = unsafe { self.nodes[node_id].data.tree.left };
-                            stack[sp + 1] = unsafe { self.nodes[node_id].data.tree.right };
-                            sp += 2;
-                        }
+                    }
+                }
+                NodeTag::Tree => {
+                    if sp + 1 < STACK_SIZE {
+                        let children = unsafe { self.nodes[node_idx].data.tree };
+                        stack[sp] = children.left;
+                        stack[sp + 1] = children.right;
+                        sp += 2;
                     }
                 }
             }
