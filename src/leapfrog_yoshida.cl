@@ -6,6 +6,7 @@
 #define D2 -1.7024143839193162
 #define D3 1.351207191959658
 
+#pragma(inline)
 double2 gravity_acceleration(
     uint object_index,
     const double2 position,
@@ -24,7 +25,8 @@ double2 gravity_acceleration(
             const double r2 = dot(delta, delta);
             const double inv_r = native_rsqrt(r2);
             const double2 direction = delta * inv_r;
-            const double factor = gravitational_constant * planet_mass / r2;
+            const double inv_r2 = inv_r * inv_r;
+            const double factor = gravitational_constant * planet_mass * inv_r2;
             gravity = fma(direction, (double2)(factor, factor), gravity);
         }
     }
