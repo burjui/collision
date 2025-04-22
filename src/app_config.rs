@@ -42,6 +42,8 @@ impl AppConfig {
         if let Some(time_limit) = self.simulation.time_limit {
             validate_positive(time_limit, "simulation.time_limit")?;
         }
+        validate_positive(self.simulation.gpu_integration_local_wg_size, "simulation.gpu_integration_local_wg_size")?;
+        validate_positive(self.simulation.gpu_bvh_local_wg_size, "simulation.gpu_bvh_local_wg_size")?;
         validate_restitution_coefficient(
             self.simulation.restitution_coefficient,
             "simulation.restitution_coefficient",
@@ -113,6 +115,10 @@ pub struct SimulationConfig {
     pub gpu_integration: bool,
     #[serde(default)]
     pub gpu_bvh: bool,
+    #[serde(default = "default_wg_size")]
+    pub gpu_integration_local_wg_size: usize,
+    #[serde(default = "default_wg_size")]
+    pub gpu_bvh_local_wg_size: usize,
     pub restitution_coefficient: f64,
     #[serde(default)]
     pub global_gravity: (f64, f64),
@@ -124,6 +130,10 @@ pub struct SimulationConfig {
 
 fn default_speed_factor() -> f64 {
     1.0
+}
+
+fn default_wg_size() -> usize {
+    32
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]

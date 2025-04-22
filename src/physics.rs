@@ -292,7 +292,7 @@ impl PhysicsEngine {
         self.gpu_leapfrog_planet_masses.as_mut().unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_integration_kernel);
         kernel.set_global_work_size(self.objects.len());
-        kernel.set_local_work_size(64);
+        kernel.set_local_work_size(CONFIG.simulation.gpu_integration_local_wg_size);
         unsafe {
             self.gpu_leapfrog_positions.set_arg(&mut kernel);
             self.gpu_leapfrog_velocities.set_arg(&mut kernel);
@@ -410,7 +410,7 @@ impl PhysicsEngine {
         self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
-        kernel.set_local_work_size(64);
+        kernel.set_local_work_size(CONFIG.simulation.gpu_bvh_local_wg_size);
         unsafe {
             kernel.set_arg(&self.bvh.root());
             self.gpu_bvh_nodes.set_arg(&mut kernel);
