@@ -42,8 +42,9 @@ kernel void bvh_find_candidates(
     global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
-    global uint2 *global_candidates,
-    const uint max_candidates
+    const uint object_count,
+    global uint2 *candidates,
+    volatile global uint *candidates_length
 ) {
     AABB private_node_aabbs[MAX_PRIVATE_AABBS];
     const uint private_node_aabb_count = min(MAX_PRIVATE_AABBS, node_count);
@@ -51,7 +52,6 @@ kernel void bvh_find_candidates(
         private_node_aabbs[i] = nodes[i].aabb;
     }
     const uint gid = get_global_id(0);
-    uint2 private_candidates[MAX_CANDIDATES] = { 0 };
     const uint object1_index = get_global_id(0);
     const AABB object_aabb = object_aabbs[object1_index];
     const double2 object1_position = positions[object1_index];
@@ -62,7 +62,6 @@ kernel void bvh_find_candidates(
     stack[sp++] = root;
 
     AABB aabb;
-    uint candidate_index = 0;
     while (sp > 0) {
         const uint node_id = stack[--sp];
         if (node_id < private_node_aabb_count) {
@@ -82,11 +81,13 @@ kernel void bvh_find_candidates(
                 const double object2_radius = radii[object2_index];
                 const double d = distance(object1_position, object2_position);
                 const double collision_distance = object1_radius + object2_radius;
-                if ((d < collision_distance) && (candidate_index < MAX_CANDIDATES)) {
+                if (d < collision_distance) {
                     const uint min_i = min(object1_index, object2_index);
                     const uint max_i = max(object1_index, object2_index);
-                    private_candidates[candidate_index] = (uint2)(min_i, max_i);
-                    candidate_index += 1;
+                    const uint index = atomic_add(candidates_length, 1);
+                    if (index < object_count * MAX_CANDIDATES) {
+                        candidates[index] = (uint2)(min_i, max_i);
+                    }
                 }
             }
         } else {
@@ -94,9 +95,5 @@ kernel void bvh_find_candidates(
             stack[sp + 1] = node.data.tree.right;
             sp += 2;
         }
-    }
-    uint offset = object1_index * MAX_CANDIDATES;
-    for (uint i = 0; i < candidate_index; ++i) {
-        global_candidates[offset + i] = private_candidates[i];
     }
 }

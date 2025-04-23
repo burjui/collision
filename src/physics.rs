@@ -18,7 +18,7 @@ use crate::{
     gpu::{
         GPU,
         GpuBufferAccessMode::{ReadOnly, ReadWrite, WriteOnly},
-        GpuDeviceBuffer, GpuDeviceBufferUtils, GpuHostPtrBuffer, GpuHostPtrBufferUtils,
+        GpuDeviceBuffer, GpuDeviceBufferUtils, GpuHostBuffer, GpuHostPtrBuffer, GpuHostPtrBufferUtils,
     },
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
@@ -50,6 +50,7 @@ pub struct PhysicsEngine {
     gpu_bvh_object_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
     gpu_bvh_object_radii: Option<GpuHostPtrBuffer<f64>>,
     gpu_bvh_object_candidates: Option<GpuHostPtrBuffer<NormalizedCollisionPair>>,
+    gpu_candidates_length_buffer: Option<GpuHostBuffer<u32>>,
 }
 
 const MAX_CANDIDATES: usize = 16;
@@ -91,6 +92,7 @@ impl PhysicsEngine {
             gpu_bvh_object_positions: None,
             gpu_bvh_object_radii: None,
             gpu_bvh_object_candidates: None,
+            gpu_candidates_length_buffer: None,
         })
     }
 
@@ -408,6 +410,14 @@ impl PhysicsEngine {
         self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
         self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
         self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
+        self.gpu_candidates_length_buffer
+            .get_or_insert_with(|| {
+                GPU.create_host_buffer(vec![0_u32], ReadWrite)
+                    .context("failed to create host buffer: candidates_length_buffer")
+                    .unwrap()
+            })
+            .data_mut()[0] = 0;
+        let object_count = u32::try_from(self.objects.len()).unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
         kernel.set_local_work_size(CONFIG.simulation.gpu_bvh_local_wg_size);
@@ -418,12 +428,15 @@ impl PhysicsEngine {
             self.gpu_bvh_object_aabbs.set_arg(&mut kernel);
             self.gpu_bvh_object_positions.set_arg(&mut kernel);
             self.gpu_bvh_object_radii.set_arg(&mut kernel);
+            kernel.set_arg(&object_count);
             self.gpu_bvh_object_candidates.set_arg(&mut kernel);
-            kernel.set_arg(&u32::try_from(MAX_CANDIDATES).unwrap());
+            kernel.set_arg(self.gpu_candidates_length_buffer.as_mut().unwrap().buffer());
         }
         self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), "gpu_bvh_nodes");
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.wait_for_queue_completion().unwrap();
+        let candidates_length = self.gpu_candidates_length_buffer.as_ref().unwrap().data()[0];
+        self.candidates.truncate(usize::try_from(candidates_length).unwrap());
     }
 
     fn process_collision_candidate(
