@@ -25,7 +25,11 @@ impl Gpu {
         let platforms = get_platforms().context("No platforms found")?;
         println!("Available OpenCL platforms:");
         for (i, platform) in platforms.iter().enumerate() {
-            println!("Platform {i}: {}", platform.name().context("Failed to get platform name")?);
+            println!(
+                "Platform {i}: {} {}",
+                platform.name().context("Failed to get platform name")?,
+                platform.version().context("Failed to get platform name")?
+            );
             let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
             for (i, &device_id) in devices.iter().enumerate() {
                 let device = Device::from(device_id);
