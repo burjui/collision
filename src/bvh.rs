@@ -50,7 +50,6 @@ impl Bvh {
 
         let (mut src, mut dst) = (&mut self.fold_buffer_a, &mut self.fold_buffer_b);
         src.extend(0..self.nodes.len());
-
         while src.len() > 1 {
             dst.clear();
             for chunk in src.chunks(2) {
@@ -79,6 +78,16 @@ impl Bvh {
             }
             swap(&mut src, &mut dst);
         }
+
+        self.nodes.reverse();
+        let node_count = u32::try_from(self.nodes.len()).unwrap();
+        for node in &mut self.nodes {
+            if let NodeTag::Tree = node.tag {
+                let children = unsafe { &mut node.data.tree };
+                children.left.0 = node_count - children.left.0 - 1;
+                children.right.0 = node_count - children.right.0 - 1;
+            }
+        }
     }
 
     pub fn nodes(&mut self) -> &mut [Node] {
@@ -86,7 +95,7 @@ impl Bvh {
     }
 
     pub fn root(&self) -> NodeId {
-        NodeId((self.nodes.len() - 1) as u32)
+        NodeId(0)
     }
 
     pub fn object_aabbs(&mut self) -> &mut [AABB] {
