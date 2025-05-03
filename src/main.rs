@@ -433,6 +433,7 @@ fn rendering_thread(
             let mut scenes = draw_physics(&rendering_data);
             let mut scene = scenes.remove(0);
             for subscene in scenes {
+                // TODO remove this when rendering scenes separately via render_to_texture() and combining the textures
                 scene.append(&subscene, None);
             }
             if rendering_data.draw_grid && !rendering_data.bvh.nodes().is_empty() {
@@ -1000,6 +1001,7 @@ fn write_duration_stat(buffer: &mut String, name: &str, stat: &DurationStat) -> 
     Ok(())
 }
 
+// TODO use new Renderer::render_to_texture()
 fn render_scene(
     scene: &Scene,
     surface: &RenderSurface,
