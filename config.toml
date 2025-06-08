@@ -26,7 +26,7 @@ randomize_radius_factor = 1
 position = [500, 200]
 size = [500, 500]
 # velocity = [1, 0]
-particle_radius = 0.7
+particle_radius = 1
 particle_spacing = 0.01
 particle_mass = 0.1
 
