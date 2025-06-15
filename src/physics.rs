@@ -18,7 +18,8 @@ use crate::{
     gpu::{
         GPU,
         GpuBufferAccessMode::{ReadOnly, ReadWrite, WriteOnly},
-        GpuDeviceBuffer, GpuDeviceBufferUtils, GpuHostBuffer, GpuHostPtrBuffer, GpuHostPtrBufferUtils,
+        GpuDeviceBuffer, GpuDeviceBufferUtils, GpuHostBuffer, GpuHostBufferUtils, GpuHostPtrBuffer,
+        GpuHostPtrBufferUtils,
     },
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
@@ -53,7 +54,7 @@ pub struct PhysicsEngine {
     gpu_candidates_length_buffer: Option<GpuHostBuffer<u32>>,
 }
 
-const MAX_CANDIDATES: usize = 16;
+const MAX_CANDIDATES: usize = 16; // TODO maybe calculate based on min and max radii
 
 impl PhysicsEngine {
     pub fn new() -> anyhow::Result<Self> {
@@ -283,12 +284,20 @@ impl PhysicsEngine {
     }
 
     fn integrate_gpu(&mut self, dt: f64) {
-        self.gpu_leapfrog_positions.init(&mut self.objects.positions, ReadWrite, "gpu_leapfrog_positions");
-        self.gpu_leapfrog_velocities.init(&mut self.objects.velocities, ReadWrite, "gpu_leapfrog_velocities");
+        unsafe {
+            self.gpu_leapfrog_positions.init(&mut self.objects.positions, ReadWrite, "gpu_leapfrog_positions");
+            self.gpu_leapfrog_velocities.init(&mut self.objects.velocities, ReadWrite, "gpu_leapfrog_velocities");
+        }
         self.gpu_planet_masses_tmp.resize(self.objects.planet_count + 1 /* cannot create an empty buffer */, 0.0);
         self.gpu_planet_masses_tmp[..self.objects.planet_count]
             .copy_from_slice(&self.objects.masses[self.objects.planet_range()]);
-        self.gpu_leapfrog_planet_masses.init(&mut self.gpu_planet_masses_tmp, ReadOnly, "gpu_leapfrog_planet_masses");
+        unsafe {
+            self.gpu_leapfrog_planet_masses.init(
+                &mut self.gpu_planet_masses_tmp,
+                ReadOnly,
+                "gpu_leapfrog_planet_masses",
+            )
+        };
         self.gpu_leapfrog_positions.as_mut().unwrap();
         self.gpu_leapfrog_velocities.as_mut().unwrap();
         self.gpu_leapfrog_planet_masses.as_mut().unwrap();
@@ -408,18 +417,14 @@ impl PhysicsEngine {
     fn find_collision_candidates_gpu(&mut self) {
         let start = Instant::now();
         self.gpu_bvh_nodes.init(self.bvh.nodes().len(), ReadOnly, "gpu_bvh_nodes");
-        self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
-        self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
-        self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
-        self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
+        unsafe {
+            self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
+            self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
+            self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
+            self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
+        }
         // TODO store on GPU and read back
-        self.gpu_candidates_length_buffer
-            .get_or_insert_with(|| {
-                GPU.create_host_buffer(vec![0_u32], ReadWrite)
-                    .context("failed to create host buffer: candidates_length_buffer")
-                    .unwrap()
-            })
-            .data_mut()[0] = 0;
+        self.gpu_candidates_length_buffer.init(vec![0_u32], ReadWrite, "gpu_candidates_length_buffer");
         let object_count = u32::try_from(self.objects.len()).unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
@@ -433,7 +438,7 @@ impl PhysicsEngine {
             self.gpu_bvh_object_radii.set_arg(&mut kernel);
             kernel.set_arg(&object_count);
             self.gpu_bvh_object_candidates.set_arg(&mut kernel);
-            kernel.set_arg(self.gpu_candidates_length_buffer.as_mut().unwrap().buffer());
+            self.gpu_candidates_length_buffer.set_arg(&mut kernel);
         }
         println!("GPU BVH: setup {:?}", start.elapsed());
         let start = Instant::now();

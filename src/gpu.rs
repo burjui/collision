@@ -20,6 +20,7 @@ pub struct Gpu {
     queue: CommandQueue,
 }
 
+// TODO don't return results (there's no point)
 impl Gpu {
     pub fn first_available(queue_length: u32) -> anyhow::Result<Self> {
         let platforms = get_platforms().context("No platforms found")?;
@@ -36,7 +37,6 @@ impl Gpu {
                 println!("  Device {i}: {}", device.name().context("Failed to get device name")?);
             }
         }
-        // panic!();
         for platform in platforms {
             let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
             if let Some(device_id) = devices.first().copied() {
@@ -178,7 +178,7 @@ impl<T> GpuHostPtrBuffer<T> {
 }
 
 pub trait GpuHostPtrBufferUtils<T> {
-    fn init(
+    unsafe fn init(
         &mut self,
         data: &mut [T],
         access_mode: GpuBufferAccessMode,
@@ -190,18 +190,18 @@ pub trait GpuHostPtrBufferUtils<T> {
 }
 
 impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
-    fn init(
+    unsafe fn init(
         &mut self,
         data: &mut [T],
         access_mode: GpuBufferAccessMode,
         name: &'static str,
     ) -> &mut GpuHostPtrBuffer<T> {
-        self.replace(unsafe {
+        self.take();
+        self.insert(unsafe {
             GPU.create_host_ptr_buffer(data, access_mode)
-                .with_context(|| format!("failed to create GPU device buffer {name}"))
+                .with_context(|| format!("failed to create GPU host ptr buffer {name}"))
                 .unwrap()
-        });
-        self.as_mut().unwrap()
+        })
     }
 
     fn len(&self) -> usize {
@@ -209,7 +209,7 @@ impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
     }
 
     unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
-        unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
+        unsafe { kernel.set_arg(&self.as_ref().unwrap().buffer) };
     }
 }
 
@@ -231,6 +231,32 @@ impl<T> GpuHostBuffer<T> {
     #[must_use]
     pub fn buffer(&self) -> &Buffer<T> {
         &self.buffer
+    }
+}
+
+pub trait GpuHostBufferUtils<T> {
+    fn init(&mut self, data: Vec<T>, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuHostBuffer<T>;
+
+    fn len(&self) -> usize;
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
+}
+
+impl<T> GpuHostBufferUtils<T> for Option<GpuHostBuffer<T>> {
+    fn init(&mut self, data: Vec<T>, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuHostBuffer<T> {
+        self.take();
+        self.insert(
+            GPU.create_host_buffer(data, access_mode)
+                .with_context(|| format!("failed to create GPU host buffer {name}"))
+                .unwrap(),
+        )
+    }
+
+    fn len(&self) -> usize {
+        self.as_ref().unwrap().data.len()
+    }
+
+    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(&self.as_ref().unwrap().buffer) };
     }
 }
 
@@ -262,14 +288,12 @@ pub trait GpuDeviceBufferUtils<T> {
 
 impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
     fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T> {
-        if self.as_ref().is_none_or(|b| b.len() != length) {
-            self.replace(
-                GPU.create_device_buffer(length, access_mode)
-                    .with_context(|| format!("failed to create GPU device buffer {name}"))
-                    .unwrap(),
-            );
-        }
-        self.as_mut().unwrap()
+        self.take_if(|b| length > b.len());
+        self.get_or_insert_with(|| {
+            GPU.create_device_buffer(length, access_mode)
+                .with_context(|| format!("failed to create GPU device buffer {name}"))
+                .unwrap()
+        })
     }
 
     fn len(&self) -> usize {
