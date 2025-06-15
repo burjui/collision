@@ -1,10 +1,11 @@
 use std::{iter::zip, time::Instant};
 
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+
 use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
-    object_indices: Vec<usize>,
     object_aabbs: Vec<AABB>,
     nodes: Vec<Node>,
 }
@@ -12,31 +13,7 @@ pub struct Bvh {
 impl Bvh {
     pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64]) {
         let start = Instant::now();
-        if self.object_indices.len() != positions.len() {
-            self.object_indices.clear();
-            self.object_indices.extend(0..positions.len());
-        }
-        println!("BVH: allocate object indices {:?}", start.elapsed());
-
-        let start = Instant::now();
         self.object_aabbs.clear();
-        self.object_aabbs.reserve(positions.len());
-        println!("BVH: allocate object AABBs {:?}", start.elapsed());
-
-        let start = Instant::now();
-
-        let dummy_node = Node {
-            aabb: AABB {
-                topleft: Vector2::default(),
-                bottomright: Vector2::default(),
-            },
-            tag: NodeTag::Leaf,
-            data: NodeData { leaf_object_index: 0 },
-        };
-        self.nodes.resize(positions.len() * 2, dummy_node);
-        println!("BVH: clear nodes {:?}", start.elapsed());
-
-        let start = Instant::now();
         self.object_aabbs.extend(zip(positions, radii).map(|(&position, &radius)| AABB {
             topleft: position - radius,
             bottomright: position + radius,
@@ -44,20 +21,26 @@ impl Bvh {
         println!("BVH: init object AABBs {:?}", start.elapsed());
 
         let start = Instant::now();
-        for (i, object_index) in self.object_indices.iter().copied().enumerate() {
-            self.nodes[i] = Node {
+        self.nodes.truncate(positions.len());
+        if self.nodes.is_empty() {
+            self.nodes.extend((0..positions.len()).map(|object_index| Node {
                 aabb: self.object_aabbs[object_index],
                 tag: NodeTag::Leaf,
                 data: NodeData {
                     leaf_object_index: u32::try_from(object_index).unwrap(),
                 },
-            };
+            }));
+        } else {
+            self.nodes
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(object_index, node)| node.aabb = self.object_aabbs[object_index]);
         }
-        println!("BVH: init nodes {:?}", start.elapsed());
+        println!("BVH: fill object nodes {:?}", start.elapsed());
 
         let start = Instant::now();
-        let mut nodes_len = positions.len();
-        let (mut src, mut dst) = (0..nodes_len, nodes_len..nodes_len);
+        let mut src = 0..self.nodes.len();
+        let mut dst = src.end..src.end;
         while src.len() > 1 {
             while src.len() > 1 {
                 let left = src.start;
@@ -66,9 +49,7 @@ impl Bvh {
                 let left_aabb = self.nodes[left].aabb;
                 let right_aabb = self.nodes[right].aabb;
                 let aabb = left_aabb.union(&right_aabb);
-                let node_id = nodes_len;
-                nodes_len += 1;
-                self.nodes[node_id] = Node {
+                self.nodes.push(Node {
                     aabb,
                     tag: NodeTag::Tree,
                     data: NodeData {
@@ -77,29 +58,16 @@ impl Bvh {
                             right: NodeId(right.try_into().unwrap()),
                         },
                     },
-                };
+                });
                 dst.end += 1;
             }
             if src.len() == 1 {
                 dst.start -= 1;
             }
             src = dst.clone();
-            dst = dst.end..dst.end;
+            dst = src.end..src.end;
         }
-        self.nodes.truncate(nodes_len);
-        println!("BVH: construct tree {:?}", start.elapsed());
-
-        let start = Instant::now();
-        self.nodes.reverse();
-        let node_count = u32::try_from(self.nodes.len()).unwrap();
-        for node in &mut self.nodes {
-            if let NodeTag::Tree = node.tag {
-                let children = unsafe { &mut node.data.tree };
-                children.left.0 = node_count - children.left.0 - 1;
-                children.right.0 = node_count - children.right.0 - 1;
-            }
-        }
-        println!("BVH: reverse nodes {:?}", start.elapsed());
+        println!("BVH: build tree {:?}", start.elapsed());
     }
 
     pub fn nodes(&mut self) -> &mut [Node] {
@@ -107,7 +75,7 @@ impl Bvh {
     }
 
     pub fn root(&self) -> NodeId {
-        NodeId(0)
+        NodeId(u32::try_from(self.nodes.len()).unwrap().checked_sub(1).unwrap())
     }
 
     pub fn object_aabbs(&mut self) -> &mut [AABB] {
