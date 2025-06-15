@@ -40,8 +40,9 @@ impl Bvh {
 
         let start = Instant::now();
         let mut src = 0..self.nodes.len();
-        let mut dst = src.end..src.end;
+        let mut dst;
         while src.len() > 1 {
+            dst = src.end..src.end;
             while src.len() > 1 {
                 let left = src.start;
                 let right = src.start + 1;
@@ -65,7 +66,6 @@ impl Bvh {
                 dst.start -= 1;
             }
             src = dst.clone();
-            dst = src.end..src.end;
         }
         println!("BVH: build tree {:?}", start.elapsed());
     }
