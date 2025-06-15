@@ -182,7 +182,7 @@ fn simulation_thread(
 
     let mut advance_time = CONFIG.simulation.auto_start;
     let mut time_limit_action_executed = false;
-    let mut draw_grid = false;
+    let mut draw_aabbs = false;
     let mut draw_ids = false;
     let mut physics = PhysicsEngine::new().unwrap();
     let mut color_source = CONFIG.rendering.color_source;
@@ -213,8 +213,8 @@ fn simulation_thread(
                     draw_ids = !draw_ids;
                     redraw_needed = true;
                 }
-                SimulationThreadEvent::ToggleDrawGrid => {
-                    draw_grid = !draw_grid;
+                SimulationThreadEvent::ToggleDrawAabbs => {
+                    draw_aabbs = !draw_aabbs;
                     redraw_needed = true;
                 }
                 SimulationThreadEvent::SetColorSource(source) => {
@@ -298,7 +298,7 @@ fn simulation_thread(
                     planet_range: physics.objects().planet_range(),
                     color_source,
                     draw_ids,
-                    draw_grid,
+                    draw_aabbs,
                     constraints: physics.constraints(),
                     draw_edf: show_edf,
                     edf: edf.clone(),
@@ -436,7 +436,7 @@ fn rendering_thread(
                 // TODO remove this when rendering scenes separately via render_to_texture() and combining the textures
                 scene.append(&subscene, None);
             }
-            if rendering_data.draw_grid && !rendering_data.bvh.nodes().is_empty() {
+            if rendering_data.draw_aabbs && !rendering_data.bvh.nodes().is_empty() {
                 draw_aabbs(&mut scene, rendering_data.bvh.nodes());
             }
             redraw_job_queue.force_push(scene);
@@ -646,7 +646,7 @@ enum SimulationThreadEvent {
     Exit,
     ToggleAdvanceTime,
     ToggleDrawIds,
-    ToggleDrawGrid,
+    ToggleDrawAabbs,
     SetColorSource(ColorSource),
     SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
@@ -682,7 +682,7 @@ struct RenderingData {
     planet_range: Range<usize>,
     color_source: ColorSource,
     draw_ids: bool,
-    draw_grid: bool,
+    draw_aabbs: bool,
     constraints: AABB,
     draw_edf: bool,
     edf: Array2<f64>,
@@ -790,7 +790,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                             self.simulation_event_sender.send(SimulationThreadEvent::ToggleAdvanceTime).unwrap();
                         }
                         Key::Character("g") => {
-                            self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawGrid).unwrap();
+                            self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawAabbs).unwrap();
                         }
                         Key::Character("i") => {
                             self.simulation_event_sender.send(SimulationThreadEvent::ToggleDrawIds).unwrap();

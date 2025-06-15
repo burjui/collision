@@ -1,6 +1,4 @@
-use std::{iter::zip, mem::swap};
-
-use rayon::slice::ParallelSliceMut;
+use std::{iter::zip, time::Instant};
 
 use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
@@ -9,78 +7,89 @@ pub struct Bvh {
     object_indices: Vec<usize>,
     object_aabbs: Vec<AABB>,
     nodes: Vec<Node>,
-    fold_buffer_a: Vec<usize>,
-    fold_buffer_b: Vec<usize>,
 }
 
 impl Bvh {
-    pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64], morton_codes: &[u32]) {
-        self.object_indices.clear();
-        self.object_aabbs.reserve(positions.len());
+    pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64]) {
+        let start = Instant::now();
+        if self.object_indices.len() != positions.len() {
+            self.object_indices.clear();
+            self.object_indices.extend(0..positions.len());
+        }
+        println!("BVH: allocate object indices {:?}", start.elapsed());
 
+        let start = Instant::now();
         self.object_aabbs.clear();
         self.object_aabbs.reserve(positions.len());
+        println!("BVH: allocate object AABBs {:?}", start.elapsed());
 
-        self.nodes.clear();
-        self.nodes.reserve(positions.len() * 2);
+        let start = Instant::now();
 
-        self.fold_buffer_a.clear();
-        self.fold_buffer_a.reserve(positions.len() * 2);
+        let dummy_node = Node {
+            aabb: AABB {
+                topleft: Vector2::default(),
+                bottomright: Vector2::default(),
+            },
+            tag: NodeTag::Leaf,
+            data: NodeData { leaf_object_index: 0 },
+        };
+        self.nodes.resize(positions.len() * 2, dummy_node);
+        println!("BVH: clear nodes {:?}", start.elapsed());
 
-        self.fold_buffer_b.clear();
-        self.fold_buffer_b.reserve(positions.len() * 2);
-
+        let start = Instant::now();
         self.object_aabbs.extend(zip(positions, radii).map(|(&position, &radius)| AABB {
             topleft: position - radius,
             bottomright: position + radius,
         }));
+        println!("BVH: init object AABBs {:?}", start.elapsed());
 
-        self.object_indices.extend(0..positions.len());
-        self.object_indices.par_sort_unstable_by_key(|&object_index| morton_codes[object_index]);
-
-        for &object_index in &self.object_indices {
-            self.nodes.push(Node {
+        let start = Instant::now();
+        for (i, object_index) in self.object_indices.iter().copied().enumerate() {
+            self.nodes[i] = Node {
                 aabb: self.object_aabbs[object_index],
                 tag: NodeTag::Leaf,
                 data: NodeData {
                     leaf_object_index: u32::try_from(object_index).unwrap(),
                 },
-            });
+            };
         }
+        println!("BVH: init nodes {:?}", start.elapsed());
 
-        // TODO preallocate nodes, fold ranges in place (nodes[len] = fold(); ++len), then truncate,
-        //      instead of using separate buffers
-        let (mut src, mut dst) = (&mut self.fold_buffer_a, &mut self.fold_buffer_b);
-        src.extend(0..self.nodes.len());
+        let start = Instant::now();
+        let mut nodes_len = positions.len();
+        let (mut src, mut dst) = (0..nodes_len, nodes_len..nodes_len);
         while src.len() > 1 {
-            dst.clear();
-            for chunk in src.chunks(2) {
-                let node_id = if chunk.len() == 1 {
-                    chunk[0]
-                } else {
-                    let left = chunk[0];
-                    let right = chunk[1];
-                    let left_aabb = self.nodes[left].aabb;
-                    let right_aabb = self.nodes[right].aabb;
-                    let aabb = left_aabb.union(&right_aabb);
-                    let node_id = self.nodes.len();
-                    self.nodes.push(Node {
-                        aabb,
-                        tag: NodeTag::Tree,
-                        data: NodeData {
-                            tree: Tree {
-                                left: NodeId(left.try_into().unwrap()),
-                                right: NodeId(right.try_into().unwrap()),
-                            },
+            while src.len() > 1 {
+                let left = src.start;
+                let right = src.start + 1;
+                src.start += 2;
+                let left_aabb = self.nodes[left].aabb;
+                let right_aabb = self.nodes[right].aabb;
+                let aabb = left_aabb.union(&right_aabb);
+                let node_id = nodes_len;
+                nodes_len += 1;
+                self.nodes[node_id] = Node {
+                    aabb,
+                    tag: NodeTag::Tree,
+                    data: NodeData {
+                        tree: Tree {
+                            left: NodeId(left.try_into().unwrap()),
+                            right: NodeId(right.try_into().unwrap()),
                         },
-                    });
-                    node_id
+                    },
                 };
-                dst.push(node_id);
+                dst.end += 1;
             }
-            swap(&mut src, &mut dst);
+            if src.len() == 1 {
+                dst.start -= 1;
+            }
+            src = dst.clone();
+            dst = dst.end..dst.end;
         }
+        self.nodes.truncate(nodes_len);
+        println!("BVH: construct tree {:?}", start.elapsed());
 
+        let start = Instant::now();
         self.nodes.reverse();
         let node_count = u32::try_from(self.nodes.len()).unwrap();
         for node in &mut self.nodes {
@@ -90,6 +99,7 @@ impl Bvh {
                 children.right.0 = node_count - children.right.0 - 1;
             }
         }
+        println!("BVH: reverse nodes {:?}", start.elapsed());
     }
 
     pub fn nodes(&mut self) -> &mut [Node] {
@@ -168,21 +178,6 @@ impl Bvh {
             }
         }
     }
-}
-
-pub fn morton_code(position: Vector2<f64>) -> u32 {
-    let x = position.x as u32;
-    let y = position.y as u32;
-    expand_bits(x) | (expand_bits(y) << 1)
-}
-
-fn expand_bits(mut x: u32) -> u32 {
-    x &= 0xFFFF;
-    x = (x | (x << 8)) & 0x00FF00FF;
-    x = (x | (x << 4)) & 0x0F0F0F0F;
-    x = (x | (x << 2)) & 0x33333333;
-    x = (x | (x << 1)) & 0x55555555;
-    x
 }
 
 #[repr(C)]

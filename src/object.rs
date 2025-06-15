@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use vello::peniko::Color;
 
-use crate::{bvh::morton_code, vector2::Vector2};
+use crate::vector2::Vector2;
 
 #[derive(Default)]
 pub struct ObjectSoa {
@@ -12,7 +12,6 @@ pub struct ObjectSoa {
     pub masses: Vec<f64>,
     pub colors: Vec<Option<Color>>,
     pub is_planet: Vec<bool>,
-    pub morton_codes: Vec<u32>,
     pub planet_count: usize,
 }
 
@@ -35,7 +34,6 @@ impl ObjectSoa {
         self.masses.push(object.mass);
         self.colors.push(object.color);
         self.is_planet.push(object.is_planet);
-        self.morton_codes.push(morton_code(object.position));
         self.planet_count += usize::from(object.is_planet);
         object_index
     }

@@ -8,13 +8,13 @@ use opencl3::kernel::{ExecuteKernel, Kernel};
 use rand::{rng, seq::SliceRandom};
 use rayon::{
     ThreadPool, ThreadPoolBuilder,
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 
 use crate::{
     app_config::{CONFIG, DtSource},
-    bvh::{AABB, Bvh, Node, morton_code},
+    bvh::{AABB, Bvh, Node},
     gpu::{
         GPU,
         GpuBufferAccessMode::{ReadOnly, ReadWrite, WriteOnly},
@@ -147,7 +147,6 @@ impl PhysicsEngine {
         let start = Instant::now();
         let dt = match CONFIG.simulation.dt {
             DtSource::Auto => {
-                // Using max_object_size instead of grid cell size to avoid an unnecessary grid update
                 let (max_velocity_squared, min_object_size) =
                     zip(self.objects.velocities.iter(), self.objects.radii.iter()).fold(
                         (0.0_f64, f64::MAX),
@@ -200,7 +199,7 @@ impl PhysicsEngine {
         self.stats.integration_duration.update(start.elapsed());
 
         let start = Instant::now();
-        self.bvh.update(&self.objects.positions, &self.objects.radii, &self.objects.morton_codes);
+        self.bvh.update(&self.objects.positions, &self.objects.radii);
         self.stats.bvh_duration.update(start.elapsed());
 
         let start = Instant::now();
@@ -218,11 +217,6 @@ impl PhysicsEngine {
         } else {
             self.integrate_cpu(dt);
         }
-        self.objects
-            .morton_codes
-            .par_iter_mut()
-            .zip(self.objects.positions.par_iter())
-            .for_each(|(code, &position)| *code = morton_code(position));
     }
 
     fn integrate_cpu(&mut self, dt: f64) {
