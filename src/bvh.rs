@@ -48,6 +48,8 @@ impl Bvh {
             });
         }
 
+        // TODO preallocate nodes, fold ranges in place (nodes[len] = fold(); ++len), then truncate,
+        //      instead of using separate buffers
         let (mut src, mut dst) = (&mut self.fold_buffer_a, &mut self.fold_buffer_b);
         src.extend(0..self.nodes.len());
         while src.len() > 1 {

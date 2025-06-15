@@ -301,6 +301,7 @@ impl PhysicsEngine {
             kernel.set_arg(&u32::try_from(self.objects.len()).unwrap());
             kernel.set_arg(&dt);
             kernel.set_arg(&self.global_gravity);
+            // TODO store planet masses and posittions on GPU (used in a loop for every particle)
             self.gpu_leapfrog_planet_masses.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.objects.planet_count).unwrap());
             kernel.set_arg(&self.gravitational_constant);
@@ -405,11 +406,13 @@ impl PhysicsEngine {
     }
 
     fn find_collision_candidates_gpu(&mut self) {
+        let start = Instant::now();
         self.gpu_bvh_nodes.init(self.bvh.nodes().len(), ReadOnly, "gpu_bvh_nodes");
         self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
         self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
         self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
         self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
+        // TODO store on GPU and read back
         self.gpu_candidates_length_buffer
             .get_or_insert_with(|| {
                 GPU.create_host_buffer(vec![0_u32], ReadWrite)
@@ -432,9 +435,14 @@ impl PhysicsEngine {
             self.gpu_bvh_object_candidates.set_arg(&mut kernel);
             kernel.set_arg(self.gpu_candidates_length_buffer.as_mut().unwrap().buffer());
         }
-        self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), "gpu_bvh_nodes");
+        println!("GPU BVH: setup {:?}", start.elapsed());
+        let start = Instant::now();
+        self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), "gpu_bvh_nodes").unwrap().wait().unwrap();
+        println!("GPU BVH: write nodes {:?}", start.elapsed());
+        let start = Instant::now();
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.wait_for_queue_completion().unwrap();
+        println!("GPU BVH: kernel {:?}", start.elapsed());
         let candidates_length = self.gpu_candidates_length_buffer.as_ref().unwrap().data()[0];
         self.candidates.truncate(usize::try_from(candidates_length).unwrap());
     }

@@ -51,7 +51,6 @@ kernel void bvh_find_candidates(
     for (uint i = 0; i < private_node_aabb_count; ++i) {
         private_node_aabbs[i] = nodes[i].aabb;
     }
-    const uint gid = get_global_id(0);
     const uint object1_index = get_global_id(0);
     const AABB object_aabb = object_aabbs[object1_index];
     const double2 object1_position = positions[object1_index];

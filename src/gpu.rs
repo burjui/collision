@@ -256,8 +256,8 @@ pub trait GpuDeviceBufferUtils<T> {
     fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T>;
     fn len(&self) -> usize;
     unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
-    fn enqueue_write(&mut self, data: &[T], name: &'static str);
-    fn enqueue_read(&self, data: &mut [T], name: &'static str);
+    fn enqueue_write(&mut self, data: &[T], name: &'static str) -> anyhow::Result<Event>;
+    fn enqueue_read(&self, data: &mut [T], name: &'static str) -> anyhow::Result<Event>;
 }
 
 impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
@@ -280,15 +280,13 @@ impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
         unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
     }
 
-    fn enqueue_write(&mut self, data: &[T], name: &'static str) {
+    fn enqueue_write(&mut self, data: &[T], name: &'static str) -> anyhow::Result<Event> {
         GPU.enqueue_write_device_buffer(self.as_mut().unwrap(), data)
             .with_context(|| format!("failed to enqueue write GPU device buffer {name}"))
-            .unwrap();
     }
 
-    fn enqueue_read(&self, data: &mut [T], name: &'static str) {
+    fn enqueue_read(&self, data: &mut [T], name: &'static str) -> anyhow::Result<Event> {
         GPU.enqueue_read_device_buffer(self.as_ref().unwrap(), data)
             .with_context(|| format!("failed to enqueue read GPU device buffer {name}"))
-            .unwrap();
     }
 }
