@@ -1,41 +1,31 @@
-use std::{iter::zip, time::Instant};
-
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use std::time::Instant;
 
 use crate::{physics::NormalizedCollisionPair, vector2::Vector2};
 
 #[derive(Default, Clone)]
 pub struct Bvh {
-    object_aabbs: Vec<AABB>,
     nodes: Vec<Node>,
 }
 
 impl Bvh {
     pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64]) {
         let start = Instant::now();
-        self.object_aabbs.clear();
-        self.object_aabbs.extend(zip(positions, radii).map(|(&position, &radius)| AABB {
-            topleft: position - radius,
-            bottomright: position + radius,
-        }));
-        println!("BVH: init object AABBs {:?}", start.elapsed());
-
-        let start = Instant::now();
-        self.nodes.truncate(positions.len());
-        if self.nodes.is_empty() {
-            self.nodes.extend((0..positions.len()).map(|object_index| Node {
-                aabb: self.object_aabbs[object_index],
+        self.nodes.clear();
+        self.nodes.extend((0..positions.len()).map(|object_index| {
+            let position = positions[object_index];
+            let radius = radii[object_index];
+            Node {
+                aabb: AABB {
+                    topleft: position - radius,
+                    bottomright: position + radius,
+                },
                 tag: NodeTag::Leaf,
                 data: NodeData {
                     leaf_object_index: u32::try_from(object_index).unwrap(),
                 },
-            }));
-        } else {
-            self.nodes
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(object_index, node)| node.aabb = self.object_aabbs[object_index]);
-        }
+            }
+        }));
+
         println!("BVH: fill object nodes {:?}", start.elapsed());
 
         let start = Instant::now();
@@ -78,10 +68,6 @@ impl Bvh {
         NodeId(u32::try_from(self.nodes.len()).unwrap().checked_sub(1).unwrap())
     }
 
-    pub fn object_aabbs(&mut self) -> &mut [AABB] {
-        &mut self.object_aabbs
-    }
-
     pub fn find_intersections(
         &self,
         object1_index: usize,
@@ -99,7 +85,7 @@ impl Bvh {
         stack[sp] = self.root();
         sp += 1;
 
-        let object1_aabb = self.object_aabbs[object1_index];
+        let object1_aabb = self.nodes[object1_index].aabb;
         let object1_position = positions[object1_index];
         let object1_radius = radii[object1_index];
         let mut candidate_index = 0;

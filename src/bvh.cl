@@ -38,7 +38,6 @@ kernel void bvh_find_candidates(
     const uint root,
     global const Node *nodes,
     const uint node_count,
-    global const AABB *object_aabbs,
     global const double2 *positions,
     global const double *radii,
     const uint object_count,
@@ -47,7 +46,7 @@ kernel void bvh_find_candidates(
     volatile global uint *errors
 ) {
     const uint object1_index = get_global_id(0);
-    const AABB object_aabb = object_aabbs[object1_index];
+    const AABB object_aabb = nodes[object1_index].aabb;
     const double2 object1_position = positions[object1_index];
     const double object1_radius = radii[object1_index];
 

@@ -47,7 +47,6 @@ pub struct PhysicsEngine {
     max_candidates_per_object: usize,
     gpu_bvh_kernel: Kernel,
     gpu_bvh_nodes: Option<GpuDeviceBuffer<Node>>,
-    gpu_bvh_object_aabbs: Option<GpuHostPtrBuffer<AABB>>,
     gpu_bvh_object_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
     gpu_bvh_object_radii: Option<GpuHostPtrBuffer<f64>>,
     gpu_bvh_object_candidates: Option<GpuHostPtrBuffer<NormalizedCollisionPair>>,
@@ -90,7 +89,6 @@ impl PhysicsEngine {
             max_candidates_per_object: 0,
             gpu_bvh_kernel,
             gpu_bvh_nodes: None,
-            gpu_bvh_object_aabbs: None,
             gpu_bvh_object_positions: None,
             gpu_bvh_object_radii: None,
             gpu_bvh_object_candidates: None,
@@ -412,14 +410,13 @@ impl PhysicsEngine {
         let start = Instant::now();
         self.gpu_bvh_nodes.init(self.bvh.nodes().len(), ReadOnly, "gpu_bvh_nodes");
         unsafe {
-            self.gpu_bvh_object_aabbs.init(self.bvh.object_aabbs(), ReadOnly, "gpu_bvh_object_aabbs");
             self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
             self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
             self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
         }
         // TODO store on GPU and read back
         self.gpu_candidates_length.init(vec![0_u32], ReadWrite, "gpu_candidates_length_buffer");
-        self.gpu_errors.init(vec![0], ReadWrite, "gpu_errors");
+        self.gpu_errors.init(vec![0], WriteOnly, "gpu_errors");
 
         let object_count = u32::try_from(self.objects.len()).unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
@@ -429,7 +426,6 @@ impl PhysicsEngine {
             kernel.set_arg(&self.bvh.root());
             self.gpu_bvh_nodes.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.gpu_bvh_nodes.len()).unwrap());
-            self.gpu_bvh_object_aabbs.set_arg(&mut kernel);
             self.gpu_bvh_object_positions.set_arg(&mut kernel);
             self.gpu_bvh_object_radii.set_arg(&mut kernel);
             kernel.set_arg(&object_count);
