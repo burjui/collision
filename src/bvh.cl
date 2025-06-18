@@ -33,7 +33,6 @@ bool intersects(const AABB a, const AABB b) {
 
 #define MAX_CANDIDATES 16
 #define STACK_SIZE 64
-#define MAX_PRIVATE_AABBS ((uint) 3)
 
 kernel void bvh_find_candidates(
     const uint root,
@@ -44,13 +43,9 @@ kernel void bvh_find_candidates(
     global const double *radii,
     const uint object_count,
     global uint2 *candidates,
-    volatile global uint *candidates_length
+    volatile global uint *candidates_length,
+    volatile global uint *errors
 ) {
-    AABB private_node_aabbs[MAX_PRIVATE_AABBS];
-    const uint private_node_aabb_count = min(MAX_PRIVATE_AABBS, node_count);
-    for (uint i = 0; i < private_node_aabb_count; ++i) {
-        private_node_aabbs[i] = nodes[i].aabb;
-    }
     const uint object1_index = get_global_id(0);
     const AABB object_aabb = object_aabbs[object1_index];
     const double2 object1_position = positions[object1_index];
@@ -63,16 +58,11 @@ kernel void bvh_find_candidates(
     AABB aabb;
     while (sp > 0) {
         const uint node_id = stack[--sp];
-        if (node_id < private_node_aabb_count) {
-            aabb = private_node_aabbs[node_id];
-        } else {
-            aabb = nodes[node_id].aabb;
-        }
-        if (!intersects(object_aabb, aabb)) {
+        const Node node = nodes[node_id];
+        if (!intersects(object_aabb, node.aabb)) {
             continue;
         }
 
-        const Node node = nodes[node_id];
         if (node.tag == TAG_LEAF) {
             const uint object2_index = node.data.leaf_object_index;
             if (object2_index != object1_index) {
@@ -86,13 +76,19 @@ kernel void bvh_find_candidates(
                     const uint index = atomic_add(candidates_length, 1);
                     if (index < object_count * MAX_CANDIDATES) {
                         candidates[index] = (uint2)(min_i, max_i);
+                    } else {
+                        atomic_add(errors, 1);
                     }
                 }
             }
         } else {
-            stack[sp] = node.data.tree.left;
-            stack[sp + 1] = node.data.tree.right;
-            sp += 2;
+            if (sp + 2 < STACK_SIZE) {
+                stack[sp] = node.data.tree.left;
+                stack[sp + 1] = node.data.tree.right;
+                sp += 2;
+            } else {
+                atomic_add(errors, 1);
+            }
         }
     }
 }

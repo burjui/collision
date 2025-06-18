@@ -51,7 +51,8 @@ pub struct PhysicsEngine {
     gpu_bvh_object_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
     gpu_bvh_object_radii: Option<GpuHostPtrBuffer<f64>>,
     gpu_bvh_object_candidates: Option<GpuHostPtrBuffer<NormalizedCollisionPair>>,
-    gpu_candidates_length_buffer: Option<GpuHostBuffer<u32>>,
+    gpu_candidates_length: Option<GpuHostBuffer<u32>>,
+    gpu_errors: Option<GpuHostBuffer<u32>>,
 }
 
 const MAX_CANDIDATES: usize = 16; // TODO maybe calculate based on min and max radii
@@ -93,7 +94,8 @@ impl PhysicsEngine {
             gpu_bvh_object_positions: None,
             gpu_bvh_object_radii: None,
             gpu_bvh_object_candidates: None,
-            gpu_candidates_length_buffer: None,
+            gpu_candidates_length: None,
+            gpu_errors: None,
         })
     }
 
@@ -416,7 +418,9 @@ impl PhysicsEngine {
             self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
         }
         // TODO store on GPU and read back
-        self.gpu_candidates_length_buffer.init(vec![0_u32], ReadWrite, "gpu_candidates_length_buffer");
+        self.gpu_candidates_length.init(vec![0_u32], ReadWrite, "gpu_candidates_length_buffer");
+        self.gpu_errors.init(vec![0], ReadWrite, "gpu_errors");
+
         let object_count = u32::try_from(self.objects.len()).unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
@@ -430,7 +434,8 @@ impl PhysicsEngine {
             self.gpu_bvh_object_radii.set_arg(&mut kernel);
             kernel.set_arg(&object_count);
             self.gpu_bvh_object_candidates.set_arg(&mut kernel);
-            self.gpu_candidates_length_buffer.set_arg(&mut kernel);
+            self.gpu_candidates_length.set_arg(&mut kernel);
+            self.gpu_errors.set_arg(&mut kernel);
         }
         println!("GPU BVH: setup {:?}", start.elapsed());
         let start = Instant::now();
@@ -440,8 +445,10 @@ impl PhysicsEngine {
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.wait_for_queue_completion().unwrap();
         println!("GPU BVH: kernel {:?}", start.elapsed());
-        let candidates_length = self.gpu_candidates_length_buffer.as_ref().unwrap().data()[0];
+        let candidates_length = self.gpu_candidates_length.as_ref().unwrap().data()[0];
         self.candidates.truncate(usize::try_from(candidates_length).unwrap());
+        let errors_count = self.gpu_errors.as_ref().unwrap().data()[0];
+        assert_eq!(errors_count, 0);
     }
 
     fn process_collision_candidate(
