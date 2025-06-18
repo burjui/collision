@@ -192,8 +192,6 @@ impl PhysicsEngine {
     }
 
     fn update(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
-        self.time += dt;
-
         let start = Instant::now();
         self.integrate(dt, gpu_compute_options);
         self.stats.integration_duration.update(start.elapsed());
