@@ -1,9 +1,10 @@
 use std::{
-    iter::zip,
+    iter::{once, zip},
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
+use itertools::Itertools;
 use opencl3::kernel::{ExecuteKernel, Kernel};
 use rand::{rng, seq::SliceRandom};
 use rayon::{
@@ -18,8 +19,7 @@ use crate::{
     gpu::{
         GPU,
         GpuBufferAccessMode::{ReadOnly, ReadWrite, WriteOnly},
-        GpuDeviceBuffer, GpuDeviceBufferUtils, GpuHostBuffer, GpuHostBufferUtils, GpuHostPtrBuffer,
-        GpuHostPtrBufferUtils,
+        GpuDeviceBuffer, GpuHostBuffer, GpuHostPtrBuffer,
     },
     object::{ObjectPrototype, ObjectSoa},
     ring_buffer::RingBuffer,
@@ -37,63 +37,75 @@ pub struct PhysicsEngine {
     restitution_coefficient: f64,
     global_gravity: Vector2<f64>,
     gravitational_constant: f64,
-    gpu_integration_kernel: Kernel,
-    gpu_leapfrog_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
-    gpu_leapfrog_velocities: Option<GpuHostPtrBuffer<Vector2<f64>>>,
-    gpu_leapfrog_planet_masses: Option<GpuHostPtrBuffer<f64>>,
-    gpu_planet_masses_tmp: Vec<f64>,
     gpu_compute_options: GpuComputeOptions,
+    gpu_integration_kernel: Kernel,
+    gpu_object_positions: GpuHostPtrBuffer<Vector2<f64>>,
+    gpu_object_velocities: GpuHostPtrBuffer<Vector2<f64>>,
+    gpu_object_radii: GpuHostPtrBuffer<f64>,
+    gpu_planet_masses: GpuHostBuffer<f64>,
     thread_pool: ThreadPool,
     max_candidates_per_object: usize,
     gpu_bvh_kernel: Kernel,
-    gpu_bvh_nodes: Option<GpuDeviceBuffer<Node>>,
-    gpu_bvh_object_positions: Option<GpuHostPtrBuffer<Vector2<f64>>>,
-    gpu_bvh_object_radii: Option<GpuHostPtrBuffer<f64>>,
-    gpu_bvh_object_candidates: Option<GpuHostPtrBuffer<NormalizedCollisionPair>>,
-    gpu_candidates_length: Option<GpuHostBuffer<u32>>,
-    gpu_errors: Option<GpuHostBuffer<u32>>,
+    gpu_bvh_nodes: GpuDeviceBuffer<Node>,
+    gpu_collision_candidates: GpuHostPtrBuffer<NormalizedCollisionPair>,
+    gpu_collision_candidates_length: GpuHostBuffer<u32>,
+    gpu_errors: GpuHostBuffer<u32>,
 }
 
-const MAX_CANDIDATES: usize = 16; // TODO maybe calculate based on min and max radii
+const MAX_CANDIDATES_PER_OBJECT: usize = 16; // TODO maybe calculate based on min and max radii
 
 impl PhysicsEngine {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(mut objects: ObjectSoa) -> anyhow::Result<Self> {
         let constraints = AABB {
             topleft: Vector2::new(0.0, 0.0),
             bottomright: Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
         };
+        let thread_pool = ThreadPoolBuilder::new().num_threads(num_cpus::get()).build().unwrap();
+        let mut bvh = Bvh::default();
+        bvh.update(&objects.positions, &objects.radii);
+        let mut candidates = vec![NormalizedCollisionPair::new(0, 0); objects.len() * MAX_CANDIDATES_PER_OBJECT];
         let integration_program = GPU.build_program("src/leapfrog_yoshida.cl")?;
         let gpu_integration_kernel =
             Kernel::create(&integration_program, "leapfrog_yoshida").context("Failed to create kernel")?;
         let bvh_program = GPU.build_program("src/bvh.cl")?;
         let gpu_bvh_kernel = Kernel::create(&bvh_program, "bvh_find_candidates").context("Failed to create kernel")?;
-        let thread_count = num_cpus::get();
+        let gpu_object_positions = unsafe { GPU.create_host_ptr_buffer(&mut objects.positions, ReadWrite) }.unwrap();
+        let gpu_object_velocities = unsafe { GPU.create_host_ptr_buffer(&mut objects.velocities, ReadWrite) }.unwrap();
+        let gpu_object_radii = unsafe { GPU.create_host_ptr_buffer(&mut objects.radii, ReadOnly) }.unwrap();
+        let gpu_planet_masses = GPU
+            .create_host_buffer(
+                objects.masses[objects.planet_range()].iter().copied().chain(once(0.0)).collect_vec(),
+                ReadOnly,
+            )
+            .unwrap();
+        let gpu_bvh_nodes = GPU.create_device_buffer(bvh.nodes().len(), ReadOnly).unwrap();
+        let gpu_collision_candidates = unsafe { GPU.create_host_ptr_buffer(&mut candidates, WriteOnly) }.unwrap();
+        let gpu_collision_candidates_length = GPU.create_host_buffer(vec![0_u32], ReadWrite).unwrap();
+        let gpu_errors = GPU.create_host_buffer(vec![0], ReadWrite).unwrap();
         Ok(Self {
             enable_constraint_bouncing: true,
-            objects: ObjectSoa::default(),
-            bvh: Bvh::default(),
-            candidates: Vec::default(),
+            thread_pool,
+            objects,
+            bvh,
+            candidates,
             time: 0.0,
             constraints,
             stats: Stats::default(),
             restitution_coefficient: CONFIG.simulation.restitution_coefficient,
             global_gravity: Vector2::from(CONFIG.simulation.global_gravity),
             gravitational_constant: CONFIG.simulation.gravitational_constant,
-            gpu_integration_kernel,
-            gpu_leapfrog_positions: None,
-            gpu_leapfrog_velocities: None,
-            gpu_leapfrog_planet_masses: None,
-            gpu_planet_masses_tmp: Vec::default(),
             gpu_compute_options: GpuComputeOptions::default(),
-            thread_pool: ThreadPoolBuilder::new().num_threads(thread_count).build().unwrap(),
+            gpu_integration_kernel,
+            gpu_object_positions,
+            gpu_object_velocities,
+            gpu_object_radii,
+            gpu_planet_masses,
             max_candidates_per_object: 0,
             gpu_bvh_kernel,
-            gpu_bvh_nodes: None,
-            gpu_bvh_object_positions: None,
-            gpu_bvh_object_radii: None,
-            gpu_bvh_object_candidates: None,
-            gpu_candidates_length: None,
-            gpu_errors: None,
+            gpu_bvh_nodes,
+            gpu_collision_candidates,
+            gpu_collision_candidates_length,
+            gpu_errors,
         })
     }
 
@@ -276,34 +288,17 @@ impl PhysicsEngine {
     }
 
     fn integrate_gpu(&mut self, dt: f64) {
-        unsafe {
-            self.gpu_leapfrog_positions.init(&mut self.objects.positions, ReadWrite, "gpu_leapfrog_positions");
-            self.gpu_leapfrog_velocities.init(&mut self.objects.velocities, ReadWrite, "gpu_leapfrog_velocities");
-        }
-        self.gpu_planet_masses_tmp.resize(self.objects.planet_count + 1 /* cannot create an empty buffer */, 0.0);
-        self.gpu_planet_masses_tmp[..self.objects.planet_count]
-            .copy_from_slice(&self.objects.masses[self.objects.planet_range()]);
-        unsafe {
-            self.gpu_leapfrog_planet_masses.init(
-                &mut self.gpu_planet_masses_tmp,
-                ReadOnly,
-                "gpu_leapfrog_planet_masses",
-            )
-        };
-        self.gpu_leapfrog_positions.as_mut().unwrap();
-        self.gpu_leapfrog_velocities.as_mut().unwrap();
-        self.gpu_leapfrog_planet_masses.as_mut().unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_integration_kernel);
         kernel.set_global_work_size(self.objects.len());
         kernel.set_local_work_size(CONFIG.simulation.gpu_integration_local_wg_size);
         unsafe {
-            self.gpu_leapfrog_positions.set_arg(&mut kernel);
-            self.gpu_leapfrog_velocities.set_arg(&mut kernel);
+            self.gpu_object_positions.set_arg(&mut kernel);
+            self.gpu_object_velocities.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.objects.len()).unwrap());
             kernel.set_arg(&dt);
             kernel.set_arg(&self.global_gravity);
             // TODO store planet masses and posittions on GPU (used in a loop for every particle)
-            self.gpu_leapfrog_planet_masses.set_arg(&mut kernel);
+            self.gpu_planet_masses.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.objects.planet_count).unwrap());
             kernel.set_arg(&self.gravitational_constant);
         }
@@ -334,7 +329,7 @@ impl PhysicsEngine {
     fn process_collisions(&mut self) {
         let start = Instant::now();
         self.candidates.clear();
-        self.candidates.resize(self.objects.len() * MAX_CANDIDATES, NormalizedCollisionPair::new(0, 0));
+        self.candidates.resize(self.objects.len() * MAX_CANDIDATES_PER_OBJECT, NormalizedCollisionPair::new(0, 0));
         if self.gpu_compute_options.bvh {
             self.find_collision_candidates_gpu();
         } else {
@@ -397,27 +392,19 @@ impl PhysicsEngine {
     ) {
         let chunk_size = (positions.len()).div_ceil(thread_pool.current_num_threads());
         thread_pool.install(|| {
-            candidates.par_chunks_mut(chunk_size * MAX_CANDIDATES).enumerate().for_each(|(chunk_index, candidates)| {
-                for (i, candidates) in candidates.array_chunks_mut::<MAX_CANDIDATES>().enumerate() {
-                    let object_index = chunk_index * chunk_size + i;
-                    bvh.find_intersections(object_index, positions, radii, candidates);
-                }
-            });
+            candidates.par_chunks_mut(chunk_size * MAX_CANDIDATES_PER_OBJECT).enumerate().for_each(
+                |(chunk_index, candidates)| {
+                    for (i, candidates) in candidates.array_chunks_mut::<MAX_CANDIDATES_PER_OBJECT>().enumerate() {
+                        let object_index = chunk_index * chunk_size + i;
+                        bvh.find_intersections(object_index, positions, radii, candidates);
+                    }
+                },
+            );
         });
     }
 
     fn find_collision_candidates_gpu(&mut self) {
         let start = Instant::now();
-        self.gpu_bvh_nodes.init(self.bvh.nodes().len(), ReadOnly, "gpu_bvh_nodes");
-        unsafe {
-            self.gpu_bvh_object_positions.init(&mut self.objects.positions, ReadOnly, "gpu_bvh_object_positions");
-            self.gpu_bvh_object_radii.init(&mut self.objects.radii, ReadOnly, "gpu_bvh_object_radii");
-            self.gpu_bvh_object_candidates.init(&mut self.candidates, WriteOnly, "gpu_bvh_object_candidates");
-        }
-        // TODO store on GPU and read back
-        self.gpu_candidates_length.init(vec![0_u32], ReadWrite, "gpu_candidates_length_buffer");
-        self.gpu_errors.init(vec![0], WriteOnly, "gpu_errors");
-
         let object_count = u32::try_from(self.objects.len()).unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
@@ -426,24 +413,26 @@ impl PhysicsEngine {
             kernel.set_arg(&self.bvh.root());
             self.gpu_bvh_nodes.set_arg(&mut kernel);
             kernel.set_arg(&u32::try_from(self.gpu_bvh_nodes.len()).unwrap());
-            self.gpu_bvh_object_positions.set_arg(&mut kernel);
-            self.gpu_bvh_object_radii.set_arg(&mut kernel);
+            self.gpu_object_positions.set_arg(&mut kernel);
+            self.gpu_object_radii.set_arg(&mut kernel);
             kernel.set_arg(&object_count);
-            self.gpu_bvh_object_candidates.set_arg(&mut kernel);
-            self.gpu_candidates_length.set_arg(&mut kernel);
+            self.gpu_collision_candidates.set_arg(&mut kernel);
+            self.gpu_collision_candidates_length.set_arg(&mut kernel);
             self.gpu_errors.set_arg(&mut kernel);
         }
         println!("GPU BVH: setup {:?}", start.elapsed());
         let start = Instant::now();
-        self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), 0, "gpu_bvh_nodes").unwrap().wait().unwrap();
+        self.gpu_collision_candidates_length.data_mut()[0] = 0;
+        self.gpu_errors.data_mut()[0] = 0;
+        GPU.enqueue_write_device_buffer(&mut self.gpu_bvh_nodes, self.bvh.nodes(), 0).unwrap().wait().unwrap();
         println!("GPU BVH: write nodes {:?}", start.elapsed());
         let start = Instant::now();
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
         GPU.wait_for_queue_completion().unwrap();
         println!("GPU BVH: kernel {:?}", start.elapsed());
-        let candidates_length = self.gpu_candidates_length.as_ref().unwrap().data()[0];
+        let candidates_length = self.gpu_collision_candidates_length.data()[0];
         self.candidates.truncate(usize::try_from(candidates_length).unwrap());
-        let errors_count = self.gpu_errors.as_ref().unwrap().data()[0];
+        let errors_count = self.gpu_errors.data()[0];
         assert_eq!(errors_count, 0);
     }
 

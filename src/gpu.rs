@@ -120,16 +120,26 @@ impl Gpu {
         Ok(GpuDeviceBuffer { buffer, length })
     }
 
-    pub fn enqueue_write_device_buffer<T>(&self, buffer: &mut GpuDeviceBuffer<T>, data: &[T]) -> anyhow::Result<Event> {
+    pub fn enqueue_write_device_buffer<T>(
+        &self,
+        buffer: &mut GpuDeviceBuffer<T>,
+        data: &[T],
+        offset: usize,
+    ) -> anyhow::Result<Event> {
         unsafe {
             self.queue
-                .enqueue_write_buffer(&mut buffer.buffer, CL_FALSE, 0, data, &[])
+                .enqueue_write_buffer(&mut buffer.buffer, CL_FALSE, offset, data, &[])
                 .context("Failed to write device buffer")
         }
     }
 
-    pub fn enqueue_read_device_buffer<T>(&self, buffer: &GpuDeviceBuffer<T>, dst: &mut [T]) -> anyhow::Result<Event> {
-        unsafe { self.queue.enqueue_read_buffer(&buffer.buffer, CL_FALSE, 0, dst, &[]) }
+    pub fn enqueue_read_device_buffer<T>(
+        &self,
+        buffer: &GpuDeviceBuffer<T>,
+        dst: &mut [T],
+        offset: usize,
+    ) -> anyhow::Result<Event> {
+        unsafe { self.queue.enqueue_read_buffer(&buffer.buffer, CL_FALSE, offset, dst, &[]) }
             .context("Failed to read device buffer")
     }
 
@@ -172,44 +182,13 @@ impl<T> GpuHostPtrBuffer<T> {
     }
 
     #[must_use]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.length
     }
-}
 
-pub trait GpuHostPtrBufferUtils<T> {
-    unsafe fn init(
-        &mut self,
-        data: &mut [T],
-        access_mode: GpuBufferAccessMode,
-        name: &'static str,
-    ) -> &mut GpuHostPtrBuffer<T>;
-
-    fn len(&self) -> usize;
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
-}
-
-impl<T> GpuHostPtrBufferUtils<T> for Option<GpuHostPtrBuffer<T>> {
-    unsafe fn init(
-        &mut self,
-        data: &mut [T],
-        access_mode: GpuBufferAccessMode,
-        name: &'static str,
-    ) -> &mut GpuHostPtrBuffer<T> {
-        self.take();
-        self.insert(unsafe {
-            GPU.create_host_ptr_buffer(data, access_mode)
-                .with_context(|| format!("failed to create GPU host ptr buffer {name}"))
-                .unwrap()
-        })
-    }
-
-    fn len(&self) -> usize {
-        self.as_ref().unwrap().length
-    }
-
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
-        unsafe { kernel.set_arg(&self.as_ref().unwrap().buffer) };
+    pub unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(&self.buffer) };
     }
 }
 
@@ -229,34 +208,13 @@ impl<T> GpuHostBuffer<T> {
     }
 
     #[must_use]
-    pub fn buffer(&self) -> &Buffer<T> {
-        &self.buffer
-    }
-}
-
-pub trait GpuHostBufferUtils<T> {
-    fn init(&mut self, data: Vec<T>, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuHostBuffer<T>;
-
-    fn len(&self) -> usize;
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
-}
-
-impl<T> GpuHostBufferUtils<T> for Option<GpuHostBuffer<T>> {
-    fn init(&mut self, data: Vec<T>, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuHostBuffer<T> {
-        self.take();
-        self.insert(
-            GPU.create_host_buffer(data, access_mode)
-                .with_context(|| format!("failed to create GPU host buffer {name}"))
-                .unwrap(),
-        )
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 
-    fn len(&self) -> usize {
-        self.as_ref().unwrap().data.len()
-    }
-
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
-        unsafe { kernel.set_arg(&self.as_ref().unwrap().buffer) };
+    pub unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(&self.buffer) };
     }
 }
 
@@ -276,41 +234,8 @@ impl<T> GpuDeviceBuffer<T> {
     pub fn len(&self) -> usize {
         self.length
     }
-}
 
-pub trait GpuDeviceBufferUtils<T> {
-    fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T>;
-    fn len(&self) -> usize;
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel);
-    fn enqueue_write(&mut self, data: &[T], name: &'static str) -> anyhow::Result<Event>;
-    fn enqueue_read(&self, data: &mut [T], name: &'static str) -> anyhow::Result<Event>;
-}
-
-impl<T> GpuDeviceBufferUtils<T> for Option<GpuDeviceBuffer<T>> {
-    fn init(&mut self, length: usize, access_mode: GpuBufferAccessMode, name: &'static str) -> &mut GpuDeviceBuffer<T> {
-        self.take_if(|b| length > b.len());
-        self.get_or_insert_with(|| {
-            GPU.create_device_buffer(length, access_mode)
-                .with_context(|| format!("failed to create GPU device buffer {name}"))
-                .unwrap()
-        })
-    }
-
-    fn len(&self) -> usize {
-        self.as_ref().unwrap().length
-    }
-
-    unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
-        unsafe { kernel.set_arg(self.as_ref().unwrap().buffer()) };
-    }
-
-    fn enqueue_write(&mut self, data: &[T], name: &'static str) -> anyhow::Result<Event> {
-        GPU.enqueue_write_device_buffer(self.as_mut().unwrap(), data)
-            .with_context(|| format!("failed to enqueue write GPU device buffer {name}"))
-    }
-
-    fn enqueue_read(&self, data: &mut [T], name: &'static str) -> anyhow::Result<Event> {
-        GPU.enqueue_read_device_buffer(self.as_ref().unwrap(), data)
-            .with_context(|| format!("failed to enqueue read GPU device buffer {name}"))
+    pub unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
+        unsafe { kernel.set_arg(&self.buffer) };
     }
 }

@@ -8,11 +8,16 @@ use vello::peniko::{
     color::{ColorSpace, Hsl, Srgb, palette::css},
 };
 
-use crate::{app_config::CONFIG, object::ObjectPrototype, physics::PhysicsEngine, vector2::Vector2};
+use crate::{
+    app_config::CONFIG,
+    object::{ObjectPrototype, ObjectSoa},
+    physics::PhysicsEngine,
+    vector2::Vector2,
+};
 
-pub fn create_demo(physics: &mut PhysicsEngine) {
+pub fn create_demo(objects: &mut ObjectSoa) {
     if CONFIG.demo.enable_planets {
-        physics.add(ObjectPrototype {
+        objects.add(ObjectPrototype {
             velocity: Vector2::new(-700.0, 0.0),
             radius: CONFIG.demo.object_radius,
             mass: 10000.0,
@@ -21,7 +26,7 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
             ..ObjectPrototype::new(Vector2::new(700.0, 500.0))
         });
 
-        physics.add(ObjectPrototype {
+        objects.add(ObjectPrototype {
             velocity: Vector2::new(700.0, 0.0),
             radius: CONFIG.demo.object_radius,
             mass: 10000.0,
@@ -32,11 +37,11 @@ pub fn create_demo(physics: &mut PhysicsEngine) {
     }
 
     for brick in &CONFIG.demo.bricks {
-        generate_brick(physics, brick);
+        generate_brick(objects, brick);
     }
 
     for ball in &CONFIG.demo.balls {
-        generate_ball(physics, ball);
+        generate_ball(objects, ball);
     }
 }
 
@@ -55,7 +60,7 @@ pub struct Brick {
     pub particle_mass: f64,
 }
 
-pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> {
+pub fn generate_brick(objects: &mut ObjectSoa, brick: &Brick) -> Vec<usize> {
     let cell_size = brick.particle_radius * 2.0 + brick.particle_spacing;
     let dims = Vector2::new((brick.size.x / cell_size) as usize, (brick.size.y / cell_size) as usize);
     let mut result = Vec::new();
@@ -86,7 +91,7 @@ pub fn generate_brick(physics: &mut PhysicsEngine, brick: &Brick) -> Vec<usize> 
                 } else {
                     0.0
                 };
-            let id = physics.add(ObjectPrototype {
+            let id = objects.add(ObjectPrototype {
                 velocity: brick.velocity,
                 radius,
                 mass: brick.particle_mass,
@@ -114,7 +119,7 @@ pub struct Ball {
     pub particle_mass: f64,
 }
 
-pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
+pub fn generate_ball(objects: &mut ObjectSoa, ball: &Ball) -> Vec<usize> {
     let mut result = Vec::new();
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
@@ -151,7 +156,7 @@ pub fn generate_ball(physics: &mut PhysicsEngine, ball: &Ball) -> Vec<usize> {
                     ..ObjectPrototype::new(position)
                 };
                 object.velocity = ball.velocity;
-                let id = physics.add(object);
+                let id = objects.add(object);
                 result.push(id);
             }
         }

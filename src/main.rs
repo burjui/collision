@@ -23,6 +23,7 @@ use collision::{
     bvh::{AABB, Bvh, Node},
     demo::create_demo,
     fps::FpsCalculator,
+    object::ObjectSoa,
     physics::{DurationStat, GpuComputeOptions, PhysicsEngine, Stats},
     simple_text::SimpleText,
     vector2::Vector2,
@@ -184,10 +185,11 @@ fn simulation_thread(
     let mut time_limit_action_executed = false;
     let mut draw_aabbs = false;
     let mut draw_ids = false;
-    let mut physics = PhysicsEngine::new().unwrap();
+    let mut objects = ObjectSoa::default();
+    create_demo(&mut objects);
+    println!("{} objects", objects.len());
+    let mut physics = PhysicsEngine::new(objects).unwrap();
     let mut color_source = CONFIG.rendering.color_source;
-    create_demo(&mut physics);
-    println!("{} objects", physics.objects().len());
     let mut redraw_needed = false;
     let mut last_redraw_instant = Instant::now();
     let mut show_edf = CONFIG.rendering.show_edf;
