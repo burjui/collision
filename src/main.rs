@@ -963,7 +963,7 @@ fn write_stats(
         bvh_duration,
         collisions_duration,
         constraints_duration,
-        total_duration: _,
+        total_duration,
     }: &Stats,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
@@ -986,6 +986,7 @@ fn write_stats(
     write_duration_stat(buffer, "collision", collisions_duration)?;
     write_duration_stat(buffer, "bvh", bvh_duration)?;
     write_duration_stat(buffer, "constraints", constraints_duration)?;
+    write_duration_stat(buffer, "total", total_duration)?;
     Ok(())
 }
 
