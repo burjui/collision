@@ -133,7 +133,7 @@ fn default_speed_factor() -> f64 {
 }
 
 fn default_wg_size() -> usize {
-    32
+    64
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
