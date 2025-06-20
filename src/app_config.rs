@@ -38,7 +38,7 @@ impl AppConfig {
         if let DtSource::Fixed(dt) = self.simulation.dt {
             validate_positive(dt, "simulation.dt")?;
         }
-        validate_positive(self.simulation.speed_factor, "simulation.base_dt")?;
+        validate_positive(self.simulation.speed_factor, "simulation.speed_factor")?;
         if let Some(time_limit) = self.simulation.time_limit {
             validate_positive(time_limit, "simulation.time_limit")?;
         }
