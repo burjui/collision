@@ -435,7 +435,7 @@ impl PhysicsEngine {
         }
         println!("GPU BVH: setup {:?}", start.elapsed());
         let start = Instant::now();
-        self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), "gpu_bvh_nodes").unwrap().wait().unwrap();
+        self.gpu_bvh_nodes.enqueue_write(self.bvh.nodes(), 0, "gpu_bvh_nodes").unwrap().wait().unwrap();
         println!("GPU BVH: write nodes {:?}", start.elapsed());
         let start = Instant::now();
         GPU.enqueue_execute_kernel(&mut kernel).context("Failed to execute kernel").unwrap();
