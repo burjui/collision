@@ -1,6 +1,6 @@
 use std::{path::Path, ptr::null_mut, sync::LazyLock};
 
-use anyhow::{Context as _, Ok, anyhow};
+use anyhow::{Context as _, anyhow};
 use opencl3::{
     command_queue::CommandQueue,
     context::Context,
@@ -24,27 +24,29 @@ pub struct Gpu {
 impl Gpu {
     pub fn first_available(queue_length: u32) -> anyhow::Result<Self> {
         let platforms = get_platforms().context("No platforms found")?;
-        println!("Available OpenCL platforms:");
+        println!("Available OpenCL platforms ({}):", platforms.len());
         for (i, platform) in platforms.iter().enumerate() {
             println!(
                 "Platform {i}: {} {}",
                 platform.name().context("Failed to get platform name")?,
                 platform.version().context("Failed to get platform name")?
             );
-            let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
-            for (i, &device_id) in devices.iter().enumerate() {
-                let device = Device::from(device_id);
-                println!("  Device {i}: {}", device.name().context("Failed to get device name")?);
+            if let Ok(devices) = platform.get_devices(CL_DEVICE_TYPE_GPU) {
+                for (i, &device_id) in devices.iter().enumerate() {
+                    let device = Device::from(device_id);
+                    println!("  Device {i}: {}", device.name().context("Failed to get device name")?);
+                }
             }
         }
         for platform in platforms {
-            let devices = platform.get_devices(CL_DEVICE_TYPE_GPU).context("No GPU device found")?;
-            if let Some(device_id) = devices.first().copied() {
-                let device = Device::from(device_id);
-                let context = Context::from_device(&device).context("Failed to create context")?;
-                let queue = CommandQueue::create_default_with_properties(&context, 0, queue_length)
-                    .context("Failed to create command queue")?;
-                return Ok(Gpu { context, queue });
+            if let Ok(devices) = platform.get_devices(CL_DEVICE_TYPE_GPU) {
+                if let Some(device_id) = devices.first().copied() {
+                    let device = Device::from(device_id);
+                    let context = Context::from_device(&device).context("Failed to create context")?;
+                    let queue = CommandQueue::create_default_with_properties(&context, 0, queue_length)
+                        .context("Failed to create command queue")?;
+                    return Ok(Gpu { context, queue });
+                }
             }
         }
         Err(anyhow!("No GPU device found"))
