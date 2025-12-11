@@ -13,7 +13,7 @@ use opencl3::{
     types::{CL_FALSE, cl_mem_flags},
 };
 
-pub static GPU: LazyLock<Gpu> = LazyLock::new(|| Gpu::first_available(20).unwrap());
+pub static GPU: LazyLock<Gpu> = LazyLock::new(|| Gpu::first_available().unwrap());
 
 pub struct Gpu {
     context: Context,
@@ -22,7 +22,7 @@ pub struct Gpu {
 
 // TODO don't return results (there's no point)
 impl Gpu {
-    pub fn first_available(queue_length: u32) -> anyhow::Result<Self> {
+    pub fn first_available() -> anyhow::Result<Self> {
         let platforms = get_platforms().context("No platforms found")?;
         println!("Available OpenCL platforms ({}):", platforms.len());
         for (i, platform) in platforms.iter().enumerate() {
@@ -43,7 +43,7 @@ impl Gpu {
                 if let Some(device_id) = devices.first().copied() {
                     let device = Device::from(device_id);
                     let context = Context::from_device(&device).context("Failed to create context")?;
-                    let queue = CommandQueue::create_default_with_properties(&context, 0, queue_length)
+                    let queue = CommandQueue::create_default_with_properties(&context, 0, 0)
                         .context("Failed to create command queue")?;
                     return Ok(Gpu { context, queue });
                 }

@@ -22,7 +22,8 @@ num_cpus = "1.17.0"
 rayon = "1.10.0"
 
 [dependencies.opencl3]
-version = "0.12"
+version = "0.12.1"
+# path = "opencl3-0.12.0"
 features = ["CL_VERSION_2_1", "CL_VERSION_2_2", "CL_VERSION_3_0"]
 
 [profile.release]
