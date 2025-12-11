@@ -1,7 +1,6 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::large_enum_variant)]
-#![feature(let_chains)]
 
 // TODO replays
 // TODO black holes9

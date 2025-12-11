@@ -394,7 +394,7 @@ impl PhysicsEngine {
         thread_pool.install(|| {
             candidates.par_chunks_mut(chunk_size * MAX_CANDIDATES_PER_OBJECT).enumerate().for_each(
                 |(chunk_index, candidates)| {
-                    for (i, candidates) in candidates.array_chunks_mut::<MAX_CANDIDATES_PER_OBJECT>().enumerate() {
+                    for (i, candidates) in candidates.chunks_mut(MAX_CANDIDATES_PER_OBJECT).enumerate() {
                         let object_index = chunk_index * chunk_size + i;
                         bvh.find_intersections(object_index, positions, radii, candidates);
                     }

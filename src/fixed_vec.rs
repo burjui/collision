@@ -1,7 +1,4 @@
-use std::{
-    mem::MaybeUninit,
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Copy)]
 pub struct FixedVec<T, const N: usize> {
@@ -36,17 +33,14 @@ impl<T: Default + Copy, const N: usize> Default for FixedVec<T, N> {
 
 impl<T: Copy + Default, const N: usize> FromIterator<T> for FixedVec<T, N> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut data = [MaybeUninit::<T>::uninit(); N];
+        let mut data = [Default::default(); N];
         let mut len = 0;
         for item in iter {
             assert!(len < N);
-            data[len].write(item);
+            data[len] = item;
             len += 1;
         }
-        Self {
-            inner: unsafe { MaybeUninit::array_assume_init(data) },
-            len,
-        }
+        Self { inner: data, len }
     }
 }
 

@@ -2,17 +2,6 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
-#![feature(random)]
-#![feature(impl_trait_in_bindings)]
-#![feature(array_repeat)]
-#![feature(array_windows)]
-#![feature(more_float_constants)]
-#![feature(lazy_get)]
-#![feature(maybe_uninit_array_assume_init)]
-#![feature(coroutines, coroutine_trait)]
-#![feature(array_try_map)]
-#![feature(iter_chain)]
-#![feature(array_chunks)]
 
 pub mod app_config;
 pub mod array2;
