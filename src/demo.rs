@@ -48,16 +48,16 @@ pub fn create_demo(objects: &mut ObjectSoa) {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct Brick {
-    pub position: Vector2<f64>,
-    pub size: Vector2<f64>,
+    pub position: Vector2<f32>,
+    pub size: Vector2<f32>,
     #[serde(default)]
-    pub velocity: Vector2<f64>,
+    pub velocity: Vector2<f32>,
     #[serde(default)]
-    pub particle_radius: f64,
+    pub particle_radius: f32,
     #[serde(default)]
-    pub particle_spacing: f64,
+    pub particle_spacing: f32,
     #[serde(default)]
-    pub particle_mass: f64,
+    pub particle_mass: f32,
 }
 
 pub fn generate_brick(objects: &mut ObjectSoa, brick: &Brick) -> Vec<usize> {
@@ -67,13 +67,13 @@ pub fn generate_brick(objects: &mut ObjectSoa, brick: &Brick) -> Vec<usize> {
     for i in 0..dims.x {
         for j in 0..dims.y {
             let p = |position, index| {
-                position + (index + 1) as f64 * (brick.particle_radius * 2.0 + brick.particle_spacing)
+                position + (index + 1) as f32 * (brick.particle_radius * 2.0 + brick.particle_spacing)
             };
             let position = Vector2::new(p(brick.position.x, i), p(brick.position.y, j))
                 + if CONFIG.demo.randomize_positions {
                     Vector2::new(
-                        brick.particle_radius * random::<f64>() * CONFIG.demo.randomize_position_factor,
-                        brick.particle_radius * random::<f64>() * CONFIG.demo.randomize_position_factor,
+                        brick.particle_radius * random::<f32>() * CONFIG.demo.randomize_position_factor,
+                        brick.particle_radius * random::<f32>() * CONFIG.demo.randomize_position_factor,
                     )
                 } else {
                     Vector2::default()
@@ -87,7 +87,7 @@ pub fn generate_brick(objects: &mut ObjectSoa, brick: &Brick) -> Vec<usize> {
             };
             let radius = brick.particle_radius
                 + if CONFIG.demo.randomize_radii {
-                    brick.particle_radius * random::<f64>() * CONFIG.demo.randomize_radius_factor
+                    brick.particle_radius * random::<f32>() * CONFIG.demo.randomize_radius_factor
                 } else {
                     0.0
                 };
@@ -107,16 +107,16 @@ pub fn generate_brick(objects: &mut ObjectSoa, brick: &Brick) -> Vec<usize> {
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct Ball {
-    pub position: Vector2<f64>,
-    pub radius: f64,
+    pub position: Vector2<f32>,
+    pub radius: f32,
     #[serde(default)]
-    pub velocity: Vector2<f64>,
+    pub velocity: Vector2<f32>,
     #[serde(default)]
-    pub particle_radius: f64,
+    pub particle_radius: f32,
     #[serde(default)]
-    pub particle_spacing: f64,
+    pub particle_spacing: f32,
     #[serde(default)]
-    pub particle_mass: f64,
+    pub particle_mass: f32,
 }
 
 pub fn generate_ball(objects: &mut ObjectSoa, ball: &Ball) -> Vec<usize> {
@@ -124,13 +124,13 @@ pub fn generate_ball(objects: &mut ObjectSoa, ball: &Ball) -> Vec<usize> {
     let num_particles = (ball.radius * 2.0 / (ball.particle_radius * 2.0 + ball.particle_spacing)) as usize;
     for i in 0..num_particles {
         for j in 0..num_particles {
-            let x = -ball.radius + (i as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
-            let y = -ball.radius + (j as f64) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let x = -ball.radius + (i as f32) * (ball.particle_radius * 2.0 + ball.particle_spacing);
+            let y = -ball.radius + (j as f32) * (ball.particle_radius * 2.0 + ball.particle_spacing);
             let position = Vector2::new(x, y)
                 + if CONFIG.demo.randomize_positions {
                     Vector2::new(
-                        random::<f64>() * ball.particle_radius * CONFIG.demo.randomize_position_factor,
-                        random::<f64>() * ball.particle_radius * CONFIG.demo.randomize_position_factor,
+                        random::<f32>() * ball.particle_radius * CONFIG.demo.randomize_position_factor,
+                        random::<f32>() * ball.particle_radius * CONFIG.demo.randomize_position_factor,
                     )
                 } else {
                     Vector2::default()
@@ -145,7 +145,7 @@ pub fn generate_ball(objects: &mut ObjectSoa, ball: &Ball) -> Vec<usize> {
                 };
                 let radius = ball.particle_radius
                     + if CONFIG.demo.randomize_radii {
-                        ball.particle_radius * random::<f64>() * CONFIG.demo.randomize_radius_factor
+                        ball.particle_radius * random::<f32>() * CONFIG.demo.randomize_radius_factor
                     } else {
                         0.0
                     };

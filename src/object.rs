@@ -6,10 +6,10 @@ use crate::vector2::Vector2;
 
 #[derive(Default)]
 pub struct ObjectSoa {
-    pub positions: Vec<Vector2<f64>>,
-    pub velocities: Vec<Vector2<f64>>,
-    pub radii: Vec<f64>,
-    pub masses: Vec<f64>,
+    pub positions: Vec<Vector2<f32>>,
+    pub velocities: Vec<Vector2<f32>>,
+    pub radii: Vec<f32>,
+    pub masses: Vec<f32>,
     pub colors: Vec<Option<Color>>,
     pub is_planet: Vec<bool>,
     pub planet_count: usize,
@@ -51,17 +51,17 @@ impl ObjectSoa {
 
 #[derive(Copy, Clone)]
 pub struct ObjectPrototype {
-    pub position: Vector2<f64>,
-    pub velocity: Vector2<f64>,
-    pub radius: f64,
-    pub mass: f64,
+    pub position: Vector2<f32>,
+    pub velocity: Vector2<f32>,
+    pub radius: f32,
+    pub mass: f32,
     pub color: Option<Color>,
     pub is_planet: bool,
 }
 
 impl ObjectPrototype {
     #[must_use]
-    pub fn new(position: Vector2<f64>) -> Self {
+    pub fn new(position: Vector2<f32>) -> Self {
         Self {
             position,
             velocity: Vector2::new(0.0, 0.0),
@@ -73,7 +73,7 @@ impl ObjectPrototype {
     }
 
     #[must_use]
-    pub fn momentum(&self) -> Vector2<f64> {
+    pub fn momentum(&self) -> Vector2<f32> {
         self.velocity * self.mass
     }
 }

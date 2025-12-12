@@ -140,7 +140,7 @@ pub fn main() -> anyhow::Result<()> {
     let sim_total_duration_guard = sim_total_duration.lock().unwrap();
     println!("total simulation duration: {:?}", *sim_total_duration_guard);
     if *sim_total_duration_guard > Duration::ZERO {
-        println!("relative speed: {}", physics.time() / sim_total_duration_guard.as_secs_f64());
+        println!("relative speed: {}", physics.time() / sim_total_duration_guard.as_secs_f32());
     }
     println!("Total app running duration: {:?}", start.elapsed());
 
@@ -166,7 +166,7 @@ fn simulation_thread(
     rendering_thread_ready: &Arc<Barrier>,
     rendering_result_receiver: &mpsc::Receiver<()>,
 ) -> PhysicsEngine {
-    const EDF_CELL_SIZE: f64 = 4.0;
+    const EDF_CELL_SIZE: f32 = 4.0;
     const EDF_SAMPLING_AREA_SIZE: usize = 3;
 
     let energy_field_job_queue = Box::leak(Box::new(ArrayQueue::new(1)));
@@ -314,22 +314,22 @@ fn simulation_thread(
 }
 
 struct EnergyDensityFieldJob {
-    positions: Vec<Vector2<f64>>,
-    velocities: Vec<Vector2<f64>>,
-    radii: Vec<f64>,
-    masses: Vec<f64>,
-    cell_size: f64,
+    positions: Vec<Vector2<f32>>,
+    velocities: Vec<Vector2<f32>>,
+    radii: Vec<f32>,
+    masses: Vec<f32>,
+    cell_size: f32,
     sampling_area_size: usize,
 }
 
 fn energy_density_field_thread(
     edf_thread_ready: Arc<Barrier>,
     energy_field_jobs: &ArrayQueue<EnergyDensityFieldJob>,
-    energy_field_result: &ArrayQueue<Array2<f64>>,
+    energy_field_result: &ArrayQueue<Array2<f32>>,
 ) {
     edf_thread_ready.wait();
-    let mut edf = Array2::<f64>::default();
-    let mut edf_avg = Array2::<f64>::default();
+    let mut edf = Array2::<f32>::default();
+    let mut edf_avg = Array2::<f32>::default();
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_cpus::get()).build().unwrap();
     loop {
         if let Some(EnergyDensityFieldJob {
@@ -343,8 +343,8 @@ fn energy_density_field_thread(
         {
             assert!(cell_size > 1.0);
             let start = Instant::now();
-            let width = (CONFIG.window.width as f64 / cell_size) as usize + 1;
-            let height = (CONFIG.window.height as f64 / cell_size) as usize + 1;
+            let width = (CONFIG.window.width as f32 / cell_size) as usize + 1;
+            let height = (CONFIG.window.height as f32 / cell_size) as usize + 1;
             edf.reset((width, height));
             for object_index in 0..positions.len() {
                 let position = positions[object_index];
@@ -383,7 +383,7 @@ fn energy_density_field_thread(
                 edf_avg.data_mut().par_iter_mut().enumerate().for_each(|(i, avg)| {
                     let x = i % width;
                     let y = i / width;
-                    let mut count = 0.0_f64;
+                    let mut count = 0.0_f32;
                     for j in y.saturating_sub(sampling_area_size)..y.saturating_add(sampling_area_size).min(height - 1)
                     {
                         for i in
@@ -465,12 +465,18 @@ fn draw_physics(
         ..
     }: &RenderingData,
 ) -> Vec<Scene> {
-    fn draw_circle(scene: &mut Scene, transform: Affine, position: Vector2<f64>, radius: f64, color: Color) {
-        scene.fill(Fill::NonZero, transform, color, None, &Circle::new((position.x, position.y), radius.max(1.0)));
+    fn draw_circle(scene: &mut Scene, transform: Affine, position: Vector2<f32>, radius: f32, color: Color) {
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            color,
+            None,
+            &Circle::new((f64::from(position.x), f64::from(position.y)), f64::from(radius).max(1.0)),
+        );
     }
 
-    fn draw_text(scene: &mut Scene, transform: Affine, text: &mut SimpleText, position: Vector2<f64>, s: &str) {
-        text.add(scene, 10.0, None, Affine::translate((position.x, position.y)) * transform, s);
+    fn draw_text(scene: &mut Scene, transform: Affine, text: &mut SimpleText, position: Vector2<f32>, s: &str) {
+        text.add(scene, 10.0, None, Affine::translate((f64::from(position.x), f64::from(position.y))) * transform, s);
     }
 
     let transform = Affine::IDENTITY;
@@ -481,6 +487,8 @@ fn draw_physics(
         .into_iter()
         .map(Itertools::collect_vec)
         .collect_vec();
+
+    // TODO render via OpenCL into Image
     let mut scenes = std::thread::scope(|scope| {
         chunks
             .iter()
@@ -531,7 +539,7 @@ fn draw_physics(
         transform,
         css::WHITE,
         None,
-        &Rect::new(topleft.x, topleft.y, bottomright.x, bottomright.y),
+        &Rect::new(f64::from(topleft.x), f64::from(topleft.y), f64::from(bottomright.x), f64::from(bottomright.y)),
     );
 
     println!("edf size: {}x{}", edf.size().0, edf.size().1);
@@ -561,15 +569,15 @@ fn draw_physics(
         let start = Instant::now();
         let blob = Blob::new(Arc::new(image_data));
         let image = Image::new(blob, ImageFormat::Rgba8, width as u32, height as u32);
-        scene.draw_image(&image, transform.pre_scale(*edf_cell_size));
+        scene.draw_image(&image, transform.pre_scale(f64::from(*edf_cell_size)));
         println!("rendering edf took {:.2?}", start.elapsed());
     }
 
     scenes
 }
 
-fn color_from_velocity(velocities: &[Vector2<f64>], object_index: usize) -> Color {
-    const SCALE_FACTOR: f64 = 0.0004;
+fn color_from_velocity(velocities: &[Vector2<f32>], object_index: usize) -> Color {
+    const SCALE_FACTOR: f32 = 0.0004;
     let velocity = velocities[object_index];
     #[allow(clippy::cast_possible_truncation)]
     let spectrum_position = (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
@@ -580,13 +588,13 @@ fn spectrum(position: f32, alpha: f32) -> Color {
     Color::new([1.0 - position, (1.0 - (position - 0.5).abs() * 2.0), position, alpha])
 }
 
-fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f64>, mouse_influence_radius: f64) {
+fn draw_mouse_influence(scene: &mut Scene, mouse_position: Vector2<f32>, mouse_influence_radius: f32) {
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
         Color::new([1.0, 1.0, 1.0, 0.3]),
         None,
-        &Circle::new((mouse_position.x, mouse_position.y), mouse_influence_radius),
+        &Circle::new((mouse_position.x, mouse_position.y), f64::from(mouse_influence_radius)),
     );
 }
 
@@ -598,10 +606,10 @@ fn draw_aabbs(scene: &mut Scene, nodes: &[Node]) {
             css::LIGHT_GRAY,
             None,
             &Rect {
-                x0: aabb.topleft.x,
-                y0: aabb.topleft.y,
-                x1: aabb.bottomright.x,
-                y1: aabb.bottomright.y,
+                x0: f64::from(aabb.topleft.x),
+                y0: f64::from(aabb.topleft.y),
+                x1: f64::from(aabb.bottomright.x),
+                y1: f64::from(aabb.bottomright.y),
             },
         );
     }
@@ -651,8 +659,8 @@ enum SimulationThreadEvent {
     SetColorSource(ColorSource),
     SetGpuComputeOptions(GpuComputeOptions),
     UnidirectionalKick {
-        mouse_position: Vector2<f64>,
-        mouse_influence_radius: f64,
+        mouse_position: Vector2<f32>,
+        mouse_influence_radius: f32,
     },
     ToggleDrawEdf,
 }
@@ -675,9 +683,9 @@ impl Debug for RenderingThreadEvent {
 
 #[derive(Default)]
 struct RenderingData {
-    positions: Vec<Vector2<f64>>,
-    velocities: Vec<Vector2<f64>>,
-    radii: Vec<f64>,
+    positions: Vec<Vector2<f32>>,
+    velocities: Vec<Vector2<f32>>,
+    radii: Vec<f32>,
     colors: Vec<Option<Color>>,
     particle_range: Range<usize>,
     planet_range: Range<usize>,
@@ -686,8 +694,8 @@ struct RenderingData {
     draw_aabbs: bool,
     constraints: AABB,
     draw_edf: bool,
-    edf: Array2<f64>,
-    edf_cell_size: f64,
+    edf: Array2<f32>,
+    edf_cell_size: f32,
     bvh: Bvh,
 }
 
@@ -704,8 +712,8 @@ struct VelloApp<'s> {
     fps_calculator: FpsCalculator,
     last_fps: usize,
     min_fps: usize,
-    mouse_position: Vector2<f64>,
-    mouse_influence_radius: f64,
+    mouse_position: Vector2<f32>,
+    mouse_influence_radius: f32,
     text: SimpleText,
     simulation_event_sender: mpsc::Sender<SimulationThreadEvent>,
     rendering_event_queue: &'s SegQueue<RenderingThreadEvent>,
@@ -893,7 +901,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 };
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_position = Vector2::new(position.x, position.y);
+                self.mouse_position = Vector2::new(position.x as f32, position.y as f32);
                 request_redraw(self.state.as_ref());
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -912,7 +920,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                 delta: MouseScrollDelta::LineDelta(_, dy),
                 ..
             } => {
-                self.mouse_influence_radius = (self.mouse_influence_radius + f64::from(dy) * 3.0).max(0.0);
+                self.mouse_influence_radius = (self.mouse_influence_radius + dy * 3.0).max(0.0);
                 request_redraw(self.state.as_ref());
             }
             _ => {}

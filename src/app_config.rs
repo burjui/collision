@@ -87,7 +87,7 @@ fn validate_non_negative<T: Num + PartialOrd>(value: T, name: &'static str) -> a
     }
 }
 
-fn validate_restitution_coefficient(value: f64, name: &'static str) -> anyhow::Result<()> {
+fn validate_restitution_coefficient(value: f32, name: &'static str) -> anyhow::Result<()> {
     if (0.0..=1.0).contains(&value) {
         Ok(())
     } else {
@@ -110,7 +110,7 @@ pub struct SimulationConfig {
     #[serde(default)]
     pub dt: DtSource,
     #[serde(default = "default_speed_factor")]
-    pub speed_factor: f64,
+    pub speed_factor: f32,
     #[serde(default)]
     pub gpu_integration: bool,
     #[serde(default)]
@@ -119,16 +119,16 @@ pub struct SimulationConfig {
     pub gpu_integration_local_wg_size: usize,
     #[serde(default = "default_wg_size")]
     pub gpu_bvh_local_wg_size: usize,
-    pub restitution_coefficient: f64,
+    pub restitution_coefficient: f32,
     #[serde(default)]
-    pub global_gravity: (f64, f64),
-    pub gravitational_constant: f64,
-    pub time_limit: Option<f64>,
+    pub global_gravity: (f32, f32),
+    pub gravitational_constant: f32,
+    pub time_limit: Option<f32>,
     #[serde(default)]
     pub time_limit_action: TimeLimitAction,
 }
 
-fn default_speed_factor() -> f64 {
+fn default_speed_factor() -> f32 {
     1.0
 }
 
@@ -144,7 +144,7 @@ pub enum DtSource {
     Auto,
 
     #[serde(rename = "fixed")]
-    Fixed(f64),
+    Fixed(f32),
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
@@ -169,7 +169,7 @@ impl Display for TimeLimitAction {
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct DemoConfig {
-    pub object_radius: f64,
+    pub object_radius: f32,
 
     #[serde(default)]
     pub enable_planets: bool,
@@ -177,11 +177,11 @@ pub struct DemoConfig {
     #[serde(default)]
     pub randomize_positions: bool,
     #[serde(default)]
-    pub randomize_position_factor: f64,
+    pub randomize_position_factor: f32,
     #[serde(default)]
     pub randomize_radii: bool,
     #[serde(default)]
-    pub randomize_radius_factor: f64,
+    pub randomize_radius_factor: f32,
 
     #[serde(default)]
     pub bricks: Vec<Brick>,

@@ -1,5 +1,6 @@
 use std::{
     iter::{once, zip},
+    process::exit,
     time::{Duration, Instant},
 };
 
@@ -31,18 +32,18 @@ pub struct PhysicsEngine {
     objects: ObjectSoa,
     bvh: Bvh,
     candidates: Vec<NormalizedCollisionPair>,
-    time: f64,
+    time: f32,
     constraints: AABB,
     stats: Stats,
-    restitution_coefficient: f64,
-    global_gravity: Vector2<f64>,
-    gravitational_constant: f64,
+    restitution_coefficient: f32,
+    global_gravity: Vector2<f32>,
+    gravitational_constant: f32,
     gpu_compute_options: GpuComputeOptions,
     gpu_integration_kernel: Kernel,
-    gpu_object_positions: GpuHostPtrBuffer<Vector2<f64>>,
-    gpu_object_velocities: GpuHostPtrBuffer<Vector2<f64>>,
-    gpu_object_radii: GpuHostPtrBuffer<f64>,
-    gpu_planet_masses: GpuHostBuffer<f64>,
+    gpu_object_positions: GpuHostPtrBuffer<Vector2<f32>>,
+    gpu_object_velocities: GpuHostPtrBuffer<Vector2<f32>>,
+    gpu_object_radii: GpuHostPtrBuffer<f32>,
+    gpu_planet_masses: GpuHostBuffer<f32>,
     thread_pool: ThreadPool,
     max_candidates_per_object: usize,
     gpu_bvh_kernel: Kernel,
@@ -58,7 +59,7 @@ impl PhysicsEngine {
     pub fn new(mut objects: ObjectSoa) -> anyhow::Result<Self> {
         let constraints = AABB {
             topleft: Vector2::new(0.0, 0.0),
-            bottomright: Vector2::new(f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
+            bottomright: Vector2::new(CONFIG.window.width as f32, CONFIG.window.height as f32),
         };
         let thread_pool = ThreadPoolBuilder::new().num_threads(num_cpus::get()).build().unwrap();
         let mut bvh = Bvh::default();
@@ -133,7 +134,7 @@ impl PhysicsEngine {
     }
 
     #[must_use]
-    pub fn time(&self) -> f64 {
+    pub fn time(&self) -> f32 {
         self.time
     }
 
@@ -150,7 +151,7 @@ impl PhysicsEngine {
         &mut self.bvh
     }
 
-    pub fn advance(&mut self, speed_factor: f64, gpu_compute_options: GpuComputeOptions) {
+    pub fn advance(&mut self, speed_factor: f32, gpu_compute_options: GpuComputeOptions) {
         if gpu_compute_options.integration != self.gpu_compute_options.integration {
             self.stats.integration_duration = DurationStat::default();
         }
@@ -161,12 +162,12 @@ impl PhysicsEngine {
             DtSource::Auto => {
                 let (max_velocity_squared, min_object_size) =
                     zip(self.objects.velocities.iter(), self.objects.radii.iter()).fold(
-                        (0.0_f64, f64::MAX),
+                        (0.0_f32, f32::MAX),
                         |(max_velocity_squared, min_object_size), (velocity, radius)| {
                             (max_velocity_squared.max(velocity.magnitude_squared()), min_object_size.min(radius * 2.0))
                         },
                     );
-                let velocity_factor = if min_object_size == f64::MAX {
+                let velocity_factor = if min_object_size == f32::MAX {
                     1.0
                 } else {
                     // Two times velocity because objects can collide head on
@@ -174,7 +175,7 @@ impl PhysicsEngine {
                     current_velocity * 2.0 / min_object_size
                 };
                 let max_gravity_squared = self.objects.positions.iter().enumerate().fold(
-                    0.0_f64,
+                    0.0_f32,
                     |max_gravity_squared, (object_index, &position)| {
                         let gravity_squared = Self::gravity_acceleration(
                             object_index,
@@ -203,7 +204,7 @@ impl PhysicsEngine {
         self.stats.object_count = self.objects.len();
     }
 
-    fn update(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
+    fn update(&mut self, dt: f32, gpu_compute_options: GpuComputeOptions) {
         let start = Instant::now();
         self.integrate(dt, gpu_compute_options);
         self.stats.integration_duration.update(start.elapsed());
@@ -219,9 +220,11 @@ impl PhysicsEngine {
         let start = Instant::now();
         self.apply_constraints();
         self.stats.constraints_duration.update(start.elapsed());
+
+        exit(0);
     }
 
-    fn integrate(&mut self, dt: f64, gpu_compute_options: GpuComputeOptions) {
+    fn integrate(&mut self, dt: f32, gpu_compute_options: GpuComputeOptions) {
         if gpu_compute_options.integration {
             self.integrate_gpu(dt);
         } else {
@@ -229,18 +232,18 @@ impl PhysicsEngine {
         }
     }
 
-    fn integrate_cpu(&mut self, dt: f64) {
+    fn integrate_cpu(&mut self, dt: f32) {
         #[allow(clippy::unreadable_literal)]
-        const CBRT2: f64 = 1.2599210498948732;
-        const W0: f64 = -CBRT2 / (2.0 - CBRT2);
-        const W1: f64 = 1.0 / (2.0 - CBRT2);
-        const C1: f64 = 0.5 * W1;
-        const C4: f64 = C1;
-        const C2: f64 = 0.5 * (W0 + W1);
-        const C3: f64 = C2;
-        const D1: f64 = W1;
-        const D3: f64 = D1;
-        const D2: f64 = W0;
+        const CBRT2: f32 = 1.2599210498948732;
+        const W0: f32 = -CBRT2 / (2.0 - CBRT2);
+        const W1: f32 = 1.0 / (2.0 - CBRT2);
+        const C1: f32 = 0.5 * W1;
+        const C4: f32 = C1;
+        const C2: f32 = 0.5 * (W0 + W1);
+        const C3: f32 = C2;
+        const D1: f32 = W1;
+        const D3: f32 = D1;
+        const D2: f32 = W0;
 
         let c1dt = C1 * dt;
         let c2dt = C2 * dt;
@@ -287,10 +290,10 @@ impl PhysicsEngine {
         }
     }
 
-    fn integrate_gpu(&mut self, dt: f64) {
+    fn integrate_gpu(&mut self, dt: f32) {
         let mut kernel = ExecuteKernel::new(&self.gpu_integration_kernel);
         kernel.set_global_work_size(self.objects.len());
-        kernel.set_local_work_size(CONFIG.simulation.gpu_integration_local_wg_size);
+        // kernel.set_local_work_size(CONFIG.simulation.gpu_integration_local_wg_size);
         unsafe {
             self.gpu_object_positions.set_arg(&mut kernel);
             self.gpu_object_velocities.set_arg(&mut kernel);
@@ -308,12 +311,12 @@ impl PhysicsEngine {
 
     fn gravity_acceleration(
         object_index: usize,
-        position: Vector2<f64>,
-        positions: &[Vector2<f64>],
-        global_gravity: Vector2<f64>,
-        gravitational_constant: f64,
-        planet_masses: &[f64],
-    ) -> Vector2<f64> {
+        position: Vector2<f32>,
+        positions: &[Vector2<f32>],
+        global_gravity: Vector2<f32>,
+        gravitational_constant: f32,
+        planet_masses: &[f32],
+    ) -> Vector2<f32> {
         let mut gravity = global_gravity;
         for planet_index in 0..planet_masses.len() {
             if planet_index != object_index {
@@ -387,8 +390,8 @@ impl PhysicsEngine {
         bvh: &Bvh,
         thread_pool: &ThreadPool,
         candidates: &mut [NormalizedCollisionPair],
-        positions: &[Vector2<f64>],
-        radii: &[f64],
+        positions: &[Vector2<f32>],
+        radii: &[f32],
     ) {
         let chunk_size = (positions.len()).div_ceil(thread_pool.current_num_threads());
         thread_pool.install(|| {
@@ -408,7 +411,7 @@ impl PhysicsEngine {
         let object_count = u32::try_from(self.objects.len()).unwrap();
         let mut kernel = ExecuteKernel::new(&self.gpu_bvh_kernel);
         kernel.set_global_work_size(self.objects.len());
-        kernel.set_local_work_size(CONFIG.simulation.gpu_bvh_local_wg_size);
+        // kernel.set_local_work_size(CONFIG.simulation.gpu_bvh_local_wg_size);
         unsafe {
             kernel.set_arg(&self.bvh.root());
             self.gpu_bvh_nodes.set_arg(&mut kernel);
@@ -439,11 +442,11 @@ impl PhysicsEngine {
     fn process_collision_candidate(
         object1_index: usize,
         object2_index: usize,
-        restitution_coefficient: f64,
-        positions: &mut [Vector2<f64>],
-        velocities: &mut [Vector2<f64>],
-        radii: &[f64],
-        masses: &[f64],
+        restitution_coefficient: f32,
+        positions: &mut [Vector2<f32>],
+        velocities: &mut [Vector2<f32>],
+        radii: &[f32],
+        masses: &[f32],
         is_planet: &[bool],
     ) {
         let object1_position = positions[object1_index];
@@ -470,12 +473,12 @@ impl PhysicsEngine {
     fn process_object_collision(
         object1_index: usize,
         object2_index: usize,
-        distance_squared: f64,
-        collision_distance: f64,
-        restitution_coefficient: f64,
-        positions: &mut [Vector2<f64>],
-        velocities: &mut [Vector2<f64>],
-        masses: &[f64],
+        distance_squared: f32,
+        collision_distance: f32,
+        restitution_coefficient: f32,
+        positions: &mut [Vector2<f32>],
+        velocities: &mut [Vector2<f32>],
+        masses: &[f32],
         is_planet: &[bool],
     ) {
         let from_1_to_2 = positions[object1_index] - positions[object2_index];
@@ -615,7 +618,7 @@ impl Default for DurationStat {
 
 #[derive(Default, Clone, Debug)]
 pub struct Stats {
-    pub sim_time: f64,
+    pub sim_time: f32,
     pub object_count: usize,
     pub integration_duration: DurationStat,
     pub bvh_duration: DurationStat,

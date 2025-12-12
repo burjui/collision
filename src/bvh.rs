@@ -8,7 +8,7 @@ pub struct Bvh {
 }
 
 impl Bvh {
-    pub fn update(&mut self, positions: &[Vector2<f64>], radii: &[f64]) {
+    pub fn update(&mut self, positions: &[Vector2<f32>], radii: &[f32]) {
         let start = Instant::now();
         self.nodes.clear();
         self.nodes.extend((0..positions.len()).map(|object_index| {
@@ -45,8 +45,8 @@ impl Bvh {
                     tag: NodeTag::Tree,
                     data: NodeData {
                         tree: Tree {
-                            left: NodeId(left.try_into().unwrap()),
-                            right: NodeId(right.try_into().unwrap()),
+                            left: left.try_into().unwrap(),
+                            right: right.try_into().unwrap(),
                         },
                     },
                 });
@@ -58,21 +58,30 @@ impl Bvh {
             src = dst.clone();
         }
         println!("BVH: build tree {:?}", start.elapsed());
+
+        print_node(&self.nodes[0]);
+        print_node(&self.nodes[1]);
+        println!("[Rust] sizeof(Node) {}", std::mem::size_of::<Node>());
+        println!("[Rust] sizeof(NodeTag) {}", std::mem::size_of::<NodeTag>());
+        println!("[Rust] sizeof(NodeData) {}", std::mem::size_of::<NodeData>());
+        println!("[Rust] sizeof(Tree) {}", std::mem::size_of::<Tree>());
+        println!("[Rust] sizeof(AABB) {}", std::mem::size_of::<AABB>());
+        println!("[Rust] sizeof(Vector2) {}", std::mem::size_of::<Vector2<f32>>());
     }
 
     pub fn nodes(&mut self) -> &mut [Node] {
         &mut self.nodes
     }
 
-    pub fn root(&self) -> NodeId {
-        NodeId(u32::try_from(self.nodes.len()).unwrap().checked_sub(1).unwrap())
+    pub fn root(&self) -> u32 {
+        u32::try_from(self.nodes.len()).unwrap().checked_sub(1).unwrap()
     }
 
     pub fn find_intersections(
         &self,
         object1_index: usize,
-        positions: &[Vector2<f64>],
-        radii: &[f64],
+        positions: &[Vector2<f32>],
+        radii: &[f32],
         candidates: &mut [NormalizedCollisionPair],
     ) {
         if self.nodes.is_empty() {
@@ -80,7 +89,7 @@ impl Bvh {
         }
 
         const STACK_SIZE: usize = 64;
-        let mut stack = [NodeId(0); STACK_SIZE];
+        let mut stack = [0; STACK_SIZE];
         let mut sp = 0;
         stack[sp] = self.root();
         sp += 1;
@@ -93,7 +102,7 @@ impl Bvh {
         while sp > 0 {
             sp -= 1;
             let node_id = stack[sp];
-            let node_idx = node_id.0 as usize;
+            let node_idx = node_id as usize;
 
             if !object1_aabb.intersects(&self.nodes[node_idx].aabb) {
                 continue;
@@ -122,6 +131,14 @@ impl Bvh {
                     }
                 }
                 NodeTag::Tree => {
+                    if object1_index == 0 {
+                        unsafe {
+                            println!(
+                                "[Rust] left: {}, right: {}",
+                                self.nodes[node_idx].data.tree.left, self.nodes[node_idx].data.tree.right
+                            );
+                        }
+                    }
                     if sp + 1 < STACK_SIZE {
                         let children = unsafe { self.nodes[node_idx].data.tree };
                         stack[sp] = children.left;
@@ -134,11 +151,18 @@ impl Bvh {
     }
 }
 
+fn print_node(node: &Node) {
+    println!(
+        "[Rust node] tag {:?}, aabb {} {} {} {}",
+        node.tag as u32, node.aabb.topleft.x, node.aabb.topleft.y, node.aabb.bottomright.x, node.aabb.bottomright.y
+    )
+}
+
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct AABB {
-    pub topleft: Vector2<f64>,
-    pub bottomright: Vector2<f64>,
+    pub topleft: Vector2<f32>,
+    pub bottomright: Vector2<f32>,
 }
 
 impl AABB {
@@ -160,10 +184,11 @@ impl AABB {
     }
 }
 
+#[repr(C, align(4))]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct NodeId(u32);
 
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Clone, Copy)]
 pub struct Node {
     pub aabb: AABB,
@@ -171,23 +196,23 @@ pub struct Node {
     data: NodeData,
 }
 
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Clone, Copy)]
 pub enum NodeTag {
-    Leaf,
-    Tree,
+    Leaf = 0,
+    Tree = 1,
 }
 
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Clone, Copy)]
 pub union NodeData {
     leaf_object_index: u32,
     tree: Tree,
 }
 
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Clone, Copy)]
 pub struct Tree {
-    left: NodeId,
-    right: NodeId,
+    left: u32,
+    right: u32,
 }
