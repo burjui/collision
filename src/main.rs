@@ -3,7 +3,7 @@
 #![allow(clippy::large_enum_variant)]
 
 // TODO replays
-// TODO black holes9
+// TODO black holes
 
 use std::{
     fmt::{self, Debug, Write},
@@ -51,7 +51,7 @@ use winit::{
 };
 
 pub fn main() -> anyhow::Result<()> {
-    enable_floating_point_exceptions();
+    // _enable_floating_point_exceptions();
     let event_loop = EventLoop::with_user_event().build()?;
     let (simulation_event_sender, simulation_event_receiver) = mpsc::channel();
     let rendering_event_queue = Box::leak(Box::new(SegQueue::new()));
@@ -97,7 +97,7 @@ pub fn main() -> anyhow::Result<()> {
                 &rendering_thread_ready,
                 &rendering_result_sender,
                 redraw_job_queue,
-                app_event_loop_proxy,
+                &app_event_loop_proxy,
             );
         })
     };
@@ -147,6 +147,7 @@ pub fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(unused)]
 fn enable_floating_point_exceptions() {
     unsafe extern "C" {
         fn feenableexcept(excepts: i32) -> i32;
@@ -414,7 +415,7 @@ fn rendering_thread(
     rendering_thread_ready: &Arc<Barrier>,
     rendering_result_queue: &mpsc::Sender<()>,
     redraw_job_queue: &ArrayQueue<Scene>,
-    app_event_loop_proxy: EventLoopProxy<AppEvent>,
+    app_event_loop_proxy: &EventLoopProxy<AppEvent>,
 ) {
     let mut rendering_data = RenderingData::default();
     rendering_thread_ready.wait();
@@ -556,9 +557,10 @@ fn draw_physics(
         for i in 0..width {
             for j in 0..height {
                 let energy_density = edf[(i, j)];
-                let energy_density_sqrt = energy_density.sqrt() as f32;
+                let energy_density_sqrt = energy_density.sqrt();
                 let color = spectrum(energy_density_sqrt, 0.9 * energy_density_sqrt);
                 let offset = j * width * BYTES_PER_PIXEL + i * BYTES_PER_PIXEL;
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 for i in 0..4 {
                     image_data[offset + i] = (color.components[i] * 255.0) as u8;
                 }
@@ -568,7 +570,7 @@ fn draw_physics(
 
         let start = Instant::now();
         let blob = Blob::new(Arc::new(image_data));
-        let image = Image::new(blob, ImageFormat::Rgba8, width as u32, height as u32);
+        let image = Image::new(blob, ImageFormat::Rgba8, u32::try_from(width).unwrap(), u32::try_from(height).unwrap());
         scene.draw_image(&image, transform.pre_scale(f64::from(*edf_cell_size)));
         println!("rendering edf took {:.2?}", start.elapsed());
     }
@@ -580,7 +582,7 @@ fn color_from_velocity(velocities: &[Vector2<f32>], object_index: usize) -> Colo
     const SCALE_FACTOR: f32 = 0.0004;
     let velocity = velocities[object_index];
     #[allow(clippy::cast_possible_truncation)]
-    let spectrum_position = (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0) as f32;
+    let spectrum_position = (velocity.magnitude() * SCALE_FACTOR).powf(0.6).clamp(0.0, 1.0);
     spectrum(spectrum_position, 1.0)
 }
 
@@ -874,7 +876,7 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                             Affine::IDENTITY,
                             css::BLACK,
                             None,
-                            &Rect::new(0.0, 0.0, CONFIG.window.width as f64, CONFIG.window.height as f64),
+                            &Rect::new(0.0, 0.0, f64::from(CONFIG.window.width), f64::from(CONFIG.window.height)),
                         );
                         self.scene.append(&self.simulation_scene, None);
                         draw_mouse_influence(&mut self.scene, self.mouse_position, self.mouse_influence_radius);
@@ -898,22 +900,25 @@ impl ApplicationHandler<AppEvent> for VelloApp<'_> {
                         self.redraw_result_queue.force_push(());
                     }
                     self.frame_count += 1;
-                };
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_position = Vector2::new(position.x as f32, position.y as f32);
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    self.mouse_position = Vector2::new(position.x as f32, position.y as f32);
+                }
                 request_redraw(self.state.as_ref());
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if state == ElementState::Pressed {
-                    if let MouseButton::Left = button {
-                        self.simulation_event_sender
-                            .send(SimulationThreadEvent::UnidirectionalKick {
-                                mouse_position: self.mouse_position,
-                                mouse_influence_radius: self.mouse_influence_radius,
-                            })
-                            .unwrap();
-                    }
+                if state == ElementState::Pressed
+                    && let MouseButton::Left = button
+                {
+                    self.simulation_event_sender
+                        .send(SimulationThreadEvent::UnidirectionalKick {
+                            mouse_position: self.mouse_position,
+                            mouse_influence_radius: self.mouse_influence_radius,
+                        })
+                        .unwrap();
                 }
             }
             WindowEvent::MouseWheel {
@@ -976,21 +981,22 @@ fn write_stats(
     }: &Stats,
     gpu_compute_options: GpuComputeOptions,
 ) -> anyhow::Result<()> {
+    const FLAG_NAMES: [&str; 2] = ["off", "on"];
+
     writeln!(buffer, "FPS: {fps} (min {min_fps})")?;
-    write!(buffer, "sim time: {}", sim_time)?;
+    write!(buffer, "sim time: {sim_time}")?;
     if let Some(time_limit) = CONFIG.simulation.time_limit {
         let action = CONFIG.simulation.time_limit_action.to_string();
         write!(buffer, " ({action} at {time_limit})")?;
     }
     writeln!(buffer)?;
-
-    const FLAG_NAMES: [&str; 2] = ["off", "on"];
     writeln!(
         buffer,
         "gpu compute: integration {}, bvh {}",
-        FLAG_NAMES[gpu_compute_options.integration as usize], FLAG_NAMES[gpu_compute_options.bvh as usize]
+        FLAG_NAMES[usize::from(gpu_compute_options.integration)],
+        FLAG_NAMES[usize::from(gpu_compute_options.bvh)]
     )?;
-    writeln!(buffer, "objects: {}", object_count)?;
+    writeln!(buffer, "objects: {object_count}")?;
     write_duration_stat(buffer, "integration", integration_duration)?;
     write_duration_stat(buffer, "collision", collisions_duration)?;
     write_duration_stat(buffer, "bvh", bvh_duration)?;

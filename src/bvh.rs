@@ -26,6 +26,7 @@ impl Bvh {
             }
         }));
 
+        // TODO check if sorting by Morton code is worth it
         println!("BVH: fill object nodes {:?}", start.elapsed());
 
         let start = Instant::now();
@@ -58,15 +59,6 @@ impl Bvh {
             src = dst.clone();
         }
         println!("BVH: build tree {:?}", start.elapsed());
-
-        print_node(&self.nodes[0]);
-        print_node(&self.nodes[1]);
-        println!("[Rust] sizeof(Node) {}", std::mem::size_of::<Node>());
-        println!("[Rust] sizeof(NodeTag) {}", std::mem::size_of::<NodeTag>());
-        println!("[Rust] sizeof(NodeData) {}", std::mem::size_of::<NodeData>());
-        println!("[Rust] sizeof(Tree) {}", std::mem::size_of::<Tree>());
-        println!("[Rust] sizeof(AABB) {}", std::mem::size_of::<AABB>());
-        println!("[Rust] sizeof(Vector2) {}", std::mem::size_of::<Vector2<f32>>());
     }
 
     pub fn nodes(&mut self) -> &mut [Node] {
@@ -101,17 +93,16 @@ impl Bvh {
 
         while sp > 0 {
             sp -= 1;
-            let node_id = stack[sp];
-            let node_idx = node_id as usize;
+            let node_index = usize::try_from(stack[sp]).unwrap();
 
-            if !object1_aabb.intersects(&self.nodes[node_idx].aabb) {
+            if !object1_aabb.intersects(&self.nodes[node_index].aabb) {
                 continue;
             }
 
-            match self.nodes[node_idx].tag {
+            match self.nodes[node_index].tag {
                 NodeTag::Leaf => {
                     let object2_index =
-                        usize::try_from(unsafe { self.nodes[node_idx].data.leaf_object_index }).unwrap();
+                        usize::try_from(unsafe { self.nodes[node_index].data.leaf_object_index }).unwrap();
                     if object2_index == object1_index {
                         continue;
                     }
@@ -123,27 +114,20 @@ impl Bvh {
                     let distance_squared = dx * dx + dy * dy;
                     let collision_distance = object1_radius + object2_radius;
 
-                    if distance_squared < collision_distance * collision_distance {
-                        if candidate_index < candidates.len() {
-                            candidates[candidate_index] = NormalizedCollisionPair::new(object1_index, object2_index);
-                            candidate_index += 1;
-                        }
+                    if distance_squared < collision_distance * collision_distance && candidate_index < candidates.len()
+                    {
+                        candidates[candidate_index] = NormalizedCollisionPair::new(object1_index, object2_index);
+                        candidate_index += 1;
                     }
                 }
                 NodeTag::Tree => {
-                    if object1_index == 0 {
-                        unsafe {
-                            println!(
-                                "[Rust] left: {}, right: {}",
-                                self.nodes[node_idx].data.tree.left, self.nodes[node_idx].data.tree.right
-                            );
-                        }
-                    }
-                    if sp + 1 < STACK_SIZE {
-                        let children = unsafe { self.nodes[node_idx].data.tree };
+                    if sp + 2 < STACK_SIZE {
+                        let children = unsafe { self.nodes[node_index].data.tree };
                         stack[sp] = children.left;
                         stack[sp + 1] = children.right;
                         sp += 2;
+                    } else {
+                        panic!("BVH traversal stack overflow");
                     }
                 }
             }
@@ -151,6 +135,7 @@ impl Bvh {
     }
 }
 
+#[allow(unused)]
 fn print_node(node: &Node) {
     println!(
         "[Rust node] tag {:?}, aabb {} {} {} {}",

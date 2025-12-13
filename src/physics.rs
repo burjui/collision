@@ -1,6 +1,5 @@
 use std::{
     iter::{once, zip},
-    process::exit,
     time::{Duration, Instant},
 };
 
@@ -189,6 +188,7 @@ impl PhysicsEngine {
                         max_gravity_squared.max(gravity_squared)
                     },
                 );
+                // TODO: more reliable estimation, sometimes dt is too large
                 // Experimentally derived
                 let gravity_factor =
                     max_gravity_squared.sqrt().sqrt().max(self.global_gravity.magnitude()) / min_object_size.sqrt();
@@ -220,8 +220,6 @@ impl PhysicsEngine {
         let start = Instant::now();
         self.apply_constraints();
         self.stats.constraints_duration.update(start.elapsed());
-
-        exit(0);
     }
 
     fn integrate(&mut self, dt: f32, gpu_compute_options: GpuComputeOptions) {
@@ -234,7 +232,7 @@ impl PhysicsEngine {
 
     fn integrate_cpu(&mut self, dt: f32) {
         #[allow(clippy::unreadable_literal)]
-        const CBRT2: f32 = 1.2599210498948732;
+        const CBRT2: f32 = 1.259921;
         const W0: f32 = -CBRT2 / (2.0 - CBRT2);
         const W1: f32 = 1.0 / (2.0 - CBRT2);
         const C1: f32 = 0.5 * W1;

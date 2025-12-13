@@ -3,15 +3,15 @@ width = 1600
 height = 800
 
 [simulation]
-# auto_start = true
+auto_start = true
 # dt = { fixed = 0.001 }
 # speed_factor = 0.5
 # gpu_integration = true
 # gpu_bvh = true
-restitution_coefficient = 0.97
+restitution_coefficient = 0.98
 global_gravity = [0, 1000]
-gravitational_constant = 10000
-# time_limit = 0.2
+gravitational_constant = 1000
+# time_limit = 0.1
 # time_limit_action = "pause"
 gpu_integration_local_wg_size = 32
 gpu_bvh_local_wg_size = 32
@@ -19,7 +19,7 @@ gpu_bvh_local_wg_size = 32
 [demo]
 object_radius = 10
 # enable_planets = true
-# randomize_positions = true
+randomize_positions = true
 randomize_position_factor = 1
 # randomize_radii = true
 randomize_radius_factor = 1
@@ -28,14 +28,14 @@ randomize_radius_factor = 1
 position = [500, 200]
 size = [500, 500]
 # velocity = [1, 0]
-particle_radius = 3
-particle_spacing = 0.01
+particle_radius = 2
+particle_spacing = 0.1
 particle_mass = 0.1
 
 # [[demo.bricks]]
 # position = [1000, 500]
 # size = [500, 250]
-# # velocity = [1, 0]
+# velocity = [1, 0]
 # particle_radius = 3
 # particle_spacing = 0.01
 # particle_mass = 0.1

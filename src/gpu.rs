@@ -39,14 +39,14 @@ impl Gpu {
             }
         }
         for platform in platforms {
-            if let Ok(devices) = platform.get_devices(CL_DEVICE_TYPE_GPU) {
-                if let Some(device_id) = devices.first().copied() {
-                    let device = Device::from(device_id);
-                    let context = Context::from_device(&device).context("Failed to create context")?;
-                    let queue = CommandQueue::create_default_with_properties(&context, 0, 0)
-                        .context("Failed to create command queue")?;
-                    return Ok(Gpu { context, queue });
-                }
+            if let Ok(devices) = platform.get_devices(CL_DEVICE_TYPE_GPU)
+                && let Some(device_id) = devices.first().copied()
+            {
+                let device = Device::from(device_id);
+                let context = Context::from_device(&device).context("Failed to create context")?;
+                let queue = CommandQueue::create_default_with_properties(&context, 0, 0)
+                    .context("Failed to create command queue")?;
+                return Ok(Gpu { context, queue });
             }
         }
         Err(anyhow!("No GPU device found"))
@@ -54,13 +54,13 @@ impl Gpu {
 
     pub fn build_program(&self, path: impl AsRef<Path>) -> anyhow::Result<Program> {
         let binary_path = path.as_ref().with_extension("bin");
-        if let anyhow::Result::Ok(binary_metadata) = std::fs::metadata(&binary_path) {
-            if let anyhow::Result::Ok(source_metadata) = std::fs::metadata(&path) {
-                let source_modified = source_metadata.modified().context("Failed to get source modified time")?;
-                let binary_modified = binary_metadata.modified().context("Failed to get binary modified time")?;
-                if binary_modified >= source_modified {
-                    return self.load_program_binary(binary_path);
-                }
+        if let anyhow::Result::Ok(binary_metadata) = std::fs::metadata(&binary_path)
+            && let anyhow::Result::Ok(source_metadata) = std::fs::metadata(&path)
+        {
+            let source_modified = source_metadata.modified().context("Failed to get source modified time")?;
+            let binary_modified = binary_metadata.modified().context("Failed to get binary modified time")?;
+            if binary_modified >= source_modified {
+                return self.load_program_binary(binary_path);
             }
         }
         println!("Building OpenCL kernel: {}", path.as_ref().display());
@@ -75,6 +75,8 @@ impl Gpu {
         Program::create_and_build_from_binary(&self.context, &[binary], "").map_err(|e| anyhow!("{e}"))
     }
 
+    /// # Safety
+    /// OpenCL is inherently unsafe
     pub unsafe fn create_host_ptr_buffer<T>(
         &self,
         data: &mut [T],
@@ -189,6 +191,8 @@ impl<T> GpuHostPtrBuffer<T> {
         self.length
     }
 
+    /// # Safety
+    /// OpenCL is inherently unsafe
     pub unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
         unsafe { kernel.set_arg(&self.buffer) };
     }
@@ -215,6 +219,8 @@ impl<T> GpuHostBuffer<T> {
         self.data.len()
     }
 
+    /// # Safety
+    /// OpenCL is inherently unsafe
     pub unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
         unsafe { kernel.set_arg(&self.buffer) };
     }
@@ -237,6 +243,8 @@ impl<T> GpuDeviceBuffer<T> {
         self.length
     }
 
+    /// # Safety
+    /// OpenCL is inherently unsafe
     pub unsafe fn set_arg(&self, kernel: &mut ExecuteKernel) {
         unsafe { kernel.set_arg(&self.buffer) };
     }
