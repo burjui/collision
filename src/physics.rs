@@ -263,7 +263,7 @@ impl PhysicsEngine {
                 &self.objects.masses[self.objects.planet_range()],
             );
             let v1 = v0 + a1 * d1dt;
-            let x2 = x0 + v1 * c2dt;
+            let x2 = x1 + v1 * c2dt;
             let a2 = Self::gravity_acceleration(
                 object_index,
                 x2,
@@ -272,8 +272,8 @@ impl PhysicsEngine {
                 self.gravitational_constant,
                 &self.objects.masses[self.objects.planet_range()],
             );
-            let v2 = v0 + a2 * d2dt;
-            let x3 = x0 + v2 * c3dt;
+            let v2 = v1 + a2 * d2dt;
+            let x3 = x2 + v2 * c3dt;
             let a3 = Self::gravity_acceleration(
                 object_index,
                 x3,
@@ -282,8 +282,8 @@ impl PhysicsEngine {
                 self.gravitational_constant,
                 &self.objects.masses[self.objects.planet_range()],
             );
-            let v3 = v0 + a3 * d3dt;
-            self.objects.positions[object_index] = x0 + v3 * c4dt;
+            let v3 = v2 + a3 * d3dt;
+            self.objects.positions[object_index] = x3 + v3 * c4dt;
             self.objects.velocities[object_index] = v3;
         }
     }
